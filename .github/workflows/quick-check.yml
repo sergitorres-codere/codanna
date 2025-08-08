@@ -58,14 +58,8 @@ jobs:
       - name: Compile check
         run: cargo check --all-features
       
-      # Doc check - ~10 seconds
-      - name: Documentation check
-        run: cargo doc --no-deps --all-features
-        env:
-          RUSTDOCFLAGS: -D warnings
+      # Skip doc check in quick-check - it's too slow (1m 44s)
+      # Doc checking moved to full-test suite
       
-      # Quick test for critical functionality - ~20 seconds
-      - name: Run fast tests
-        run: |
-          # Only run unit tests, skip integration tests
-          cargo test --lib --bins -- --test-threads=4
+      # Skip tests in quick-check - cargo check is sufficient
+      # Tests moved to full-test suite
