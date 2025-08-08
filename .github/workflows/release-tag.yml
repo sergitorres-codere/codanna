@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write  # Needed to create releases
+  actions: write   # Needed to trigger workflow dispatch
 
 jobs:
   build-and-release:
