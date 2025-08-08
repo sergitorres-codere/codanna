@@ -1,0 +1,30 @@
+name: Auto-fix
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  autofix:
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: ${{ github.head_ref }}
+      
+      - name: Run auto-fixes
+        run: |
+          cargo fmt
+          cargo clippy --fix --allow-dirty || true
+          cargo fix --allow-dirty || true
+      
+      - name: Commit fixes
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add -A
+          git diff --staged --quiet || {
+            git commit -m "fix: auto-fix formatting and lints"
+            git push
+          }

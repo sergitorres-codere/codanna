@@ -1,0 +1,220 @@
+//! Simplified persistence layer for Tantivy-only storage
+//!
+//! This module manages metadata and ensures Tantivy index exists.
+//! All actual data is stored in Tantivy.
+
+use crate::storage::{DataSource, IndexMetadata};
+use crate::{IndexError, IndexResult, Settings, SimpleIndexer};
+use std::path::PathBuf;
+use std::sync::Arc;
+
+/// Manages persistence of the index
+#[derive(Debug)]
+pub struct IndexPersistence {
+    base_path: PathBuf,
+}
+
+impl IndexPersistence {
+    /// Create a new persistence manager
+    pub fn new(base_path: PathBuf) -> Self {
+        Self { base_path }
+    }
+
+    /// Get path for semantic search data
+    fn semantic_path(&self) -> PathBuf {
+        self.base_path.join("semantic")
+    }
+
+    /// Check if semantic data exists
+    fn has_semantic_data(&self) -> bool {
+        // Check if metadata exists - that's the definitive indicator
+        self.semantic_path().join("metadata.json").exists()
+    }
+
+    /// Save metadata for the index
+    #[must_use = "Save errors should be handled to ensure data is persisted"]
+    pub fn save(&self, indexer: &SimpleIndexer) -> IndexResult<()> {
+        // Update metadata
+        let mut metadata =
+            IndexMetadata::load(&self.base_path).unwrap_or_else(|_| IndexMetadata::new());
+
+        metadata.update_counts(indexer.symbol_count() as u32, indexer.file_count());
+
+        // Update metadata to reflect Tantivy
+        metadata.data_source = DataSource::Tantivy {
+            path: self.base_path.join("tantivy"),
+            doc_count: indexer.document_count().unwrap_or(0),
+            timestamp: crate::indexing::get_utc_timestamp(),
+        };
+
+        metadata.save(&self.base_path)?;
+
+        // NEW: Save semantic search if enabled
+        if indexer.has_semantic_search() {
+            let semantic_path = self.semantic_path();
+            std::fs::create_dir_all(&semantic_path).map_err(|e| {
+                IndexError::General(format!("Failed to create semantic directory: {e}"))
+            })?;
+
+            indexer
+                .save_semantic_search(&semantic_path)
+                .map_err(|e| IndexError::General(format!("Failed to save semantic search: {e}")))?;
+        }
+
+        Ok(())
+    }
+
+    /// Load the indexer from disk
+    #[must_use = "Load errors should be handled appropriately"]
+    pub fn load(&self) -> IndexResult<SimpleIndexer> {
+        self.load_with_settings(Arc::new(Settings::default()), false)
+    }
+
+    /// Load the indexer from disk with custom settings
+    #[must_use = "Load errors should be handled appropriately"]
+    pub fn load_with_settings(
+        &self,
+        settings: Arc<Settings>,
+        info: bool,
+    ) -> IndexResult<SimpleIndexer> {
+        // Load metadata to understand data sources
+        let metadata = IndexMetadata::load(&self.base_path).ok();
+
+        // Check if Tantivy index exists
+        let tantivy_path = self.base_path.join("tantivy");
+        if tantivy_path.join("meta.json").exists() {
+            // Create indexer that will load from Tantivy
+            let mut indexer = SimpleIndexer::with_settings(settings);
+
+            // Display source info with fresh counts
+            if let Some(meta) = metadata {
+                // Get fresh counts from the actual index
+                let fresh_symbol_count = indexer.symbol_count();
+                let fresh_file_count = indexer.file_count();
+
+                // Display the metadata but with fresh counts
+                if info {
+                    match &meta.data_source {
+                        DataSource::Tantivy {
+                            path, doc_count, ..
+                        } => {
+                            eprintln!(
+                                "Loaded from Tantivy index: {} ({} documents)",
+                                path.display(),
+                                doc_count
+                            );
+                        }
+                        DataSource::Fresh => {
+                            eprintln!("Created fresh index");
+                        }
+                    }
+                    eprintln!(
+                        "Index contains {fresh_symbol_count} symbols from {fresh_file_count} files"
+                    );
+                }
+            }
+
+            // NEW: Load semantic search if it exists
+            if self.has_semantic_data() {
+                let semantic_path = self.semantic_path();
+                match indexer.load_semantic_search(&semantic_path, info) {
+                    Ok(true) => {
+                        // Successfully loaded (message already printed by load_semantic_search)
+                    }
+                    Ok(false) => {
+                        // No semantic data found (shouldn't happen if has_semantic_data() was true)
+                    }
+                    Err(e) => {
+                        // Log error but continue - semantic search is optional
+                        eprintln!("Warning: Failed to load semantic search: {e}");
+                    }
+                }
+            }
+
+            Ok(indexer)
+        } else {
+            Err(IndexError::FileRead {
+                path: tantivy_path,
+                source: std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "Tantivy index not found",
+                ),
+            })
+        }
+    }
+
+    /// Check if an index exists
+    pub fn exists(&self) -> bool {
+        // Check if Tantivy index exists
+        let tantivy_path = self.base_path.join("tantivy");
+        tantivy_path.join("meta.json").exists()
+    }
+
+    /// Delete the persisted index
+    pub fn clear(&self) -> Result<(), std::io::Error> {
+        let tantivy_path = self.base_path.join("tantivy");
+        if tantivy_path.exists() {
+            std::fs::remove_dir_all(tantivy_path)?;
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_save_and_load() {
+        let temp_dir = TempDir::new().unwrap();
+        let persistence = IndexPersistence::new(temp_dir.path().to_path_buf());
+
+        // Create an indexer
+        let indexer = SimpleIndexer::new();
+
+        // Save it
+        persistence.save(&indexer).unwrap();
+
+        // Check metadata exists
+        let metadata_path = temp_dir.path().join("index.meta");
+        assert!(metadata_path.exists());
+    }
+
+    #[test]
+    fn test_exists() {
+        let temp_dir = TempDir::new().unwrap();
+        let persistence = IndexPersistence::new(temp_dir.path().to_path_buf());
+
+        // Initially doesn't exist
+        assert!(!persistence.exists());
+
+        // Create tantivy directory with meta.json
+        let tantivy_path = temp_dir.path().join("tantivy");
+        std::fs::create_dir_all(&tantivy_path).unwrap();
+        std::fs::write(tantivy_path.join("meta.json"), "{}").unwrap();
+
+        // Now it exists
+        assert!(persistence.exists());
+    }
+
+    #[test]
+    fn test_semantic_paths() {
+        let temp_dir = TempDir::new().unwrap();
+        let persistence = IndexPersistence::new(temp_dir.path().to_path_buf());
+
+        // Test semantic_path
+        let semantic_path = persistence.semantic_path();
+        assert_eq!(semantic_path, temp_dir.path().join("semantic"));
+
+        // Initially has no semantic data
+        assert!(!persistence.has_semantic_data());
+
+        // Create semantic directory and metadata file
+        std::fs::create_dir_all(&semantic_path).unwrap();
+        std::fs::write(semantic_path.join("metadata.json"), "{}").unwrap();
+
+        // Now has semantic data
+        assert!(persistence.has_semantic_data());
+    }
+}

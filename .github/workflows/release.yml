@@ -1,0 +1,51 @@
+name: Build Release Binaries
+# Manual trigger for building release binaries
+# This workflow is triggered by the release-tag.yml workflow
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., 1.0.0)'
+        required: true
+        type: string
+
+jobs:
+  build:
+    name: Build - ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          # Just the essentials for now
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            name: linux-x64
+          
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            name: macos-x64
+          
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            name: windows-x64
+
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Build binary
+        run: cargo build --release
+      
+      - name: Package binary
+        shell: bash
+        run: |
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            cp target/release/codanna.exe codanna-${{ inputs.version }}-${{ matrix.name }}.exe
+          else
+            cp target/release/codanna codanna-${{ inputs.version }}-${{ matrix.name }}
+          fi
+      
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: codanna-${{ inputs.version }}-${{ matrix.name }}
+          path: codanna-${{ inputs.version }}-${{ matrix.name }}*

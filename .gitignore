@@ -1,0 +1,8 @@
+/target
+.codanna/
+.codanna/index/
+.fastembed_cache/
+
+# Build artifacts
+*.rcgu.o
+*.rmeta
