@@ -272,6 +272,206 @@ codanna benchmark python       # Test specific language
 - Semantic search requires English documentation/comments
 - Windows support is experimental
 
+## Roadmap
+
+### Status Overview
+
+| Priority | Feature | Status | Target |
+|----------|---------|--------|--------|
+| 1 | [JSON Output Support](#2-json-output-support) | In-Progress | v0.2.1 |
+| 2 | [Exit Codes for Common Conditions](#4-exit-codes-for-common-conditions) | In-Progress | v0.2.2 |
+| 3 | [Batch Symbol Operations](#2-batch-symbol-operations) | Planning | v0.2.3 |
+| 4 | [Output Format Control](#3-output-format-control) | Planning | v0.2.3 |
+| 5 | [Direct CLI Semantic Search](#1-direct-cli-semantic-search) | Pending | -- |
+| 6 | [Incremental Index Updates](#6-incremental-index-updates) | Completed | v2.0.0 |
+| 7 | [Query Language for Complex Searches](#5-query-language-for-complex-searches) | Pending | -- |
+| 8 | [Symbol Relationship Graph Export](#7-symbol-relationship-graph-export) | Pending | -- |
+| 9 | [Diff-Aware Analysis](#8-diff-aware-analysis) | Pending | -- |
+| 10 | [Configuration Profiles](#9-configuration-profiles) | Pending | -- |
+| 11 | [Machine-Readable Progress](#10-machine-readable-progress) | Pending | -- |
+
+---
+
+### 1. Direct CLI Semantic Search
+
+**Why**: Currently semantic search is only available through MCP interface
+
+```bash
+# Current: Only through MCP
+codanna mcp semantic_search_docs --args '{"query": "authentication"}'
+
+# Wishlist: Direct CLI command
+codanna semantic search "authentication" --limit 10
+```
+
+**Benefits**:
+- Simpler command syntax
+- Better Unix integration
+- No JSON escaping needed
+
+### 2. JSON Output Support
+
+**Why**: Enable reliable programmatic integration without text parsing
+
+```bash
+# Add --json flag to commands
+codanna retrieve symbol MyFunction --json
+{
+  "name": "MyFunction",
+  "kind": "Function",
+  "file": "./src/core.rs",
+  "line": 42,
+  "signature": "fn MyFunction(input: &str) -> Result<String, Error>",
+  "visibility": "Public"
+}
+```
+
+**Benefits**:
+- Stable API for scripts and tools
+- No more awk/grep gymnastics
+- Enable IDE integrations
+
+## 2. Batch Symbol Operations
+
+**Why**: Reduce overhead when analyzing multiple symbols
+
+```bash
+# Current: Multiple invocations
+for sym in func1 func2 func3; do
+  codanna retrieve symbol "$sym"
+done
+
+# Wishlist: Single command
+codanna retrieve symbols func1 func2 func3
+```
+
+**Benefits**:
+- One index load instead of N
+- Faster CI/CD pipelines
+- Better for parallel analysis
+
+### 3. Output Format Control
+
+**Why**: Different use cases need different detail levels
+
+```bash
+# Compact output for scripts
+codanna retrieve callers MyFunc --format=compact
+validate_input:src/validation.rs:45
+process_request:src/handler.rs:120
+
+# Full output for humans (current default)
+codanna retrieve callers MyFunc --format=full
+```
+
+### 4. Exit Codes for Common Conditions
+
+**Why**: Make scripting more robust
+
+```bash
+# Exit codes:
+# 0 - Success
+# 1 - Error
+# 2 - No results found
+# 3 - Index not found
+# 4 - Symbol not found
+
+if codanna retrieve symbol MyFunc >/dev/null 2>&1; then
+  echo "Symbol exists"
+else
+  case $? in
+    3) echo "Need to build index first" ;;
+    4) echo "Symbol not found" ;;
+  esac
+fi
+```
+
+### 5. Query Language for Complex Searches
+
+**Why**: Find symbols matching multiple criteria without multiple commands
+
+```bash
+# Find all public methods that call database functions
+codanna query "kind:method visibility:public calls:*database*"
+
+# Find unused private functions
+codanna query "kind:function visibility:private callers:0"
+```
+
+### 6. Incremental Index Updates
+
+**Why**: Faster re-indexing for large codebases
+
+```bash
+# Only re-index changed files
+codanna index --incremental
+
+# Watch mode for development
+codanna index --watch
+```
+
+### 7. Symbol Relationship Graph Export
+
+**Why**: Visualize complex dependencies
+
+```bash
+# Export full dependency graph
+codanna export graph --format=dot > project.dot
+
+# Export focused subgraph
+codanna export graph --root=MyService --depth=2 --format=mermaid
+```
+
+### 8. Diff-Aware Analysis
+
+**Why**: Focus analysis on what changed
+
+```bash
+# Analyze impact of changes in a PR
+codanna analyze diff --base=main --head=feature-branch
+
+# Pre-commit hook helper
+codanna analyze staged --max-impact=20
+```
+
+### 9. Configuration Profiles
+
+**Why**: Different settings for different use cases
+
+```bash
+# .codanna/profiles.toml
+[profiles.ci]
+semantic_search = false
+max_file_size = "1MB"
+
+[profiles.dev]
+semantic_search = true
+watch_mode = true
+
+# Use profile
+codanna --profile=ci index .
+```
+
+### 10. Machine-Readable Progress
+
+**Why**: Better CI/CD integration
+
+```bash
+# Current: Human-readable progress
+# Wishlist: Machine-readable option
+codanna index . --progress=json
+{"phase":"parsing","files_done":45,"files_total":200,"percent":22.5}
+{"phase":"parsing","files_done":46,"files_total":200,"percent":23.0}
+```
+
+### Implementation Priority
+
+1. **JSON output** - Enables everything else
+2. **Exit codes** - Minimal change, big impact
+3. **Batch operations** - Performance win
+4. **Format control** - Flexibility for users
+5. **Rest** - Nice to have
+
 ## Contributing
 
 This is an early release focused on core functionality. Contributions welcome! See CONTRIBUTING.md for guidelines.
