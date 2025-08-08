@@ -1,9 +1,20 @@
-name: Codanna CI
+name: Full Test Suite
 on:
-  push:
-    branches: [main]
+  # Only run on PRs to main
   pull_request:
     branches: [main]
+  
+  # Manual trigger for testing
+  workflow_dispatch:
+  
+  # Nightly run to catch issues early
+  schedule:
+    - cron: '0 0 * * *'  # Midnight UTC daily
+  
+  # Run on version tags
+  push:
+    tags:
+      - 'v*'
 
 env:
   CARGO_TERM_COLOR: always
@@ -11,8 +22,9 @@ env:
 
 jobs:
   test:
-    name: Test Suite
+    name: Full Test Suite
     runs-on: ubuntu-latest
+    timeout-minutes: 30  # Fail if takes longer than 30 minutes
     steps:
       - uses: actions/checkout@v4
       

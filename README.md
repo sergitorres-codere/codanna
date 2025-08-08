@@ -274,14 +274,20 @@ codanna benchmark python       # Test specific language
 
 ## Roadmap
 
+### Versioning Strategy
+
+- **0.2.x** - Patches and fixes only (bug fixes, dependency updates, performance improvements)
+- **0.3.x** - Feature releases (JSON output, exit codes, new capabilities)
+- **0.4.x** - Major features (JavaScript/TypeScript support, advanced analysis)
+
 ### Status Overview
 
 | Priority | Feature | Status | Target |
 |----------|---------|--------|--------|
-| 1 | [JSON Output Support](#2-json-output-support) | In-Progress | v0.2.1 |
-| 2 | [Exit Codes for Common Conditions](#4-exit-codes-for-common-conditions) | In-Progress | v0.2.2 |
-| 3 | [Batch Symbol Operations](#2-batch-symbol-operations) | Planning | v0.2.3 |
-| 4 | [Output Format Control](#3-output-format-control) | Planning | v0.2.3 |
+| 1 | [JSON Output Support](#2-json-output-support) | In-Progress | v0.3.0 |
+| 2 | [Exit Codes for Common Conditions](#4-exit-codes-for-common-conditions) | In-Progress | v0.3.0 |
+| 3 | [Batch Symbol Operations](#2-batch-symbol-operations) | Planning | v0.3.1 |
+| 4 | [Output Format Control](#3-output-format-control) | Planning | v0.3.1 |
 | 5 | [Direct CLI Semantic Search](#1-direct-cli-semantic-search) | Pending | -- |
 | 6 | [Incremental Index Updates](#6-incremental-index-updates) | Completed | v2.0.0 |
 | 7 | [Query Language for Complex Searches](#5-query-language-for-complex-searches) | Pending | -- |
