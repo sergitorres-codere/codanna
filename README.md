@@ -108,7 +108,7 @@ Configure in `.mcp.json`:
 }
 ```
 
-For HTTPS configuration, see the [HTTPS Server Mode documentation](hmcp-https-self-signed.md).
+For HTTPS configuration, see the [HTTPS Server Mode documentation](mcp-https-self-signed.md).
 
 ### Claude Sub Agent
 
