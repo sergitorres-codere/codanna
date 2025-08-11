@@ -130,10 +130,27 @@ codanna mcp find_callers init
 codanna mcp semantic_search_docs query:"error handling" limit:3 --json
 codanna mcp search_symbols query:parse kind:function --json
 
-# Powerful Unix piping with JSON output
-echo "error handling" | codanna mcp semantic_search_docs --json | jq '.data[].name'
-codanna mcp find_symbol Parser --json | jq -r '.data[].callers[].name' | \
-  xargs -I {} codanna mcp find_symbol {} --json
+# Unix piping with JSON output
+time codanna mcp search_symbols query:parse limit:1 --json | \
+    jq -r '.data[0].name' | \
+    xargs -I {} codanna retrieve callers {} --json | \
+    jq -r '.data[] | "\(.name) in \(.module_path)"'
+
+# Result:
+#
+# main in crate::main
+# serve_http in crate::mcp::http_server::serve_http
+# serve_http in crate::mcp::http_server::serve_http
+# serve_https in crate::mcp::https_server::serve_https
+# serve_https in crate::mcp::https_server::serve_https
+# parse in crate::parsing::rust::parse
+# parse in crate::parsing::rust::parse
+# parse in crate::parsing::python::parse
+#
+# codanna mcp search_symbols query:parse limit:1 --json  0.10s user 0.08s system 122% cpu 0.143 total
+# jq -r '.data[0].name'  0.00s user 0.00s system 3% cpu 0.142 total
+# xargs -I {} codanna retrieve callers {} --json  0.11s user 0.07s system 63% cpu 0.288 total
+# jq -r '.data[] | "\(.name) in \(.module_path)"'  0.00s user 0.00s system 1% cpu 0.288 total
 
 # Legacy format still supported for backward compatibility
 codanna mcp find_symbol --args '{"name": "main"}'
@@ -526,7 +543,7 @@ codanna index . --progress=json
 
 ## Contributing
 
-This is an early release focused on core functionality. Contributions welcome! See CONTRIBUTING.md for guidelines.
+This is an early release focused on core functionality. Contributions welcome! See [CONTRIBUTING](CONTRIBUTING.md) for guidelines.
 
 ## License
 

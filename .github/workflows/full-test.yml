@@ -28,6 +28,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      
       # Fast checks first
       - name: Check formatting
         run: cargo fmt --check
@@ -74,7 +79,7 @@ jobs:
       - name: Check binary size
         run: |
           ls -lh $CODANNA_BIN
-          size=$(stat -f%z $CODANNA_BIN 2>/dev/null || stat -c%s $CODANNA_BIN)
+          size=$(stat -c%s $CODANNA_BIN 2>/dev/null || stat -f%z $CODANNA_BIN)
           echo "Binary size: $size bytes"
           if [ $size -gt 50000000 ]; then  # 50MB limit
             echo "::warning::Binary larger than 50MB"
