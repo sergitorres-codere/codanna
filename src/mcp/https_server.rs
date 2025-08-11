@@ -5,7 +5,9 @@
 
 #[cfg(feature = "https-server")]
 pub async fn serve_https(config: crate::Settings, watch: bool, bind: String) -> anyhow::Result<()> {
-    use crate::mcp::CodeIntelligenceServer;
+    use crate::mcp::{
+        CodeIntelligenceServer, notifications::NotificationBroadcaster, watcher::IndexWatcher,
+    };
     use crate::{IndexPersistence, SimpleIndexer};
     use anyhow::Context;
     use axum::Router;
@@ -20,6 +22,9 @@ pub async fn serve_https(config: crate::Settings, watch: bool, bind: String) -> 
     if config.mcp.debug {
         eprintln!("Starting HTTPS MCP server on {bind}");
     }
+
+    // Create notification broadcaster for file change events
+    let broadcaster = Arc::new(NotificationBroadcaster::new(100).with_debug(config.mcp.debug));
 
     // Create shared indexer
     let indexer = Arc::new(RwLock::new(SimpleIndexer::with_settings(Arc::new(
@@ -46,24 +51,38 @@ pub async fn serve_https(config: crate::Settings, watch: bool, bind: String) -> 
                 }
             }
         }
-    } else {
-        if config.mcp.debug {
-            eprintln!("No existing index found, starting fresh");
-        }
+    } else if config.mcp.debug {
+        eprintln!("No existing index found, starting fresh");
     }
+
+    // Parse bind address for SSE server early
+    let addr: SocketAddr = bind.parse().context("Failed to parse bind address")?;
+
+    // Create cancellation token for graceful shutdown
+    let ct = CancellationToken::new();
 
     // Start file watcher if enabled
     if watch || config.file_watch.enabled {
         use crate::indexing::FileSystemWatcher;
 
         let watcher_indexer = indexer.clone();
+        let watcher_broadcaster = broadcaster.clone();
         let debounce_ms = config.file_watch.debounce_ms;
+        let watcher_ct = ct.clone();
 
         match FileSystemWatcher::new(watcher_indexer, debounce_ms, config.mcp.debug) {
             Ok(watcher) => {
+                let watcher = watcher.with_broadcaster(watcher_broadcaster);
                 tokio::spawn(async move {
-                    if let Err(e) = watcher.watch().await {
-                        eprintln!("File watcher error: {e}");
+                    tokio::select! {
+                        result = watcher.watch() => {
+                            if let Err(e) = result {
+                                eprintln!("File watcher error: {e}");
+                            }
+                        }
+                        _ = watcher_ct.cancelled() => {
+                            eprintln!("File watcher stopped by cancellation token");
+                        }
                     }
                 });
                 if config.mcp.debug {
@@ -79,11 +98,40 @@ pub async fn serve_https(config: crate::Settings, watch: bool, bind: String) -> 
         }
     }
 
-    // Parse bind address for SSE server
-    let addr: SocketAddr = bind.parse().context("Failed to parse bind address")?;
+    // Start index watcher if watch mode is enabled
+    if watch {
+        let index_watcher_indexer = indexer.clone();
+        let index_watcher_settings = Arc::new(config.clone());
+        let index_watcher_broadcaster = broadcaster.clone();
+        let index_watcher_ct = ct.clone();
 
-    // Create cancellation token for graceful shutdown
-    let ct = CancellationToken::new();
+        // Default to 5 second interval
+        let watch_interval = 5u64;
+
+        let index_watcher = IndexWatcher::new(
+            index_watcher_indexer,
+            index_watcher_settings,
+            Duration::from_secs(watch_interval),
+        )
+        .with_broadcaster(index_watcher_broadcaster);
+
+        tokio::spawn(async move {
+            tokio::select! {
+                _ = index_watcher.watch() => {
+                    eprintln!("Index watcher ended");
+                }
+                _ = index_watcher_ct.cancelled() => {
+                    eprintln!("Index watcher stopped by cancellation token");
+                }
+            }
+        });
+
+        if config.mcp.debug {
+            eprintln!(
+                "Index watcher started (checks every {watch_interval} seconds for index changes)"
+            );
+        }
+    }
 
     // Create SSE server configuration
     let sse_config = SseServerConfig {
@@ -145,7 +193,7 @@ pub async fn serve_https(config: crate::Settings, watch: bool, bind: String) -> 
         eprintln!("Headers received:");
         for (name, value) in req.headers() {
             if let Ok(v) = value.to_str() {
-                eprintln!("  {}: {}", name, v);
+                eprintln!("  {name}: {v}");
             }
         }
 
@@ -379,8 +427,7 @@ async fn oauth_authorize(
     </div>
 </body>
 </html>
-"#,
-        callback_url = callback_url
+"#
     );
 
     axum::response::Html(html)
@@ -466,13 +513,13 @@ async fn get_or_create_certificate(bind: &str) -> anyhow::Result<(Vec<u8>, Vec<u
     let mut hasher = DefaultHasher::new();
     cert.cert.der().hash(&mut hasher);
     let fingerprint = hasher.finish();
-    let fingerprint_hex = format!("{:016X}", fingerprint);
+    let fingerprint_hex = format!("{fingerprint:016X}");
 
     eprintln!();
     eprintln!("🔐 Certificate Details:");
     eprintln!("   - Type: Self-Signed TLS Certificate");
     eprintln!("   - Location: {}", cert_path.display());
-    eprintln!("   - Fingerprint: {}", fingerprint_hex);
+    eprintln!("   - Fingerprint: {fingerprint_hex}");
     eprintln!("   - Valid for: {}", subject_alt_names.join(", "));
     eprintln!();
     eprintln!("🔧 To trust this certificate on macOS:");

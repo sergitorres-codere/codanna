@@ -1,22 +1,14 @@
 # Codanna
 
-High-performance code intelligence that gives AI assistants deep understanding of your codebase through semantic search and relationship tracking.
+Semantic code search and relationship tracking via MCP and Unix CLI.
 
-## What It Does
+## How It Works
 
-Codanna indexes your code and provides:
-- **Semantic search** - Find code using natural language: "authentication logic", "parse JSON data"
-- **Relationship tracking** - Who calls what, implementation hierarchies, dependency graphs
-- **MCP integration** - Claude can navigate and understand your codebase in real-time
-- **Hot-reload** - Changes are automatically re-indexed
-- **Fast searches** - Results in <10ms
-
-Under the hood, Codanna:
-1. Parses your code with tree-sitter (currently Rust and Python, more languages coming)
-2. Extracts symbols and their relationships using type-aware analysis
-3. Generates embeddings from documentation comments using AllMiniLML6V2 (384 dimensions)
-4. Stores everything in a Tantivy full-text index with integrated vector search
-5. Serves it via MCP so Claude can use it naturally
+1. **Parse** - Tree-sitter AST parsing for Rust and Python (JavaScript/TypeScript coming)
+2. **Extract** - Symbols, call graphs, implementations, and type relationships
+3. **Embed** - 384-dimensional vectors from doc comments via AllMiniLML6V2
+4. **Index** - Tantivy for full-text search + memory-mapped symbol cache for <10ms lookups
+5. **Serve** - MCP protocol for AI assistants, ~300ms response time
 
 ## Installation
 
@@ -24,11 +16,11 @@ Under the hood, Codanna:
 # Install latest version
 cargo install codanna
 
-# Install with HTTP/HTTPS server support
+# Install with HTTP server (OAuth authentication)
 cargo install codanna --features http-server
 
-# Install from git
-cargo install --git https://github.com/bartolli/codanna
+# Install with HTTPS server (TLS + optional OAuth)
+cargo install codanna --features https-server
 
 # Install from local path (development)
 cargo install --path . --all-features
@@ -62,8 +54,18 @@ codanna index . --dry-run
 codanna index src/main.rs
 ```
 
-4. **Try semantic search:**
+4. **Search your code:**
 ```bash
+# Semantic search with new simplified syntax
+codanna mcp semantic_search_docs query:"parse rust files" limit:3 --json
+
+# Find symbols with JSON output
+codanna retrieve symbol Parser --json
+
+# Analyze function relationships
+codanna mcp find_callers process_file --json | jq '.data[].name'
+
+# Legacy format still works
 codanna mcp semantic_search_with_context --args '{"query": "parse rust files and extract symbols", "limit": 3}'
 ```
 
@@ -89,10 +91,10 @@ Add to your `.mcp.json`:
 For persistent server with real-time file watching:
 
 ```bash
-# HTTP server
+# HTTP server with OAuth authentication (requires http-server feature)
 codanna serve --http --watch
 
-# HTTPS server (requires http-server feature)
+# HTTPS server with TLS encryption (requires https-server feature)
 codanna serve --https --watch
 ```
 
@@ -116,16 +118,28 @@ We include a codanna-navigator sub agent at `.claude/agents/codanna-navigator.md
 
 ### Unix-Style Integration
 
-Codanna CLI is unix-friendly, enabling powerful command chaining and integration with other tools:
+Codanna CLI is unix-friendly with positional arguments and JSON output for easy command chaining:
 
 ```bash
-codanna mcp semantic_search_docs --args '{"query": "error handling", "limit": 3}' && \
-echo "=== Analyzing IndexError usage ===" && \
-codanna mcp find_symbol --args '{"name": "IndexError"}' && \
-codanna mcp search_symbols --args '{"query": "Error", "limit": 5}'
+# New simplified syntax - positional arguments for simple tools
+codanna mcp find_symbol main --json
+codanna mcp get_calls process_file
+codanna mcp find_callers init
+
+# Key:value pairs for complex tools  
+codanna mcp semantic_search_docs query:"error handling" limit:3 --json
+codanna mcp search_symbols query:parse kind:function --json
+
+# Powerful Unix piping with JSON output
+echo "error handling" | codanna mcp semantic_search_docs --json | jq '.data[].name'
+codanna mcp find_symbol Parser --json | jq -r '.data[].callers[].name' | \
+  xargs -I {} codanna mcp find_symbol {} --json
+
+# Legacy format still supported for backward compatibility
+codanna mcp find_symbol --args '{"name": "main"}'
 ```
 
-This approach works well for agentic workflows and custom automation scripts.
+All MCP tools support `--json` flag for structured output, making integration with other tools seamless.
 
 ## Configuration
 
@@ -184,22 +198,24 @@ This encourages better documentation → better AI understanding → more motiva
 
 ### Retrieval Commands
 
+All retrieve commands support `--json` flag for structured output (exit code 3 when not found).
+
 | Command | Description | Example |
 |---------|-------------|---------|
-| `retrieve symbol <NAME>` | Find a symbol by name | `codanna retrieve symbol main` |
-| `retrieve calls <FUNCTION>` | Show what functions a given function calls | `codanna retrieve calls parse_file` |
-| `retrieve callers <FUNCTION>` | Show what functions call a given function | `codanna retrieve callers main` |
-| `retrieve implementations <TRAIT>` | Show what types implement a trait | `codanna retrieve implementations Parser` |
-| `retrieve impact <SYMBOL>` | Show the impact radius of changing a symbol | `codanna retrieve impact main --depth 3` |
-| `retrieve search <QUERY>` | Search for symbols using full-text search | `codanna retrieve search "parse" --limit 5` |
-| `retrieve describe <SYMBOL>` | Show comprehensive information about a symbol | `codanna retrieve describe SimpleIndexer` |
+| `retrieve symbol <NAME>` | Find a symbol by name | `codanna retrieve symbol main --json` |
+| `retrieve calls <FUNCTION>` | Show what functions a given function calls | `codanna retrieve calls parse_file --json` |
+| `retrieve callers <FUNCTION>` | Show what functions call a given function | `codanna retrieve callers main --json` |
+| `retrieve implementations <TRAIT>` | Show what types implement a trait | `codanna retrieve implementations Parser --json` |
+| `retrieve impact <SYMBOL>` | Show the impact radius of changing a symbol | `codanna retrieve impact main --depth 3 --json` |
+| `retrieve search <QUERY>` | Search for symbols using full-text search | `codanna retrieve search "parse" --limit 5 --json` |
+| `retrieve describe <SYMBOL>` | Show comprehensive information about a symbol | `codanna retrieve describe SimpleIndexer --json` |
 
 ### Testing and Utilities
 
 | Command | Description | Example |
 |---------|-------------|---------|
 | `codanna mcp-test` | Verify Claude can connect and list available tools | `codanna mcp-test` |
-| `codanna mcp <TOOL>` | Execute MCP tools without spawning server | `codanna mcp find_symbol --args '{"name":"main"}'` |
+| `codanna mcp <TOOL>` | Execute MCP tools without spawning server | `codanna mcp find_symbol main --json` |
 | `codanna benchmark` | Benchmark parser performance | `codanna benchmark rust --file my_code.rs` |
 
 ### Common Flags
@@ -212,18 +228,35 @@ This encourages better documentation → better AI understanding → more motiva
 
 ## MCP Tools
 
-Available tools when using the MCP server:
+Available tools when using the MCP server. All tools support `--json` flag for structured output.
 
-| Tool | Description | Key Parameters |
-|------|-------------|----------------|
-| `find_symbol` | Find a symbol by exact name | `name` (required) |
-| `search_symbols` | Search symbols with full-text fuzzy matching | `query`, `limit`, `kind`, `module` |
-| `semantic_search_docs` | Search using natural language queries | `query`, `limit`, `threshold` |
-| `semantic_search_with_context` | Search with enhanced context and details | `query`, `limit`, `threshold` |
-| `get_calls` | Show functions called by a given function | `function_name` |
-| `find_callers` | Show functions that call a given function | `function_name` |
-| `analyze_impact` | Analyze the impact radius of symbol changes | `symbol_name`, `max_depth` |
-| `get_index_info` | Get index statistics and metadata | None |
+### Simple Tools (Positional Arguments)
+| Tool | Description | Example |
+|------|-------------|---------|
+| `find_symbol` | Find a symbol by exact name | `codanna mcp find_symbol main --json` |
+| `get_calls` | Show functions called by a given function | `codanna mcp get_calls process_file` |
+| `find_callers` | Show functions that call a given function | `codanna mcp find_callers init` |
+| `analyze_impact` | Analyze the impact radius of symbol changes | `codanna mcp analyze_impact Parser --json` |
+| `get_index_info` | Get index statistics and metadata | `codanna mcp get_index_info --json` |
+
+### Complex Tools (Key:Value Arguments)
+| Tool | Description | Example |
+|------|-------------|---------|
+| `search_symbols` | Search symbols with full-text fuzzy matching | `codanna mcp search_symbols query:parse kind:function limit:10` |
+| `semantic_search_docs` | Search using natural language queries | `codanna mcp semantic_search_docs query:"error handling" limit:5` |
+| `semantic_search_with_context` | Search with enhanced context | `codanna mcp semantic_search_with_context query:"parse files" threshold:0.7` |
+
+### Parameters Reference
+| Tool | Parameters |
+|------|------------|
+| `find_symbol` | `name` (required) |
+| `search_symbols` | `query`, `limit`, `kind`, `module` |
+| `semantic_search_docs` | `query`, `limit`, `threshold` |
+| `semantic_search_with_context` | `query`, `limit`, `threshold` |
+| `get_calls` | `function_name` |
+| `find_callers` | `function_name` |
+| `analyze_impact` | `symbol_name`, `max_depth` |
+| `get_index_info` | None |
 
 ## Performance
 
@@ -241,6 +274,8 @@ Key achievements:
 - **Parallel processing**: Multi-threaded indexing that scales with CPU cores
 - **Memory efficiency**: Approximately 100 bytes per symbol including all metadata
 - **Real-time capability**: Fast enough for incremental parsing during editing
+- **Optimized CLI startup**: ~300ms for all operations (53x improvement from v0.2)
+- **JSON output**: Zero overhead - structured output adds <1ms to response time
 
 Run performance benchmarks:
 ```bash
@@ -250,15 +285,17 @@ codanna benchmark python       # Test specific language
 
 ## Architecture Highlights
 
-**Memory-mapped vector storage**: Semantic embeddings are stored in memory-mapped files for instant loading after the OS page cache warms up.
+**Memory-mapped storage**: Two caches for different access patterns:
+- `symbol_cache.bin` - FNV-1a hashed symbol lookups, <10ms response time
+- `segment_0.vec` - 384-dimensional vectors, <1μs access after OS page cache warm-up
 
-**Embedding lifecycle management**: Old embeddings are automatically cleaned up when files are re-indexed to prevent accumulation over time.
+**Embedding lifecycle management**: Old embeddings deleted when files are re-indexed to prevent accumulation.
 
-**Lock-free concurrency**: Uses DashMap for concurrent symbol access with minimal blocking for write coordination.
+**Lock-free concurrency**: DashMap for concurrent symbol reads, write coordination via single writer lock.
 
-**Single-pass indexing**: Extracts symbols, relationships, and generates embeddings in one complete AST traversal.
+**Single-pass indexing**: Symbols, relationships, and embeddings extracted in one AST traversal.
 
-**Hot reload capability**: Event-driven file watching with debouncing indexes only changed files for efficient updates.
+**Hot reload**: File watcher with 500ms debounce triggers re-indexing of changed files only.
 
 ## Requirements
 
@@ -284,60 +321,59 @@ codanna benchmark python       # Test specific language
 
 | Priority | Feature | Status | Target |
 |----------|---------|--------|--------|
-| 1 | [JSON Output Support](#2-json-output-support) | In-Progress | v0.3.0 |
-| 2 | [Exit Codes for Common Conditions](#4-exit-codes-for-common-conditions) | In-Progress | v0.3.0 |
-| 3 | [Batch Symbol Operations](#2-batch-symbol-operations) | Planning | v0.3.1 |
-| 4 | [Output Format Control](#3-output-format-control) | Planning | v0.3.1 |
-| 5 | [Direct CLI Semantic Search](#1-direct-cli-semantic-search) | Pending | -- |
-| 6 | [Incremental Index Updates](#6-incremental-index-updates) | Completed | v2.0.0 |
-| 7 | [Query Language for Complex Searches](#5-query-language-for-complex-searches) | Pending | -- |
-| 8 | [Symbol Relationship Graph Export](#7-symbol-relationship-graph-export) | Pending | -- |
-| 9 | [Diff-Aware Analysis](#8-diff-aware-analysis) | Pending | -- |
-| 10 | [Configuration Profiles](#9-configuration-profiles) | Pending | -- |
-| 11 | [Machine-Readable Progress](#10-machine-readable-progress) | Pending | -- |
+| 1 | [JSON Output Support](#2-json-output-support) | ✅ Completed | v0.3.0 |
+| 2 | [Exit Codes for Common Conditions](#5-exit-codes-for-common-conditions) | ✅ Completed | v0.3.0 |
+| 3 | [Batch Symbol Operations](#3-batch-symbol-operations) | Planning | v0.3.1 |
+| 4 | [Output Format Control](#4-output-format-control) | Planning | v0.3.1 |
+| 5 | [Direct CLI Semantic Search](#1-direct-cli-semantic-search) | Partial | v0.3.1 |
+| 6 | [Incremental Index Updates](#7-incremental-index-updates) | ✅ Completed | v0.2.0 |
+| 7 | [Query Language for Complex Searches](#6-query-language-for-complex-searches) | Partial | -- |
+| 8 | [Configuration Profiles](#8-configuration-profiles) | Pending | -- |
+| 9 | [Machine-Readable Progress](#9-machine-readable-progress) | Pending | -- |
 
 ---
 
 ### 1. Direct CLI Semantic Search
 
-**Why**: Currently semantic search is only available through MCP interface
+**Partially Implemented**: Simplified syntax available through MCP interface.
 
 ```bash
-# Current: Only through MCP
-codanna mcp semantic_search_docs --args '{"query": "authentication"}'
+# NEW: Simplified syntax (no JSON escaping needed!)
+codanna mcp semantic_search_docs query:authentication limit:10 --json
 
-# Wishlist: Direct CLI command
-codanna semantic search "authentication" --limit 10
+# Still TODO: Direct retrieve command
+codanna retrieve semantic "authentication" --limit 10
 ```
 
-**Benefits**:
-- Simpler command syntax
-- Better Unix integration
-- No JSON escaping needed
+**Delivered**:
+- ✅ Simpler command syntax (key:value pairs)
+- ✅ Better Unix integration (positional args)
+- ✅ No JSON escaping needed
+
+**Remaining**: Direct `retrieve semantic` command for consistency
 
 ### 2. JSON Output Support
 
-**Why**: Enable reliable programmatic integration without text parsing
+**Implemented in v0.3.0**: All retrieve commands and MCP tools now support `--json` flag.
 
 ```bash
-# Add --json flag to commands
+# All retrieve commands support --json
 codanna retrieve symbol MyFunction --json
-{
-  "name": "MyFunction",
-  "kind": "Function",
-  "file": "./src/core.rs",
-  "line": 42,
-  "signature": "fn MyFunction(input: &str) -> Result<String, Error>",
-  "visibility": "Public"
-}
+codanna retrieve calls process_file --json
+codanna retrieve callers init --json
+
+# All MCP tools support --json
+codanna mcp find_symbol main --json
+codanna mcp semantic_search_docs query:"error handling" --json
 ```
 
-**Benefits**:
-- Stable API for scripts and tools
-- No more awk/grep gymnastics
-- Enable IDE integrations
+**Delivered Benefits**:
+- ✅ Stable API for scripts and tools
+- ✅ Zero performance overhead (<1ms)
+- ✅ Consistent JsonResponse format across all commands
+- ✅ Proper exit codes (3 for not found)
 
-## 2. Batch Symbol Operations
+### 3. Batch Symbol Operations
 
 **Why**: Reduce overhead when analyzing multiple symbols
 
@@ -356,7 +392,7 @@ codanna retrieve symbols func1 func2 func3
 - Faster CI/CD pipelines
 - Better for parallel analysis
 
-### 3. Output Format Control
+### 4. Output Format Control
 
 **Why**: Different use cases need different detail levels
 
@@ -370,77 +406,87 @@ process_request:src/handler.rs:120
 codanna retrieve callers MyFunc --format=full
 ```
 
-### 4. Exit Codes for Common Conditions
+### 5. Exit Codes for Common Conditions
 
-**Why**: Make scripting more robust
+**Implemented in v0.3.0**: All commands now return appropriate exit codes.
 
 ```bash
-# Exit codes:
+# Exit codes implemented:
 # 0 - Success
-# 1 - Error
-# 2 - No results found
-# 3 - Index not found
-# 4 - Symbol not found
+# 1 - General error
+# 3 - Not found (symbol, function, etc.)
 
-if codanna retrieve symbol MyFunc >/dev/null 2>&1; then
+if codanna retrieve symbol MyFunc --json >/dev/null 2>&1; then
   echo "Symbol exists"
 else
-  case $? in
-    3) echo "Need to build index first" ;;
-    4) echo "Symbol not found" ;;
-  esac
+  if [ $? -eq 3 ]; then
+    echo "Symbol not found"
+  else
+    echo "Error occurred"
+  fi
 fi
 ```
 
-### 5. Query Language for Complex Searches
+**Actual JSON output**:
+```bash
+$ codanna retrieve symbol NonExistent --json
+{
+  "status": "error",
+  "code": "NOT_FOUND",
+  "message": "Symbol 'NonExistent' not found",
+  "error": {
+    "suggestions": [
+      "Check the spelling",
+      "Ensure the index is up to date"
+    ]
+  },
+  "exit_code": 3
+}
+# Exit code: 3
+```
 
-**Why**: Find symbols matching multiple criteria without multiple commands
+### 6. Query Language for Complex Searches
+
+**Partially Implemented**: Key:value syntax available for MCP tools.
 
 ```bash
-# Find all public methods that call database functions
-codanna query "kind:method visibility:public calls:*database*"
+# NOW AVAILABLE: Key:value syntax for MCP tools
+codanna mcp search_symbols query:Parser kind:method limit:20 --json
+codanna mcp semantic_search_docs query:"error handling" limit:5 --json
 
-# Find unused private functions
+# Still TODO: Advanced query combinations
+codanna query "kind:method visibility:public calls:*Parser*"
 codanna query "kind:function visibility:private callers:0"
 ```
 
-### 6. Incremental Index Updates
+**Delivered**: Basic key:value parameter parsing for MCP tools
+**Remaining**: Full query language with wildcards and combinations
 
-**Why**: Faster re-indexing for large codebases
+### 7. Incremental Index Updates
 
-```bash
-# Only re-index changed files
-codanna index --incremental
-
-# Watch mode for development
-codanna index --watch
-```
-
-### 7. Symbol Relationship Graph Export
-
-**Why**: Visualize complex dependencies
+**Implemented**: Watch mode with notification channels for coordinated updates.
 
 ```bash
-# Export full dependency graph
-codanna export graph --format=dot > project.dot
+# Watch mode auto-indexes changed files
+codanna serve --watch --watch-interval 5
 
-# Export focused subgraph
-codanna export graph --root=MyService --depth=2 --format=mermaid
+# Server output shows notification flow:
+# Detected change in indexed file: src/main.rs
+#   Re-indexing...
+#   ✓ Re-indexed successfully (file updated)
+# File watcher received IndexReloaded notification
+#   Refreshing watched file list...
+#   ✓ Now watching 60 files
 ```
 
-### 8. Diff-Aware Analysis
+**Delivered**:
+- ✅ Automatic file watching with `--watch` flag
+- ✅ Broadcast channels coordinate index and file watchers
+- ✅ File deletions trigger index and cache cleanup
+- ✅ Only changed files are re-indexed
+- ✅ Event-driven with debouncing for efficiency
 
-**Why**: Focus analysis on what changed
-
-```bash
-# Analyze impact of changes in a PR
-codanna analyze diff --base=main --head=feature-branch
-
-# Pre-commit hook helper
-codanna analyze staged --max-impact=20
-```
-
-### 9. Configuration Profiles
+### 8. Configuration Profiles
 
 **Why**: Different settings for different use cases
 
@@ -458,7 +504,7 @@ watch_mode = true
 codanna --profile=ci index .
 ```
 
-### 10. Machine-Readable Progress
+### 9. Machine-Readable Progress
 
 **Why**: Better CI/CD integration
 

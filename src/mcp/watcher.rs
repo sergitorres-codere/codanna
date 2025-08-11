@@ -10,6 +10,10 @@ use tokio::sync::RwLock;
 use tokio::time::interval;
 use tracing::{debug, error, info, warn};
 
+use super::{
+    CodeIntelligenceServer,
+    notifications::{FileChangeEvent, NotificationBroadcaster},
+};
 use crate::{IndexPersistence, Settings, SimpleIndexer};
 
 /// Watches the index file and reloads it when changes are detected
@@ -20,6 +24,8 @@ pub struct IndexWatcher {
     persistence: IndexPersistence,
     last_modified: Option<SystemTime>,
     check_interval: Duration,
+    mcp_server: Option<Arc<CodeIntelligenceServer>>,
+    broadcaster: Option<Arc<NotificationBroadcaster>>,
 }
 
 impl IndexWatcher {
@@ -45,7 +51,21 @@ impl IndexWatcher {
             persistence,
             last_modified,
             check_interval,
+            mcp_server: None,
+            broadcaster: None,
         }
+    }
+
+    /// Set the MCP server to send notifications
+    pub fn with_mcp_server(mut self, server: Arc<CodeIntelligenceServer>) -> Self {
+        self.mcp_server = Some(server);
+        self
+    }
+
+    /// Set the notification broadcaster
+    pub fn with_broadcaster(mut self, broadcaster: Arc<NotificationBroadcaster>) -> Self {
+        self.broadcaster = Some(broadcaster);
+        self
     }
 
     /// Start watching for index changes
@@ -112,10 +132,15 @@ impl IndexWatcher {
                 // Update last modified time
                 self.last_modified = Some(current_modified);
 
-                info!(
-                    "Index successfully reloaded with {} symbols",
-                    indexer_guard.symbol_count()
-                );
+                let symbol_count = indexer_guard.symbol_count();
+                info!("Index successfully reloaded with {symbol_count} symbols");
+
+                // Send notification that index was reloaded
+                if let Some(ref broadcaster) = self.broadcaster {
+                    broadcaster.send(FileChangeEvent::IndexReloaded);
+                    info!("Sent IndexReloaded notification to all listeners");
+                }
+
                 Ok(())
             }
             Err(e) => {
@@ -181,6 +206,15 @@ impl IndexWatcher {
                             IndexingResult::Indexed(_) => {
                                 reindexed_count += 1;
                                 debug!("  ✓ Re-indexed successfully");
+
+                                // Send notification if MCP server is available
+                                if let Some(ref server) = self.mcp_server {
+                                    let path_str = path.display().to_string();
+                                    let server_clone = server.clone();
+                                    tokio::spawn(async move {
+                                        server_clone.notify_file_reindexed(&path_str).await;
+                                    });
+                                }
                             }
                             IndexingResult::Cached(_) => {
                                 debug!("  - File unchanged (hash match)");

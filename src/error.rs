@@ -92,6 +92,32 @@ pub enum IndexError {
 }
 
 impl IndexError {
+    /// Get a stable status code for this error type.
+    ///
+    /// Returns a string identifier that can be used in JSON responses
+    /// for programmatic error handling.
+    pub fn status_code(&self) -> String {
+        match self {
+            Self::FileRead { .. } => "FILE_READ_ERROR",
+            Self::FileWrite { .. } => "FILE_WRITE_ERROR",
+            Self::ParseError { .. } => "PARSE_ERROR",
+            Self::UnsupportedFileType { .. } => "UNSUPPORTED_FILE_TYPE",
+            Self::PersistenceError { .. } => "PERSISTENCE_ERROR",
+            Self::LoadError { .. } => "LOAD_ERROR",
+            Self::SymbolNotFound { .. } => "SYMBOL_NOT_FOUND",
+            Self::FileNotFound { .. } => "FILE_NOT_FOUND",
+            Self::FileIdExhausted => "FILE_ID_EXHAUSTED",
+            Self::SymbolIdExhausted => "SYMBOL_ID_EXHAUSTED",
+            Self::ConfigError { .. } => "CONFIG_ERROR",
+            Self::TantivyError { .. } => "TANTIVY_ERROR",
+            Self::TransactionFailed { .. } => "TRANSACTION_FAILED",
+            Self::MutexPoisoned => "MUTEX_POISONED",
+            Self::IndexCorrupted { .. } => "INDEX_CORRUPTED",
+            Self::General(_) => "GENERAL_ERROR",
+        }
+        .to_string()
+    }
+
     /// Get recovery suggestions for this error
     pub fn recovery_suggestions(&self) -> Vec<&'static str> {
         match self {

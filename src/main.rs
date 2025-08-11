@@ -10,9 +10,38 @@ use clap::{
 use codanna::FileId;
 use codanna::parsing::{LanguageParser, PythonParser, RustParser};
 use codanna::{IndexPersistence, RelationKind, Settings, SimpleIndexer, Symbol, SymbolKind};
+use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
+
+// MCP tool JSON output structures
+#[derive(Debug, Serialize)]
+struct IndexInfo {
+    symbol_count: usize,
+    file_count: usize,
+    relationship_count: usize,
+    symbol_kinds: SymbolKindBreakdown,
+    semantic_search: SemanticSearchInfo,
+}
+
+#[derive(Debug, Serialize)]
+struct SymbolKindBreakdown {
+    functions: usize,
+    methods: usize,
+    structs: usize,
+    traits: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct SemanticSearchInfo {
+    enabled: bool,
+    model_name: Option<String>,
+    embeddings: Option<usize>,
+    dimensions: Option<usize>,
+    created: Option<String>,
+    updated: Option<String>,
+}
 
 fn clap_cargo_style() -> Styles {
     Styles::styled()
@@ -35,15 +64,13 @@ fn create_custom_help() -> String {
     } else {
         help.push_str(&format!("{}\n", style("Quick Start:").cyan().bold()));
     }
-    help.push_str("  $ codanna init              # Set up in current directory\n");
-    help.push_str("  $ codanna index src         # Index your source code\n");
-    help.push_str("  $ codanna mcp-test          # Verify Claude can connect\n\n");
+    help.push_str("  $ codanna init                   # Initialize in current directory\n");
+    help.push_str("  $ codanna index src              # Index your source code\n");
+    help.push_str("  $ codanna serve --http --watch   # HTTP server with OAuth\n");
+    help.push_str("  $ codanna serve --https --watch  # HTTPS server with TLS\n\n");
 
     // About section
-    help.push_str(
-        "Codanna provides AI assistants like Claude with deep understanding of your codebase.\n\n",
-    );
-    help.push_str("Fast parallel indexing with natural language search capabilities.\n\n");
+    help.push_str("Index code and query relationships, symbols, and dependencies.\n\n");
 
     // Usage
     if Theme::should_disable_colors() {
@@ -59,16 +86,17 @@ fn create_custom_help() -> String {
     } else {
         help.push_str(&format!("{}\n", style("Commands:").cyan().bold()));
     }
-    help.push_str("  init        Set up .codanna directory with default configuration\n");
-    help.push_str(
-        "  index       Build searchable index from your codebase with fast parallel processing\n",
-    );
-    help.push_str("  retrieve    Search symbols, find callers/callees, analyze impact\n");
-    help.push_str("  config      Display active settings from .codanna/settings.toml\n");
-    help.push_str("  mcp-test    Verify Claude can connect and list available tools\n");
-    help.push_str("  mcp         Execute MCP tools without spawning server - for debugging\n");
-    help.push_str("  benchmark   Benchmark parser performance for different languages\n");
+    help.push_str("  init        Set up .codanna directory\n");
+    help.push_str("  index       Build searchable index from codebase\n");
+    help.push_str("  retrieve    Query symbols, relationships, and dependencies\n");
+    help.push_str("  serve       Start MCP server\n");
+    help.push_str("  config      Display active settings\n");
+    help.push_str("  mcp-test    Test MCP connection\n");
+    help.push_str("  mcp         Execute MCP tools directly\n");
+    help.push_str("  benchmark   Benchmark parser performance\n");
     help.push_str("  help        Print this message or the help of the given subcommand(s)\n\n");
+
+    help.push_str("See 'codanna help <command>' for more information on a specific command.\n\n");
 
     // Options
     if Theme::should_disable_colors() {
@@ -81,78 +109,24 @@ fn create_custom_help() -> String {
     help.push_str("  -h, --help             Print help\n");
     help.push_str("  -V, --version          Print version\n\n");
 
-    // Helper to format description lines with dimmed text
-    let format_desc = |desc: &str| {
-        if Theme::should_disable_colors() {
-            format!("  {desc}:\n")
-        } else {
-            let styled = style(desc).dim();
-            format!("  {styled}:\n")
-        }
-    };
-
-    // Examples
-    if Theme::should_disable_colors() {
-        help.push_str("Examples:\n");
-    } else {
-        help.push_str(&format!("{}\n", style("Examples:").cyan().bold()));
-    }
-
-    help.push_str(&format_desc("First time setup"));
-    help.push_str("    $ codanna init\n");
-    help.push_str("    $ codanna index src --progress\n");
-    help.push_str("    $ codanna mcp-test\n\n");
-
-    help.push_str(&format_desc("Index a single file"));
-    help.push_str("    $ codanna index src/main.rs\n\n");
-
-    help.push_str(&format_desc("Check what calls your main function"));
-    help.push_str("    $ codanna retrieve callers main\n\n");
-
-    help.push_str(&format_desc("Natural language search"));
-    help.push_str(
-        "    $ codanna mcp semantic_search_docs --args '{\"query\": \"error handling\"}'\n\n",
-    );
-
-    help.push_str(&format_desc("Show detailed loading information"));
-    help.push_str("    $ codanna --info retrieve symbol main\n\n");
-
-    // Benchmarks
-    if Theme::should_disable_colors() {
-        help.push_str("Benchmarks:\n");
-    } else {
-        help.push_str(&format!("{}\n", style("Benchmarks:").cyan().bold()));
-    }
-
-    help.push_str(&format_desc("Test parser performance (all languages)"));
-    help.push_str("    $ codanna benchmark all\n\n");
-
-    help.push_str(&format_desc("Benchmark specific language"));
-    help.push_str("    $ codanna benchmark python\n");
-    help.push_str("    $ codanna benchmark rust\n\n");
-
-    help.push_str(&format_desc("Benchmark with your own file"));
-    help.push_str("    $ codanna benchmark python --file large_module.py\n\n");
-
     // Learn More
     if Theme::should_disable_colors() {
         help.push_str("Learn More:\n");
     } else {
         help.push_str(&format!("{}\n", style("Learn More:").cyan().bold()));
     }
-    help.push_str("  GitHub: https://github.com/bartolli/codanna\n");
-    help.push_str("  Commands: codanna help <COMMAND>");
+    help.push_str("  GitHub: https://github.com/bartolli/codanna");
 
     help
 }
 
-/// High-performance code intelligence for AI assistants
+/// Code intelligence system
 #[derive(Parser)]
 #[command(
     name = "codanna",
     version = env!("CARGO_PKG_VERSION"),
-    about = "High-performance code intelligence for AI assistants",
-    long_about = "Codanna provides AI assistants like Claude with deep understanding of your codebase.\n\nFast parallel indexing with natural language search capabilities.",
+    about = "Code intelligence system",
+    long_about = "Index code and query relationships, symbols, and dependencies.",
     next_line_help = true,
     styles = clap_cargo_style(),
     override_help = create_custom_help()
@@ -173,7 +147,7 @@ struct Cli {
 /// Available CLI commands
 #[derive(Subcommand)]
 enum Commands {
-    /// Initialize project for code intelligence
+    /// Initialize project
     #[command(about = "Set up .codanna directory with default configuration")]
     Init {
         /// Force overwrite existing configuration
@@ -181,8 +155,8 @@ enum Commands {
         force: bool,
     },
 
-    /// Index source files or directories for AI understanding
-    #[command(about = "Build searchable index from your codebase with fast parallel processing")]
+    /// Index source files or directories
+    #[command(about = "Build searchable index from codebase")]
     Index {
         /// Path to file or directory to index
         path: PathBuf,
@@ -209,7 +183,11 @@ enum Commands {
     },
 
     /// Query code relationships and dependencies
-    #[command(about = "Search symbols, find callers/callees, analyze impact")]
+    #[command(
+        about = "Search symbols, find callers/callees, analyze impact",
+        long_about = "Query indexed symbols, relationships, and dependencies.",
+        after_help = "Examples:\n  codanna retrieve symbol main\n  codanna retrieve callers process_file\n  codanna retrieve calls init\n  codanna retrieve implementations Parser\n  codanna retrieve impact MyStruct --depth 3\n  codanna retrieve search \"parse\" --limit 10\n\nJSON paths:\n  retrieve symbol     .data.name\n  retrieve search     .data[].name\n  retrieve callers    .data[].name\n  retrieve impact     .data[].name"
+    )]
     Retrieve {
         #[command(subcommand)]
         query: RetrieveQuery,
@@ -219,8 +197,12 @@ enum Commands {
     #[command(about = "Display active settings from .codanna/settings.toml")]
     Config,
 
-    /// Start MCP server for AI assistants
-    #[command(hide = true)] // Hidden - used internally by MCP clients
+    /// Start MCP server
+    #[command(
+        about = "Start MCP server",
+        long_about = "Start MCP server with optional HTTP/HTTPS modes.",
+        after_help = "Examples:\n  codanna serve\n  codanna serve --http --watch\n  codanna serve --https --watch\n  codanna serve --http --bind 0.0.0.0:3000\n\nModes:\n  Default: stdio\n  --http: HTTP with OAuth\n  --https: HTTPS with TLS"
+    )]
     Serve {
         /// Watch index file for changes and auto-reload
         #[arg(long, help = "Enable hot-reload when index changes")]
@@ -255,11 +237,8 @@ enum Commands {
         bind: String,
     },
 
-    /// Test MCP connection with Claude
-    #[command(
-        name = "mcp-test",
-        about = "Verify Claude can connect and list available tools"
-    )]
+    /// Test MCP connection
+    #[command(name = "mcp-test", about = "Test MCP connection and list tools")]
     McpTest {
         /// Path to server binary (defaults to current binary)
         #[arg(long)]
@@ -275,18 +254,30 @@ enum Commands {
     },
 
     /// Call MCP tools directly (advanced)
-    #[command(about = "Execute MCP tools without spawning server - for debugging")]
+    #[command(
+        about = "Execute MCP tools directly",
+        long_about = "Execute MCP tools directly without spawning a server.\n\nSupports positional arguments, key=value pairs, and JSON arguments.",
+        after_help = "Examples:\n  codanna mcp find_symbol main\n  codanna mcp get_calls process_file\n  codanna mcp semantic_search_docs query:\"error handling\" limit:5\n  codanna mcp search_symbols query:parse kind:function\n  codanna mcp find_symbol Parser --json | jq '.data[].symbol.name'\n  codanna mcp search_symbols query:Parser --json | jq '.data[].name'\n\nTools:\n  find_symbol                  Find symbol by exact name\n  search_symbols               Full-text search with fuzzy matching\n  semantic_search_docs         Natural language search\n  semantic_search_with_context Natural language search with relationships\n  get_calls                    Functions called by a function\n  find_callers                 Functions that call a function\n  analyze_impact               Impact radius of symbol changes\n  get_index_info               Index statistics"
+    )]
     Mcp {
         /// Tool to call
         tool: String,
 
-        /// Tool arguments as JSON
+        /// Positional arguments (can be simple values or key:value pairs)
+        #[arg(num_args = 0..)]
+        positional: Vec<String>,
+
+        /// Tool arguments as JSON (for backward compatibility and complex cases)
         #[arg(long)]
         args: Option<String>,
+
+        /// Output in JSON format
+        #[arg(long)]
+        json: bool,
     },
 
-    /// Run parser performance benchmarks
-    #[command(about = "Benchmark parser performance for different languages")]
+    /// Benchmark parser performance
+    #[command(about = "Benchmark parser performance")]
     Benchmark {
         /// Language to benchmark (rust, python, all)
         #[arg(default_value = "all")]
@@ -304,27 +295,45 @@ enum Commands {
 #[derive(Subcommand)]
 enum RetrieveQuery {
     /// Find a symbol by name
+    #[command(
+        after_help = "Examples:\n  codanna retrieve symbol main\n  codanna retrieve symbol Parser --json\n  codanna retrieve symbol MyStruct --json | jq '.file'"
+    )]
     Symbol {
         /// Name of the symbol to find
         name: String,
+        /// Output in JSON format
+        #[arg(long)]
+        json: bool,
     },
 
     /// Show what functions a given function calls
     Calls {
         /// Name of the function
         function: String,
+        /// Output in JSON format
+        #[arg(long)]
+        json: bool,
     },
 
     /// Show what functions call a given function
+    #[command(
+        after_help = "Examples:\n  codanna retrieve callers main\n  codanna retrieve callers process_file --json\n  codanna retrieve callers init --json | jq -r '.[].name'"
+    )]
     Callers {
         /// Name of the function
         function: String,
+        /// Output in JSON format
+        #[arg(long)]
+        json: bool,
     },
 
     /// Show what types implement a given trait
     Implementations {
         /// Name of the trait
         trait_name: String,
+        /// Output in JSON format
+        #[arg(long)]
+        json: bool,
     },
 
     /// Show what types a given symbol uses
@@ -334,15 +343,24 @@ enum RetrieveQuery {
     },
 
     /// Show the impact radius of changing a symbol
+    #[command(
+        after_help = "Examples:\n  codanna retrieve impact MyStruct\n  codanna retrieve impact Parser --depth 3\n  codanna retrieve impact main --json --depth 2"
+    )]
     Impact {
         /// Name of the symbol
         symbol: String,
         /// Maximum depth to search (default: 5)
         #[arg(short, long)]
         depth: Option<usize>,
+        /// Output in JSON format
+        #[arg(long)]
+        json: bool,
     },
 
     /// Search for symbols using full-text search
+    #[command(
+        after_help = "Examples:\n  codanna retrieve search \"parse\"\n  codanna retrieve search \"error handling\" --limit 5\n  codanna retrieve search parser --json | jq '.[].name'"
+    )]
     Search {
         /// Search query
         query: String,
@@ -358,6 +376,10 @@ enum RetrieveQuery {
         /// Filter by module path
         #[arg(short, long)]
         module: Option<String>,
+
+        /// Output in JSON format
+        #[arg(long)]
+        json: bool,
     },
 
     /// Show what methods a type or trait defines
@@ -366,17 +388,113 @@ enum RetrieveQuery {
         symbol: String,
     },
 
-    /// Show comprehensive dependency analysis for a symbol
+    /// Show dependency analysis for a symbol
     Dependencies {
         /// Name of the symbol
         symbol: String,
     },
 
-    /// Show comprehensive information about a symbol
+    /// Show information about a symbol
     Describe {
         /// Name of the symbol
         symbol: String,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
     },
+}
+
+/// Parse key:value pairs from positional arguments with strict type validation
+///
+/// Security constraints:
+/// - Only allows: strings, unsigned integers (u64), floats (f64), and booleans
+/// - Maximum key length: 50 characters
+/// - Maximum value length: 1000 characters
+/// - No special characters in keys (alphanumeric + underscore only)
+/// - No code injection possible - values are strictly typed
+///
+/// Returns a map with parsed values, inferring types safely
+fn parse_key_value_pairs(args: &[String]) -> serde_json::Map<String, serde_json::Value> {
+    use serde_json::Value;
+
+    let mut map = serde_json::Map::with_capacity(args.len());
+
+    for arg in args {
+        // Security: Limit total argument length
+        if arg.len() > 1050 {
+            // key (50) + ':' (1) + value (1000) = 1051 max
+            eprintln!("Warning: Skipping oversized argument (max 1050 chars)");
+            continue;
+        }
+
+        // Fast path: split on first colon only
+        if let Some((key, value)) = arg.split_once(':') {
+            // Security: Validate key format (alphanumeric + underscore only)
+            if key.len() > 50 {
+                eprintln!(
+                    "Warning: Skipping argument with oversized key (max 50 chars): {}",
+                    &key[..20]
+                );
+                continue;
+            }
+
+            // Security: Only allow safe key characters
+            if !key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+                eprintln!("Warning: Skipping argument with invalid key characters: {key}");
+                continue;
+            }
+
+            // Security: Limit value length
+            if value.len() > 1000 {
+                eprintln!("Warning: Skipping argument with oversized value (max 1000 chars)");
+                continue;
+            }
+
+            // Type inference with strict validation
+            let json_value = if value.starts_with('"') && value.ends_with('"') && value.len() > 1 {
+                // Quoted string: remove quotes and validate UTF-8
+                let unquoted = &value[1..value.len() - 1];
+                // Security: Ensure valid UTF-8 (though Rust strings already are)
+                Value::String(unquoted.to_string())
+            } else if value == "true" || value == "false" {
+                // Boolean - only exact matches allowed
+                Value::Bool(value == "true")
+            } else if let Ok(n) = value.parse::<u64>() {
+                // Unsigned integer - safe range 0 to 2^64-1
+                // Security: Number parsing is safe, Rust's parse handles overflow
+                Value::Number(n.into())
+            } else if value.contains('.') {
+                // Only try float parsing if it has a decimal point
+                if let Ok(f) = value.parse::<f64>() {
+                    // Security: Check for special float values
+                    if f.is_finite() {
+                        if let Some(num) = serde_json::Number::from_f64(f) {
+                            Value::Number(num)
+                        } else {
+                            // Should not happen with finite floats, but be safe
+                            Value::String(value.to_string())
+                        }
+                    } else {
+                        // Reject NaN, Infinity, -Infinity
+                        eprintln!("Warning: Skipping non-finite float value: {value}");
+                        continue;
+                    }
+                } else {
+                    // Not a valid float, treat as string
+                    Value::String(value.to_string())
+                }
+            } else {
+                // Default to string for everything else
+                // Security: String is safe, no evaluation happens
+                Value::String(value.to_string())
+            };
+
+            map.insert(key.to_string(), json_value);
+        }
+        // Silently skip non-key:value arguments (they might be positional)
+    }
+
+    map
 }
 
 /// Entry point with tokio async runtime.
@@ -493,6 +611,17 @@ async fn main() {
     // Skip loading index for mcp-test (thin client mode)
     let skip_index_load = matches!(cli.command, Commands::McpTest { .. });
 
+    // Determine if we need full trait resolver initialization
+    // Only needed for trait-related commands: implementations, trait analysis, etc.
+    let needs_trait_resolver = matches!(
+        cli.command,
+        Commands::Retrieve {
+            query: RetrieveQuery::Implementations { .. },
+            ..
+        } | Commands::Index { .. }
+            | Commands::Serve { .. }
+    );
+
     // Load existing index or create new one (unless we're in thin client mode)
     let settings = Arc::new(config.clone());
     let mut indexer = if skip_index_load {
@@ -507,7 +636,17 @@ async fn main() {
                     config.index_path.display()
                 );
             }
-            match persistence.load_with_settings(settings.clone(), cli.info) {
+            // Use lazy loading for simple commands to improve startup time
+            let skip_trait_resolver = !needs_trait_resolver;
+            if skip_trait_resolver && config.debug {
+                eprintln!("DEBUG: Using lazy initialization (skipping trait resolver)");
+            }
+
+            match persistence.load_with_settings_lazy(
+                settings.clone(),
+                cli.info,
+                skip_trait_resolver,
+            ) {
                 Ok(loaded) => {
                     if config.debug {
                         eprintln!("DEBUG: Successfully loaded index from disk");
@@ -537,7 +676,9 @@ async fn main() {
             if config.debug {
                 eprintln!("DEBUG: Creating new index");
             }
-            let mut new_indexer = SimpleIndexer::with_settings(settings.clone());
+            let skip_trait_resolver = !needs_trait_resolver;
+            let mut new_indexer =
+                SimpleIndexer::with_settings_lazy(settings.clone(), skip_trait_resolver);
             // Clear Tantivy index if force re-indexing directory
             if force_recreate_index {
                 if let Err(e) = new_indexer.clear_tantivy_index() {
@@ -679,18 +820,20 @@ async fn main() {
 
                         let indexer_arc = server.get_indexer_arc();
                         let settings = Arc::new(config.clone());
+                        let server_arc = Arc::new(server.clone());
                         let watcher = IndexWatcher::new(
                             indexer_arc,
                             settings,
                             Duration::from_secs(actual_watch_interval),
-                        );
+                        )
+                        .with_mcp_server(server_arc);
 
                         // Spawn watcher in background
                         tokio::spawn(async move {
                             watcher.watch().await;
                         });
 
-                        eprintln!("Index watcher started");
+                        eprintln!("Index watcher started with notification support");
                     }
 
                     // If file watching is enabled in config, start the file system watcher
@@ -860,6 +1003,11 @@ async fn main() {
                         stats.display();
 
                         if !dry_run && stats.files_indexed > 0 {
+                            // Build symbol cache before saving
+                            if let Err(e) = indexer.build_symbol_cache() {
+                                eprintln!("Warning: Failed to build symbol cache: {e}");
+                            }
+
                             // Save the index
                             eprintln!(
                                 "\nSaving index with {} total symbols, {} total relationships...",
@@ -900,49 +1048,71 @@ async fn main() {
 
         Commands::Retrieve { query } => {
             match query {
-                RetrieveQuery::Symbol { name } => {
+                RetrieveQuery::Symbol { name, json } => {
                     let symbols = indexer.find_symbols_by_name(&name);
 
-                    if symbols.is_empty() {
-                        println!("No symbols found with name: {name}");
+                    if json {
+                        // JSON output mode - use simple JsonResponse directly
+                        use codanna::io::format::JsonResponse;
+
+                        if symbols.is_empty() {
+                            let response = JsonResponse::not_found("Symbol", &name);
+                            println!("{}", serde_json::to_string_pretty(&response).unwrap());
+                            std::process::exit(3); // NOT_FOUND exit code
+                        } else {
+                            let response = JsonResponse::success(symbols);
+                            println!("{}", serde_json::to_string_pretty(&response).unwrap());
+                        }
                     } else {
-                        println!("Found {} symbol(s) named '{}':", symbols.len(), name);
-                        for symbol in symbols {
-                            let file_path = indexer
-                                .get_file_path(symbol.file_id)
-                                .unwrap_or_else(|| "<unknown>".to_string());
-                            println!(
-                                "  {:?} at {}:{}",
-                                symbol.kind,
-                                file_path,
-                                symbol.range.start_line + 1
-                            );
+                        // Text output mode (existing behavior - keep it exactly as it was)
+                        if symbols.is_empty() {
+                            println!("No symbols found with name: {name}");
+                        } else {
+                            println!("Found {} symbol(s) named '{}':", symbols.len(), name);
+                            for symbol in symbols {
+                                let file_path = indexer
+                                    .get_file_path(symbol.file_id)
+                                    .unwrap_or_else(|| "<unknown>".to_string());
+                                println!(
+                                    "  {:?} at {}:{}",
+                                    symbol.kind,
+                                    file_path,
+                                    symbol.range.start_line + 1
+                                );
 
-                            // Show documentation if available
-                            if let Some(ref doc) = symbol.doc_comment {
-                                // Show first 3 lines or less
-                                let lines: Vec<&str> = doc.lines().take(3).collect();
-                                let preview = if doc.lines().count() > 3 {
-                                    format!("{}...", lines.join(" "))
-                                } else {
-                                    lines.join(" ")
-                                };
-                                println!("    Documentation: {preview}");
-                            }
+                                // Show documentation if available
+                                if let Some(ref doc) = symbol.doc_comment {
+                                    // Show first 3 lines or less
+                                    let lines: Vec<&str> = doc.lines().take(3).collect();
+                                    let preview = if doc.lines().count() > 3 {
+                                        format!("{}...", lines.join(" "))
+                                    } else {
+                                        lines.join(" ")
+                                    };
+                                    println!("    Documentation: {preview}");
+                                }
 
-                            // Show signature if available
-                            if let Some(ref sig) = symbol.signature {
-                                println!("    Signature: {sig}");
+                                // Show signature if available
+                                if let Some(ref sig) = symbol.signature {
+                                    println!("    Signature: {sig}");
+                                }
                             }
                         }
                     }
                 }
 
-                RetrieveQuery::Calls { function } => {
+                RetrieveQuery::Calls { function, json } => {
                     let symbols = indexer.find_symbols_by_name(&function);
 
                     if symbols.is_empty() {
-                        println!("Function not found: {function}");
+                        if json {
+                            use codanna::io::format::JsonResponse;
+                            let response = JsonResponse::not_found("Function", &function);
+                            println!("{}", serde_json::to_string_pretty(&response).unwrap());
+                            std::process::exit(3);
+                        } else {
+                            println!("Function not found: {function}");
+                        }
                     } else {
                         let mut all_called_with_metadata = Vec::new();
                         let mut checked_symbols = 0;
@@ -961,59 +1131,85 @@ async fn main() {
                             }
                         }
 
-                        if all_called_with_metadata.is_empty() {
-                            println!(
-                                "{function} doesn't call any functions (checked {checked_symbols} symbol(s) with this name)"
-                            );
+                        if json {
+                            // JSON output - return just the called symbols
+                            use codanna::io::format::JsonResponse;
+                            let called_symbols: Vec<_> = all_called_with_metadata
+                                .into_iter()
+                                .map(|(s, _)| s)
+                                .collect();
+
+                            if called_symbols.is_empty() {
+                                // Return empty array with success status
+                                let response = JsonResponse::success(Vec::<codanna::Symbol>::new());
+                                println!("{}", serde_json::to_string_pretty(&response).unwrap());
+                            } else {
+                                let response = JsonResponse::success(called_symbols);
+                                println!("{}", serde_json::to_string_pretty(&response).unwrap());
+                            }
                         } else {
-                            println!(
-                                "{} calls {} function(s):",
-                                function,
-                                all_called_with_metadata.len()
-                            );
-                            for (callee, metadata) in all_called_with_metadata {
-                                // Parse metadata to extract receiver info
-                                let call_display = if let Some(meta) = metadata {
-                                    if meta.contains("receiver:") && meta.contains("static:") {
-                                        // Parse "receiver:{receiver},static:{is_static}"
-                                        let parts: Vec<&str> = meta.split(',').collect();
-                                        let mut receiver = "";
-                                        let mut is_static = false;
+                            // Text output (existing behavior)
+                            if all_called_with_metadata.is_empty() {
+                                println!(
+                                    "{function} doesn't call any functions (checked {checked_symbols} symbol(s) with this name)"
+                                );
+                            } else {
+                                println!(
+                                    "{function} calls {} function(s):",
+                                    all_called_with_metadata.len()
+                                );
+                                for (callee, metadata) in all_called_with_metadata {
+                                    // Parse metadata to extract receiver info
+                                    let call_display = if let Some(meta) = metadata {
+                                        if meta.contains("receiver:") && meta.contains("static:") {
+                                            // Parse "receiver:{receiver},static:{is_static}"
+                                            let parts: Vec<&str> = meta.split(',').collect();
+                                            let mut receiver = "";
+                                            let mut is_static = false;
 
-                                        for part in parts {
-                                            if let Some(r) = part.strip_prefix("receiver:") {
-                                                receiver = r;
-                                            } else if let Some(s) = part.strip_prefix("static:") {
-                                                is_static = s == "true";
+                                            for part in parts {
+                                                if let Some(r) = part.strip_prefix("receiver:") {
+                                                    receiver = r;
+                                                } else if let Some(s) = part.strip_prefix("static:")
+                                                {
+                                                    is_static = s == "true";
+                                                }
                                             }
-                                        }
 
-                                        if !receiver.is_empty() {
-                                            if is_static {
-                                                format!("{}::{}", receiver, callee.name)
+                                            if !receiver.is_empty() {
+                                                if is_static {
+                                                    format!("{}::{}", receiver, callee.name)
+                                                } else {
+                                                    format!("{}.{}", receiver, callee.name)
+                                                }
                                             } else {
-                                                format!("{}.{}", receiver, callee.name)
+                                                callee.name.to_string()
                                             }
                                         } else {
                                             callee.name.to_string()
                                         }
                                     } else {
                                         callee.name.to_string()
-                                    }
-                                } else {
-                                    callee.name.to_string()
-                                };
-                                println!("  -> {call_display}");
+                                    };
+                                    println!("  -> {call_display}");
+                                }
                             }
                         }
                     }
                 }
 
-                RetrieveQuery::Callers { function } => {
+                RetrieveQuery::Callers { function, json } => {
                     let symbols = indexer.find_symbols_by_name(&function);
 
                     if symbols.is_empty() {
-                        println!("Function not found: {function}");
+                        if json {
+                            use codanna::io::format::JsonResponse;
+                            let response = JsonResponse::not_found("Function", &function);
+                            println!("{}", serde_json::to_string_pretty(&response).unwrap());
+                            std::process::exit(3);
+                        } else {
+                            println!("Function not found: {function}");
+                        }
                     } else {
                         let mut all_callers_with_metadata = Vec::new();
                         let mut checked_symbols = 0;
@@ -1032,67 +1228,86 @@ async fn main() {
                             }
                         }
 
-                        if all_callers_with_metadata.is_empty() {
-                            println!(
-                                "No functions call {function} (checked {checked_symbols} symbol(s) with this name)"
-                            );
+                        if json {
+                            // JSON output - return just the calling symbols
+                            use codanna::io::format::JsonResponse;
+                            let calling_symbols: Vec<_> = all_callers_with_metadata
+                                .into_iter()
+                                .map(|(s, _)| s)
+                                .collect();
+
+                            if calling_symbols.is_empty() {
+                                // Return empty array with success status
+                                let response = JsonResponse::success(Vec::<codanna::Symbol>::new());
+                                println!("{}", serde_json::to_string_pretty(&response).unwrap());
+                            } else {
+                                let response = JsonResponse::success(calling_symbols);
+                                println!("{}", serde_json::to_string_pretty(&response).unwrap());
+                            }
                         } else {
-                            println!(
-                                "{} function(s) call {}:",
-                                all_callers_with_metadata.len(),
-                                function
-                            );
-                            for (caller, metadata) in all_callers_with_metadata {
-                                let file_path = indexer
-                                    .get_file_path(caller.file_id)
-                                    .unwrap_or_else(|| "<unknown>".to_string());
+                            // Text output (existing behavior)
+                            if all_callers_with_metadata.is_empty() {
+                                println!(
+                                    "No functions call {function} (checked {checked_symbols} symbol(s) with this name)"
+                                );
+                            } else {
+                                println!(
+                                    "{} function(s) call {function}:",
+                                    all_callers_with_metadata.len()
+                                );
+                                for (caller, metadata) in all_callers_with_metadata {
+                                    let file_path = indexer
+                                        .get_file_path(caller.file_id)
+                                        .unwrap_or_else(|| "<unknown>".to_string());
 
-                                // Parse metadata to extract receiver info
-                                let call_display = if let Some(meta) = metadata {
-                                    if meta.contains("receiver:") && meta.contains("static:") {
-                                        // Parse "receiver:{receiver},static:{is_static}"
-                                        let parts: Vec<&str> = meta.split(',').collect();
-                                        let mut receiver = "";
-                                        let mut is_static = false;
+                                    // Parse metadata to extract receiver info
+                                    let call_display = if let Some(meta) = metadata {
+                                        if meta.contains("receiver:") && meta.contains("static:") {
+                                            // Parse "receiver:{receiver},static:{is_static}"
+                                            let parts: Vec<&str> = meta.split(',').collect();
+                                            let mut receiver = "";
+                                            let mut is_static = false;
 
-                                        for part in parts {
-                                            if let Some(r) = part.strip_prefix("receiver:") {
-                                                receiver = r;
-                                            } else if let Some(s) = part.strip_prefix("static:") {
-                                                is_static = s == "true";
+                                            for part in parts {
+                                                if let Some(r) = part.strip_prefix("receiver:") {
+                                                    receiver = r;
+                                                } else if let Some(s) = part.strip_prefix("static:")
+                                                {
+                                                    is_static = s == "true";
+                                                }
                                             }
-                                        }
 
-                                        let call_str = if !receiver.is_empty() {
-                                            if is_static {
-                                                format!("{receiver}::{function}")
+                                            let call_str = if !receiver.is_empty() {
+                                                if is_static {
+                                                    format!("{receiver}::{function}")
+                                                } else {
+                                                    format!("{receiver}.{function}")
+                                                }
                                             } else {
-                                                format!("{receiver}.{function}")
-                                            }
-                                        } else {
-                                            function.to_string()
-                                        };
+                                                function.to_string()
+                                            };
 
-                                        format!("{} calls {}", caller.name, call_str)
+                                            format!("{} calls {}", caller.name, call_str)
+                                        } else {
+                                            caller.name.to_string()
+                                        }
                                     } else {
                                         caller.name.to_string()
-                                    }
-                                } else {
-                                    caller.name.to_string()
-                                };
+                                    };
 
-                                println!(
-                                    "  <- {} ({}:{})",
-                                    call_display,
-                                    file_path,
-                                    caller.range.start_line + 1
-                                );
+                                    println!(
+                                        "  <- {} ({}:{})",
+                                        call_display,
+                                        file_path,
+                                        caller.range.start_line + 1
+                                    );
+                                }
                             }
                         }
                     }
                 }
 
-                RetrieveQuery::Implementations { trait_name } => {
+                RetrieveQuery::Implementations { trait_name, json } => {
                     use codanna::symbol::context::ContextIncludes;
 
                     // Find all symbols with this name and look for the trait
@@ -1108,7 +1323,15 @@ async fn main() {
 
                             if let Some(ctx) = ctx {
                                 if let Some(impls) = &ctx.relationships.implemented_by {
-                                    if impls.is_empty() {
+                                    if json {
+                                        // JSON output - return implementing types
+                                        use codanna::io::format::JsonResponse;
+                                        let response = JsonResponse::success(impls.clone());
+                                        println!(
+                                            "{}",
+                                            serde_json::to_string_pretty(&response).unwrap()
+                                        );
+                                    } else if impls.is_empty() {
                                         println!("No types implement {trait_name}");
                                     } else {
                                         println!(
@@ -1172,13 +1395,29 @@ async fn main() {
                                             }
                                         }
                                     }
+                                } else if json {
+                                    // JSON output - empty array
+                                    use codanna::io::format::JsonResponse;
+                                    let response =
+                                        JsonResponse::success(Vec::<codanna::Symbol>::new());
+                                    println!(
+                                        "{}",
+                                        serde_json::to_string_pretty(&response).unwrap()
+                                    );
                                 } else {
                                     println!("No types implement {trait_name}");
                                 }
                             } else {
                                 // Fallback to original behavior if context fails
                                 let implementations = indexer.get_implementations(symbol.id);
-                                if implementations.is_empty() {
+                                if json {
+                                    use codanna::io::format::JsonResponse;
+                                    let response = JsonResponse::success(implementations);
+                                    println!(
+                                        "{}",
+                                        serde_json::to_string_pretty(&response).unwrap()
+                                    );
+                                } else if implementations.is_empty() {
                                     println!("No types implement {trait_name}");
                                 } else {
                                     println!(
@@ -1193,7 +1432,14 @@ async fn main() {
                             }
                         }
                         None => {
-                            println!("Trait not found: {trait_name}");
+                            if json {
+                                use codanna::io::format::JsonResponse;
+                                let response = JsonResponse::not_found("Trait", &trait_name);
+                                println!("{}", serde_json::to_string_pretty(&response).unwrap());
+                                std::process::exit(3);
+                            } else {
+                                println!("Trait not found: {trait_name}");
+                            }
                         }
                     }
                 }
@@ -1220,17 +1466,25 @@ async fn main() {
                     }
                 },
 
-                RetrieveQuery::Impact { symbol, depth } => {
+                RetrieveQuery::Impact {
+                    symbol,
+                    depth,
+                    json,
+                } => {
                     match indexer.find_symbol(&symbol) {
                         Some(symbol_id) => {
                             let impacted = indexer.get_impact_radius(symbol_id, depth);
 
-                            if impacted.is_empty() {
+                            if json {
+                                // JSON output - return impacted symbols
+                                use codanna::io::format::JsonResponse;
+                                let response = JsonResponse::success(impacted);
+                                println!("{}", serde_json::to_string_pretty(&response).unwrap());
+                            } else if impacted.is_empty() {
                                 println!("No symbols would be impacted by changing {symbol}");
                             } else {
                                 println!(
-                                    "Changing {} would impact {} symbol(s):",
-                                    symbol,
+                                    "Changing {symbol} would impact {} symbol(s):",
                                     impacted.len()
                                 );
 
@@ -1261,7 +1515,14 @@ async fn main() {
                             }
                         }
                         None => {
-                            println!("Symbol not found: {symbol}");
+                            if json {
+                                use codanna::io::format::JsonResponse;
+                                let response = JsonResponse::not_found("Symbol", &symbol);
+                                println!("{}", serde_json::to_string_pretty(&response).unwrap());
+                                std::process::exit(3);
+                            } else {
+                                println!("Symbol not found: {symbol}");
+                            }
                         }
                     }
                 }
@@ -1271,6 +1532,7 @@ async fn main() {
                     limit,
                     kind,
                     module,
+                    json,
                 } => {
                     // Parse the kind filter if provided
                     let kind_filter = kind.as_ref().and_then(|k| match k.to_lowercase().as_str() {
@@ -1289,7 +1551,12 @@ async fn main() {
 
                     match indexer.search(&query, limit, kind_filter, module.as_deref()) {
                         Ok(results) => {
-                            if results.is_empty() {
+                            if json {
+                                // JSON output - return search results
+                                use codanna::io::format::JsonResponse;
+                                let response = JsonResponse::success(results);
+                                println!("{}", serde_json::to_string_pretty(&response).unwrap());
+                            } else if results.is_empty() {
                                 println!("No results found for query: {query}");
                             } else {
                                 println!(
@@ -1591,14 +1858,32 @@ async fn main() {
                     }
                 }
 
-                RetrieveQuery::Describe { symbol } => {
+                RetrieveQuery::Describe { symbol, json } => {
                     match indexer.find_symbol(&symbol) {
                         Some(symbol_id) => {
                             use codanna::symbol::context::ContextIncludes;
 
                             let ctx = indexer.get_symbol_context(symbol_id, ContextIncludes::ALL);
 
-                            if let Some(ctx) = ctx {
+                            if json {
+                                use codanna::io::format::JsonResponse;
+                                if let Some(ctx) = ctx {
+                                    let response = JsonResponse::success(ctx);
+                                    println!(
+                                        "{}",
+                                        serde_json::to_string_pretty(&response).unwrap()
+                                    );
+                                } else {
+                                    // Fallback: just get the basic symbol
+                                    if let Some(sym) = indexer.get_symbol(symbol_id) {
+                                        let response = JsonResponse::success(sym);
+                                        println!(
+                                            "{}",
+                                            serde_json::to_string_pretty(&response).unwrap()
+                                        );
+                                    }
+                                }
+                            } else if let Some(ctx) = ctx {
                                 // Use the format_full method for comprehensive output
                                 println!("{}", ctx.format_full(""));
 
@@ -1677,7 +1962,14 @@ async fn main() {
                             }
                         }
                         None => {
-                            println!("Symbol not found: {symbol}");
+                            if json {
+                                use codanna::io::format::JsonResponse;
+                                let response = JsonResponse::not_found("Symbol", &symbol);
+                                println!("{}", serde_json::to_string_pretty(&response).unwrap());
+                                std::process::exit(3);
+                            } else {
+                                println!("Symbol not found: {symbol}");
+                            }
                         }
                     }
                 }
@@ -1703,13 +1995,16 @@ async fn main() {
             }
         }
 
-        Commands::Mcp { tool, args } => {
-            // Embedded mode - use already loaded indexer directly
-            let server = codanna::mcp::CodeIntelligenceServer::new(indexer);
-
-            // Parse arguments if provided
-            let arguments = if let Some(args_str) = args {
-                match serde_json::from_str::<serde_json::Value>(&args_str) {
+        Commands::Mcp {
+            tool,
+            positional,
+            args,
+            json,
+        } => {
+            // Build arguments from both positional and --args
+            let mut arguments = if let Some(args_str) = &args {
+                // Parse JSON arguments if provided (backward compatibility)
+                match serde_json::from_str::<serde_json::Value>(args_str) {
                     Ok(serde_json::Value::Object(map)) => Some(map),
                     Ok(_) => {
                         eprintln!("Error: Arguments must be a JSON object");
@@ -1721,8 +2016,513 @@ async fn main() {
                     }
                 }
             } else {
+                // Start with empty map if no --args
+                Some(serde_json::Map::new())
+            };
+
+            // Process positional arguments
+            if !positional.is_empty() {
+                if let Some(ref mut args_map) = arguments {
+                    // Smart parsing: reconstruct values that were split by shell
+                    let mut processed_args = Vec::new();
+                    let mut i = 0;
+
+                    while i < positional.len() {
+                        let arg = &positional[i];
+
+                        if let Some((key, value)) = arg.split_once(':') {
+                            // This is a key:value pair
+                            if value.starts_with('"') && !value.ends_with('"') {
+                                // Opening quote but no closing quote - value was split by shell
+                                // Reconstruct the full value until we find the closing quote
+                                let mut full_value = value.to_string();
+                                i += 1;
+
+                                while i < positional.len() {
+                                    let next_part = &positional[i];
+                                    full_value.push(' ');
+                                    full_value.push_str(next_part);
+
+                                    if next_part.ends_with('"') {
+                                        // Found the closing quote
+                                        break;
+                                    }
+                                    i += 1;
+                                }
+
+                                processed_args.push(format!("{key}:{full_value}"));
+                            } else {
+                                // Complete key:value pair
+                                processed_args.push(arg.clone());
+                            }
+                        } else {
+                            // Not a key:value pair - regular positional argument
+                            processed_args.push(arg.clone());
+                        }
+                        i += 1;
+                    }
+
+                    // Now separate regular args from key:value pairs
+                    let mut regular_args = Vec::new();
+                    let mut key_value_args = Vec::new();
+
+                    for arg in &processed_args {
+                        if arg.contains(':') {
+                            key_value_args.push(arg.clone());
+                        } else {
+                            regular_args.push(arg.clone());
+                        }
+                    }
+
+                    // Handle the first regular argument as positional for simple tools
+                    if !regular_args.is_empty() {
+                        let pos_arg = &regular_args[0];
+                        match tool.as_str() {
+                            "find_symbol" => {
+                                args_map.insert(
+                                    "name".to_string(),
+                                    serde_json::Value::String(pos_arg.clone()),
+                                );
+                            }
+                            "get_calls" | "find_callers" => {
+                                args_map.insert(
+                                    "function_name".to_string(),
+                                    serde_json::Value::String(pos_arg.clone()),
+                                );
+                            }
+                            "analyze_impact" => {
+                                args_map.insert(
+                                    "symbol_name".to_string(),
+                                    serde_json::Value::String(pos_arg.clone()),
+                                );
+                            }
+                            "semantic_search_docs" | "semantic_search_with_context" => {
+                                args_map.insert(
+                                    "query".to_string(),
+                                    serde_json::Value::String(pos_arg.clone()),
+                                );
+                            }
+                            "search_symbols" => {
+                                args_map.insert(
+                                    "query".to_string(),
+                                    serde_json::Value::String(pos_arg.clone()),
+                                );
+                            }
+                            _ => {
+                                if regular_args.len() > 1 || !key_value_args.is_empty() {
+                                    eprintln!(
+                                        "Warning: Unknown tool '{tool}', treating as key:value args"
+                                    );
+                                }
+                            }
+                        }
+
+                        // Warn if there are extra regular arguments
+                        if regular_args.len() > 1 {
+                            eprintln!(
+                                "Warning: Ignoring extra positional arguments after the first one"
+                            );
+                        }
+                    }
+
+                    // Parse and merge key:value pairs
+                    if !key_value_args.is_empty() {
+                        let parsed = parse_key_value_pairs(&key_value_args);
+                        // Merge parsed arguments (they override previous values)
+                        for (key, value) in parsed {
+                            args_map.insert(key, value);
+                        }
+                    }
+                }
+            }
+
+            // Convert to Option<Map> only if we have arguments
+            let arguments = arguments.filter(|map| !map.is_empty());
+
+            // Collect data for find_symbol if JSON output is requested
+            let find_symbol_data = if json && tool == "find_symbol" {
+                let name = arguments
+                    .as_ref()
+                    .and_then(|m| m.get("name"))
+                    .and_then(|v| v.as_str());
+
+                if let Some(symbol_name) = name {
+                    let symbols = indexer.find_symbols_by_name(symbol_name);
+                    if !symbols.is_empty() {
+                        use codanna::symbol::context::ContextIncludes;
+                        let mut results = Vec::new();
+
+                        for symbol in symbols {
+                            // Get full context with callers using the same approach as MCP
+                            let context = indexer.get_symbol_context(
+                                symbol.id,
+                                ContextIncludes::CALLERS
+                                    | ContextIncludes::IMPLEMENTATIONS
+                                    | ContextIncludes::DEFINITIONS,
+                            );
+
+                            // Build result with context if available
+                            if let Some(ctx) = context {
+                                results.push(ctx);
+                            } else {
+                                // Fallback: create minimal context
+                                let file_path = indexer
+                                    .get_file_path(symbol.file_id)
+                                    .unwrap_or_else(|| "unknown".to_string());
+
+                                results.push(codanna::symbol::context::SymbolContext {
+                                    symbol,
+                                    file_path,
+                                    relationships: Default::default(),
+                                });
+                            }
+                        }
+                        Some(results)
+                    } else {
+                        Some(Vec::new())
+                    }
+                } else {
+                    None
+                }
+            } else {
                 None
             };
+
+            // Collect data for get_calls if JSON output is requested
+            let get_calls_data = if json && tool == "get_calls" {
+                let function_name = arguments
+                    .as_ref()
+                    .and_then(|m| m.get("function_name"))
+                    .and_then(|v| v.as_str());
+
+                if let Some(func_name) = function_name {
+                    // Find the function first
+                    let symbols = indexer.find_symbols_by_name(func_name);
+                    if let Some(symbol) = symbols.into_iter().find(|s| {
+                        matches!(
+                            s.kind,
+                            crate::SymbolKind::Function | crate::SymbolKind::Method
+                        )
+                    }) {
+                        use codanna::symbol::context::ContextIncludes;
+                        // Get context with calls
+                        let context = indexer.get_symbol_context(symbol.id, ContextIncludes::CALLS);
+
+                        if let Some(ctx) = context {
+                            // Extract just the calls from the context
+                            if let Some(calls) = ctx.relationships.calls {
+                                Some(calls)
+                            } else {
+                                Some(Vec::new())
+                            }
+                        } else {
+                            Some(Vec::new())
+                        }
+                    } else {
+                        None // Function not found
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            // Collect data for find_callers if JSON output is requested
+            let find_callers_data = if json && tool == "find_callers" {
+                let function_name = arguments
+                    .as_ref()
+                    .and_then(|m| m.get("function_name"))
+                    .and_then(|v| v.as_str());
+
+                if let Some(func_name) = function_name {
+                    // Find all functions with this name
+                    let symbols = indexer.find_symbols_by_name(func_name);
+                    if !symbols.is_empty() {
+                        let mut all_callers = Vec::new();
+
+                        // Check all symbols with this name (could be multiple overloads)
+                        for symbol in &symbols {
+                            let callers = indexer.get_calling_functions_with_metadata(symbol.id);
+                            all_callers.extend(callers);
+                        }
+
+                        Some(all_callers)
+                    } else {
+                        None // Function not found
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            // Collect data for analyze_impact if JSON output is requested
+            let analyze_impact_data = if json && tool == "analyze_impact" {
+                let symbol_name = arguments
+                    .as_ref()
+                    .and_then(|m| m.get("symbol_name"))
+                    .and_then(|v| v.as_str());
+
+                if let Some(sym_name) = symbol_name {
+                    // Find the symbol first
+                    let symbols = indexer.find_symbols_by_name(sym_name);
+                    if let Some(symbol) = symbols.first() {
+                        let max_depth = arguments
+                            .as_ref()
+                            .and_then(|m| m.get("max_depth"))
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(3) as usize;
+
+                        // Get impact radius - returns Vec<SymbolId>
+                        let impacted_ids = indexer.get_impact_radius(symbol.id, Some(max_depth));
+
+                        // Convert SymbolIds to full Symbols
+                        let mut impacted_symbols = Vec::new();
+                        for id in impacted_ids {
+                            if let Some(sym) = indexer.get_symbol(id) {
+                                impacted_symbols.push(sym);
+                            }
+                        }
+
+                        Some(impacted_symbols)
+                    } else {
+                        None // Symbol not found
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            // Collect data for search_symbols if JSON output is requested
+            let search_symbols_data = if json && tool == "search_symbols" {
+                let query = arguments
+                    .as_ref()
+                    .and_then(|m| m.get("query"))
+                    .and_then(|v| v.as_str());
+
+                if let Some(q) = query {
+                    let limit = arguments
+                        .as_ref()
+                        .and_then(|m| m.get("limit"))
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(10) as usize;
+                    let kind = arguments
+                        .as_ref()
+                        .and_then(|m| m.get("kind"))
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                    let module = arguments
+                        .as_ref()
+                        .and_then(|m| m.get("module"))
+                        .and_then(|v| v.as_str());
+
+                    // Parse the kind filter if provided
+                    let kind_filter = kind.as_ref().and_then(|k| match k.to_lowercase().as_str() {
+                        "function" => Some(crate::SymbolKind::Function),
+                        "struct" => Some(crate::SymbolKind::Struct),
+                        "trait" => Some(crate::SymbolKind::Trait),
+                        "method" => Some(crate::SymbolKind::Method),
+                        "field" => Some(crate::SymbolKind::Field),
+                        "module" => Some(crate::SymbolKind::Module),
+                        "constant" => Some(crate::SymbolKind::Constant),
+                        _ => None,
+                    });
+
+                    match indexer.search(q, limit, kind_filter, module) {
+                        Ok(results) => Some(results),
+                        Err(_) => Some(Vec::new()),
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            // Collect data for semantic_search_docs if JSON output is requested
+            #[derive(serde::Serialize)]
+            struct SemanticSearchResult {
+                symbol: Symbol,
+                score: f32,
+            }
+
+            #[derive(serde::Serialize)]
+            struct SemanticSearchWithContextResult {
+                symbol: Symbol,
+                score: f32,
+                context: codanna::symbol::context::SymbolContext,
+            }
+
+            let semantic_search_docs_data = if json && tool == "semantic_search_docs" {
+                if !indexer.has_semantic_search() {
+                    None // Semantic search not enabled
+                } else {
+                    let query = arguments
+                        .as_ref()
+                        .and_then(|m| m.get("query"))
+                        .and_then(|v| v.as_str());
+
+                    if let Some(q) = query {
+                        let limit = arguments
+                            .as_ref()
+                            .and_then(|m| m.get("limit"))
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(10) as usize;
+                        let threshold = arguments
+                            .as_ref()
+                            .and_then(|m| m.get("threshold"))
+                            .and_then(|v| v.as_f64())
+                            .map(|t| t as f32);
+
+                        let results = match threshold {
+                            Some(t) => indexer.semantic_search_docs_with_threshold(q, limit, t),
+                            None => indexer.semantic_search_docs(q, limit),
+                        };
+
+                        match results {
+                            Ok(results) => {
+                                let semantic_results: Vec<SemanticSearchResult> = results
+                                    .into_iter()
+                                    .map(|(symbol, score)| SemanticSearchResult { symbol, score })
+                                    .collect();
+                                Some(semantic_results)
+                            }
+                            Err(_) => Some(Vec::new()),
+                        }
+                    } else {
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+
+            // Collect data for semantic_search_with_context if JSON output is requested
+            let semantic_search_with_context_data = if json
+                && tool == "semantic_search_with_context"
+            {
+                if !indexer.has_semantic_search() {
+                    None // Semantic search not enabled
+                } else {
+                    let query = arguments
+                        .as_ref()
+                        .and_then(|m| m.get("query"))
+                        .and_then(|v| v.as_str());
+
+                    if let Some(q) = query {
+                        let limit = arguments
+                            .as_ref()
+                            .and_then(|m| m.get("limit"))
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(5) as usize; // Default 5 for context version
+                        let threshold = arguments
+                            .as_ref()
+                            .and_then(|m| m.get("threshold"))
+                            .and_then(|v| v.as_f64())
+                            .map(|t| t as f32);
+
+                        let search_results = match threshold {
+                            Some(t) => indexer.semantic_search_docs_with_threshold(q, limit, t),
+                            None => indexer.semantic_search_docs(q, limit),
+                        };
+
+                        match search_results {
+                            Ok(results) => {
+                                use codanna::symbol::context::ContextIncludes;
+                                let context_results: Vec<SemanticSearchWithContextResult> = results
+                                    .into_iter()
+                                    .filter_map(|(symbol, score)| {
+                                        // Get full context for each symbol
+                                        let context = indexer.get_symbol_context(
+                                            symbol.id,
+                                            ContextIncludes::CALLERS
+                                                | ContextIncludes::CALLS
+                                                | ContextIncludes::IMPLEMENTATIONS
+                                                | ContextIncludes::DEFINITIONS,
+                                        );
+
+                                        context.map(|ctx| SemanticSearchWithContextResult {
+                                            symbol,
+                                            score,
+                                            context: ctx,
+                                        })
+                                    })
+                                    .collect();
+                                Some(context_results)
+                            }
+                            Err(_) => Some(Vec::new()),
+                        }
+                    } else {
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+
+            // Check semantic search status before moving indexer
+            let has_semantic_search = indexer.has_semantic_search();
+
+            // If we need JSON output for get_index_info, collect data before moving indexer
+            let index_info_data = if json && tool == "get_index_info" {
+                let symbol_count = indexer.symbol_count();
+                let file_count = indexer.file_count();
+                let relationship_count = indexer.relationship_count();
+
+                // Count symbols by kind
+                let mut kind_counts = std::collections::HashMap::new();
+                for symbol in indexer.get_all_symbols() {
+                    *kind_counts.entry(symbol.kind).or_insert(0) += 1;
+                }
+
+                let functions = *kind_counts.get(&crate::SymbolKind::Function).unwrap_or(&0);
+                let methods = *kind_counts.get(&crate::SymbolKind::Method).unwrap_or(&0);
+                let structs = *kind_counts.get(&crate::SymbolKind::Struct).unwrap_or(&0);
+                let traits = *kind_counts.get(&crate::SymbolKind::Trait).unwrap_or(&0);
+
+                // Get semantic search info
+                let semantic_search = if let Some(metadata) = indexer.get_semantic_metadata() {
+                    SemanticSearchInfo {
+                        enabled: true,
+                        model_name: Some(metadata.model_name),
+                        embeddings: Some(metadata.embedding_count),
+                        dimensions: Some(metadata.dimension),
+                        created: Some(codanna::mcp::format_relative_time(metadata.created_at)),
+                        updated: Some(codanna::mcp::format_relative_time(metadata.updated_at)),
+                    }
+                } else {
+                    SemanticSearchInfo {
+                        enabled: false,
+                        model_name: None,
+                        embeddings: None,
+                        dimensions: None,
+                        created: None,
+                        updated: None,
+                    }
+                };
+
+                Some(IndexInfo {
+                    symbol_count,
+                    file_count: file_count as usize,
+                    relationship_count,
+                    symbol_kinds: SymbolKindBreakdown {
+                        functions,
+                        methods,
+                        structs,
+                        traits,
+                    },
+                    semantic_search,
+                })
+            } else {
+                None
+            };
+
+            // Embedded mode - use already loaded indexer directly
+            let server = codanna::mcp::CodeIntelligenceServer::new(indexer);
 
             // Call the tool directly
             use codanna::mcp::*;
@@ -1888,10 +2688,23 @@ async fn main() {
                         .await
                 }
                 _ => {
-                    eprintln!("Unknown tool: {tool}");
-                    eprintln!(
-                        "Available tools: find_symbol, get_calls, find_callers, analyze_impact, get_index_info, search_symbols, semantic_search_docs, semantic_search_with_context"
-                    );
+                    if json {
+                        use codanna::io::exit_code::ExitCode;
+                        use codanna::io::format::JsonResponse;
+                        let response = JsonResponse::error(
+                            ExitCode::GeneralError,
+                            &format!("Unknown tool: {tool}"),
+                            vec![
+                                "Available tools: find_symbol, get_calls, find_callers, analyze_impact, get_index_info, search_symbols, semantic_search_docs, semantic_search_with_context",
+                            ],
+                        );
+                        println!("{}", serde_json::to_string_pretty(&response).unwrap());
+                    } else {
+                        eprintln!("Unknown tool: {tool}");
+                        eprintln!(
+                            "Available tools: find_symbol, get_calls, find_callers, analyze_impact, get_index_info, search_symbols, semantic_search_docs, semantic_search_with_context"
+                        );
+                    }
                     std::process::exit(1);
                 }
             };
@@ -1899,22 +2712,266 @@ async fn main() {
             // Print result
             match result {
                 Ok(call_result) => {
-                    if let Some(content_vec) = &call_result.content {
-                        for content in content_vec {
-                            match &**content {
-                                rmcp::model::RawContent::Text(text_content) => {
-                                    println!("{}", text_content.text);
-                                }
-                                _ => {
-                                    eprintln!("Warning: Non-text content returned");
+                    if json && tool == "get_index_info" {
+                        // Use pre-collected data for JSON output
+                        if let Some(index_info) = index_info_data {
+                            use codanna::io::format::JsonResponse;
+                            let response = JsonResponse::success(index_info);
+                            println!("{}", serde_json::to_string_pretty(&response).unwrap());
+                        }
+                    } else if json && tool == "find_symbol" {
+                        // Use pre-collected data for JSON output
+                        if let Some(symbol_contexts) = find_symbol_data {
+                            use codanna::io::format::JsonResponse;
+                            if symbol_contexts.is_empty() {
+                                let name = arguments
+                                    .as_ref()
+                                    .and_then(|m| m.get("name"))
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("unknown");
+                                let response = JsonResponse::not_found("Symbol", name);
+                                println!("{}", serde_json::to_string_pretty(&response).unwrap());
+                                std::process::exit(3);
+                            } else {
+                                let response = JsonResponse::success(symbol_contexts);
+                                println!("{}", serde_json::to_string_pretty(&response).unwrap());
+                            }
+                        }
+                    } else if json && tool == "get_calls" {
+                        // Use pre-collected data for JSON output
+                        if let Some(calls) = get_calls_data {
+                            use codanna::io::format::JsonResponse;
+                            let response = JsonResponse::success(calls);
+                            println!("{}", serde_json::to_string_pretty(&response).unwrap());
+                        } else {
+                            // Function not found
+                            let name = arguments
+                                .as_ref()
+                                .and_then(|m| m.get("function_name"))
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("unknown");
+                            use codanna::io::format::JsonResponse;
+                            let response = JsonResponse::not_found("Function", name);
+                            println!("{}", serde_json::to_string_pretty(&response).unwrap());
+                            std::process::exit(3);
+                        }
+                    } else if json && tool == "find_callers" {
+                        // Use pre-collected data for JSON output
+                        if let Some(callers) = find_callers_data {
+                            use codanna::io::format::JsonResponse;
+                            let response = JsonResponse::success(callers);
+                            println!("{}", serde_json::to_string_pretty(&response).unwrap());
+                        } else {
+                            // Function not found
+                            let name = arguments
+                                .as_ref()
+                                .and_then(|m| m.get("function_name"))
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("unknown");
+                            use codanna::io::format::JsonResponse;
+                            let response = JsonResponse::not_found("Function", name);
+                            println!("{}", serde_json::to_string_pretty(&response).unwrap());
+                            std::process::exit(3);
+                        }
+                    } else if json && tool == "analyze_impact" {
+                        // Use pre-collected data for JSON output
+                        if let Some(impacted) = analyze_impact_data {
+                            use codanna::io::format::JsonResponse;
+                            if impacted.is_empty() {
+                                // No symbols would be impacted
+                                let name = arguments
+                                    .as_ref()
+                                    .and_then(|m| m.get("symbol_name"))
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("unknown");
+                                println!("{{");
+                                println!("  \"status\": \"success\",");
+                                println!("  \"data\": {{");
+                                println!("    \"symbol\": \"{name}\",");
+                                println!("    \"impacted_count\": 0,");
+                                println!("    \"impacted_symbols\": [],");
+                                println!(
+                                    "    \"message\": \"No symbols would be impacted by changes to this symbol\""
+                                );
+                                println!("  }}");
+                                println!("}}");
+                            } else {
+                                let response = JsonResponse::success(impacted);
+                                println!("{}", serde_json::to_string_pretty(&response).unwrap());
+                            }
+                        } else {
+                            // Symbol not found
+                            let name = arguments
+                                .as_ref()
+                                .and_then(|m| m.get("symbol_name"))
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("unknown");
+                            use codanna::io::format::JsonResponse;
+                            let response = JsonResponse::not_found("Symbol", name);
+                            println!("{}", serde_json::to_string_pretty(&response).unwrap());
+                            std::process::exit(3);
+                        }
+                    } else if json && tool == "search_symbols" {
+                        // Use pre-collected data for JSON output
+                        if let Some(results) = search_symbols_data {
+                            use codanna::io::format::JsonResponse;
+                            if results.is_empty() {
+                                let query = arguments
+                                    .as_ref()
+                                    .and_then(|m| m.get("query"))
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("unknown");
+                                println!("{{");
+                                println!("  \"status\": \"success\",");
+                                println!("  \"data\": {{");
+                                println!("    \"query\": \"{query}\",");
+                                println!("    \"result_count\": 0,");
+                                println!("    \"results\": [],");
+                                println!("    \"message\": \"No results found for query\"");
+                                println!("  }}");
+                                println!("}}");
+                            } else {
+                                let response = JsonResponse::success(results);
+                                println!("{}", serde_json::to_string_pretty(&response).unwrap());
+                            }
+                        } else {
+                            use codanna::io::exit_code::ExitCode;
+                            use codanna::io::format::JsonResponse;
+                            let response = JsonResponse::error(
+                                ExitCode::GeneralError,
+                                "Failed to execute search",
+                                vec!["Check query syntax"],
+                            );
+                            println!("{}", serde_json::to_string_pretty(&response).unwrap());
+                            std::process::exit(1);
+                        }
+                    } else if json && tool == "semantic_search_docs" {
+                        // Use pre-collected data for JSON output
+                        if let Some(results) = semantic_search_docs_data {
+                            use codanna::io::format::JsonResponse;
+                            if results.is_empty() {
+                                let query = arguments
+                                    .as_ref()
+                                    .and_then(|m| m.get("query"))
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("unknown");
+                                println!("{{");
+                                println!("  \"status\": \"success\",");
+                                println!("  \"data\": {{");
+                                println!("    \"query\": \"{query}\",");
+                                println!("    \"result_count\": 0,");
+                                println!("    \"results\": [],");
+                                println!(
+                                    "    \"message\": \"No semantically similar documentation found\""
+                                );
+                                println!("  }}");
+                                println!("}}");
+                            } else {
+                                let response = JsonResponse::success(results);
+                                println!("{}", serde_json::to_string_pretty(&response).unwrap());
+                            }
+                        } else if !has_semantic_search {
+                            use codanna::io::exit_code::ExitCode;
+                            use codanna::io::format::JsonResponse;
+                            let response = JsonResponse::error(
+                                ExitCode::GeneralError,
+                                "Semantic search is not enabled",
+                                vec![
+                                    "Enable semantic search in settings.toml and rebuild the index",
+                                ],
+                            );
+                            println!("{}", serde_json::to_string_pretty(&response).unwrap());
+                            std::process::exit(1);
+                        } else {
+                            use codanna::io::exit_code::ExitCode;
+                            use codanna::io::format::JsonResponse;
+                            let response = JsonResponse::error(
+                                ExitCode::GeneralError,
+                                "Failed to execute semantic search",
+                                vec!["Check query syntax"],
+                            );
+                            println!("{}", serde_json::to_string_pretty(&response).unwrap());
+                            std::process::exit(1);
+                        }
+                    } else if json && tool == "semantic_search_with_context" {
+                        // Use pre-collected data for JSON output
+                        if let Some(results) = semantic_search_with_context_data {
+                            use codanna::io::format::JsonResponse;
+                            if results.is_empty() {
+                                let query = arguments
+                                    .as_ref()
+                                    .and_then(|m| m.get("query"))
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("unknown");
+                                println!("{{");
+                                println!("  \"status\": \"success\",");
+                                println!("  \"data\": {{");
+                                println!("    \"query\": \"{query}\",");
+                                println!("    \"result_count\": 0,");
+                                println!("    \"results\": [],");
+                                println!(
+                                    "    \"message\": \"No semantically similar documentation found\""
+                                );
+                                println!("  }}");
+                                println!("}}");
+                            } else {
+                                let response = JsonResponse::success(results);
+                                println!("{}", serde_json::to_string_pretty(&response).unwrap());
+                            }
+                        } else if !has_semantic_search {
+                            use codanna::io::exit_code::ExitCode;
+                            use codanna::io::format::JsonResponse;
+                            let response = JsonResponse::error(
+                                ExitCode::GeneralError,
+                                "Semantic search is not enabled",
+                                vec![
+                                    "Enable semantic search in settings.toml and rebuild the index",
+                                ],
+                            );
+                            println!("{}", serde_json::to_string_pretty(&response).unwrap());
+                            std::process::exit(1);
+                        } else {
+                            use codanna::io::exit_code::ExitCode;
+                            use codanna::io::format::JsonResponse;
+                            let response = JsonResponse::error(
+                                ExitCode::GeneralError,
+                                "Failed to execute semantic search with context",
+                                vec!["Check query syntax"],
+                            );
+                            println!("{}", serde_json::to_string_pretty(&response).unwrap());
+                            std::process::exit(1);
+                        }
+                    } else {
+                        // Default text output
+                        if let Some(content_vec) = &call_result.content {
+                            for content in content_vec {
+                                match &**content {
+                                    rmcp::model::RawContent::Text(text_content) => {
+                                        println!("{}", text_content.text);
+                                    }
+                                    _ => {
+                                        eprintln!("Warning: Non-text content returned");
+                                    }
                                 }
                             }
                         }
                     }
                 }
                 Err(e) => {
-                    eprintln!("Error calling tool: {}", e.message);
-                    std::process::exit(1);
+                    if json {
+                        use codanna::io::exit_code::ExitCode;
+                        use codanna::io::format::JsonResponse;
+                        let response = JsonResponse::error(
+                            ExitCode::GeneralError,
+                            &e.message,
+                            vec!["Check the tool name and arguments"],
+                        );
+                        println!("{}", serde_json::to_string_pretty(&response).unwrap());
+                        std::process::exit(1);
+                    } else {
+                        eprintln!("Error calling tool: {}", e.message);
+                        std::process::exit(1);
+                    }
                 }
             }
         }

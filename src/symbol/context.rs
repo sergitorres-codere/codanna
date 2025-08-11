@@ -2,9 +2,10 @@
 
 use crate::{Symbol, SymbolKind, Visibility};
 use bitflags::bitflags;
+use serde::Serialize;
 
 /// Comprehensive context for a symbol including all relationships
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct SymbolContext {
     /// The symbol itself with all its metadata
     pub symbol: Symbol,
@@ -15,7 +16,7 @@ pub struct SymbolContext {
 }
 
 /// Container for all types of symbol relationships
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct SymbolRelationships {
     /// What traits this type implements
     pub implements: Option<Vec<Symbol>>,

@@ -14,6 +14,7 @@ use thiserror::Error;
 use tokio::sync::{RwLock, mpsc};
 use tokio::time::{Duration, sleep};
 
+use crate::mcp::notifications::{FileChangeEvent, NotificationBroadcaster};
 use crate::{IndexError, IndexResult, SimpleIndexer};
 
 /// Errors specific to file watching operations
@@ -64,6 +65,8 @@ pub struct FileSystemWatcher {
     _watcher: notify::RecommendedWatcher,
     /// MCP debug flag for controlling verbosity
     mcp_debug: bool,
+    /// Optional notification broadcaster for MCP notifications
+    broadcaster: Option<Arc<NotificationBroadcaster>>,
 }
 
 impl FileSystemWatcher {
@@ -101,7 +104,14 @@ impl FileSystemWatcher {
             event_rx: rx,
             _watcher: watcher,
             mcp_debug,
+            broadcaster: None,
         })
+    }
+
+    /// Set the notification broadcaster
+    pub fn with_broadcaster(mut self, broadcaster: Arc<NotificationBroadcaster>) -> Self {
+        self.broadcaster = Some(broadcaster);
+        self
     }
 
     /// Get the list of files that are currently indexed
@@ -172,14 +182,24 @@ impl FileSystemWatcher {
 
         // 3. Start watching those directories
         for dir in &watch_dirs {
-            match self._watcher.watch(dir, RecursiveMode::NonRecursive) {
+            // Convert relative paths to absolute for the watcher
+            let watch_path = if dir.is_absolute() {
+                dir.clone()
+            } else {
+                workspace_root.join(dir)
+            };
+
+            match self
+                ._watcher
+                .watch(&watch_path, RecursiveMode::NonRecursive)
+            {
                 Ok(_) => {
                     if self.mcp_debug {
-                        eprintln!("  Watching: {}", dir.display());
+                        eprintln!("  Watching: {}", watch_path.display());
                     }
                 }
                 Err(e) => {
-                    eprintln!("  Warning: Failed to watch {}: {}", dir.display(), e);
+                    eprintln!("  Warning: Failed to watch {}: {}", watch_path.display(), e);
                     // Continue with other directories
                 }
             }
@@ -187,7 +207,7 @@ impl FileSystemWatcher {
 
         // 4. Convert paths to absolute paths in HashSet for efficient lookup
         // The notify crate gives us absolute paths, but our index stores relative paths
-        let indexed_set: HashSet<PathBuf> = indexed_paths
+        let mut indexed_set: HashSet<PathBuf> = indexed_paths
             .into_iter()
             .map(|p| {
                 if p.is_absolute() {
@@ -202,7 +222,13 @@ impl FileSystemWatcher {
         let mut pending_changes: HashMap<PathBuf, Instant> = HashMap::new();
         let debounce_duration = Duration::from_millis(self.debounce_ms);
 
-        // 6. Event handling loop with debouncing
+        // 6. Subscribe to broadcast notifications if broadcaster is available
+        let mut broadcast_receiver = self.broadcaster.as_ref().map(|b| b.subscribe());
+        if broadcast_receiver.is_some() {
+            eprintln!("File watcher subscribed to index reload notifications");
+        }
+
+        // 7. Event handling loop with debouncing
         eprintln!("File watcher started. Press Ctrl+C to stop.");
 
         loop {
@@ -215,11 +241,46 @@ impl FileSystemWatcher {
                 Some(res) = self.event_rx.recv() => {
                     match res {
                         Ok(event) => {
-                            // Record changes for indexed files
+                            // Handle different event types for indexed files
                             for path in &event.paths {
-                                if indexed_set.contains(path) && matches!(event.kind, EventKind::Modify(_)) {
-                                    // Record this change with current timestamp
-                                    pending_changes.insert(path.clone(), Instant::now());
+                                if indexed_set.contains(path) {
+                                    match event.kind {
+                                        EventKind::Modify(_) => {
+                                            // Record this change with current timestamp
+                                            pending_changes.insert(path.clone(), Instant::now());
+                                        }
+                                        EventKind::Remove(_) => {
+                                            // File was deleted - remove it from index immediately
+                                            let path_display = path.display();
+                                            eprintln!("Detected deletion of indexed file: {path_display}");
+                                            eprintln!("  Removing from index...");
+
+                                            // Convert absolute path to relative path for the index
+                                            let relative_path = if path.is_absolute() {
+                                                if let Ok(cwd) = std::env::current_dir() {
+                                                    match path.strip_prefix(&cwd) {
+                                                        Ok(rel) => rel.to_path_buf(),
+                                                        Err(_) => path.clone(),
+                                                    }
+                                                } else {
+                                                    path.clone()
+                                                }
+                                            } else {
+                                                path.clone()
+                                            };
+
+                                            let relative_display = relative_path.display();
+                                            eprintln!("  Using relative path: {relative_display}");
+
+                                            let mut indexer = self.indexer.write().await;
+                                            if let Err(e) = indexer.remove_file(&relative_path) {
+                                                eprintln!("  ✗ Failed to remove from index: {e}");
+                                            } else {
+                                                eprintln!("  ✓ Removed from index successfully");
+                                            }
+                                        }
+                                        _ => {} // Ignore other event types
+                                    }
                                 }
                             }
                         }
@@ -256,6 +317,18 @@ impl FileSystemWatcher {
                                 match result {
                                     IndexingResult::Indexed(_) => {
                                         eprintln!("  ✓ Re-indexed successfully (file updated)");
+
+                                        // Send notification if broadcaster is available
+                                        if let Some(ref broadcaster) = self.broadcaster {
+                                            if self.mcp_debug {
+                                                eprintln!("DEBUG: FileSystemWatcher sending notification for: {}", path.display());
+                                            }
+                                            broadcaster.send(FileChangeEvent::FileReindexed {
+                                                path: path.clone(),
+                                            });
+                                        } else if self.mcp_debug {
+                                            eprintln!("DEBUG: No broadcaster available to send notification");
+                                        }
                                     }
                                     IndexingResult::Cached(_) => {
                                         eprintln!("  ✓ File unchanged (hash match, skipped)");
@@ -265,6 +338,79 @@ impl FileSystemWatcher {
                             Err(e) => {
                                 eprintln!("  ✗ Re-index failed: {e}");
                             }
+                        }
+                    }
+                }
+
+                // Handle broadcast notifications for index reloads
+                Some(event) = async {
+                    match &mut broadcast_receiver {
+                        Some(rx) => rx.recv().await.ok(),
+                        None => None,
+                    }
+                } => {
+                    match event {
+                        FileChangeEvent::IndexReloaded => {
+                            eprintln!("File watcher received IndexReloaded notification");
+                            eprintln!("  Refreshing watched file list...");
+
+                            // Get the updated list of indexed files
+                            let new_indexed_paths = self.get_indexed_paths().await;
+
+                            // Convert to absolute paths
+                            let new_indexed_set: HashSet<PathBuf> = new_indexed_paths
+                                .into_iter()
+                                .map(|p| {
+                                    if p.is_absolute() {
+                                        p
+                                    } else {
+                                        workspace_root.join(&p)
+                                    }
+                                })
+                                .collect();
+
+                            // Calculate differences
+                            let added: Vec<_> = new_indexed_set.difference(&indexed_set).cloned().collect();
+                            let removed: Vec<_> = indexed_set.difference(&new_indexed_set).cloned().collect();
+
+                            if !added.is_empty() {
+                                let added_count = added.len();
+                                eprintln!("  Added {added_count} new files to watch");
+                                if self.mcp_debug {
+                                    for path in &added {
+                                        let path_display = path.display();
+                                        eprintln!("    + {path_display}");
+                                    }
+                                }
+
+                                // Watch new directories if needed
+                                let new_dirs = Self::compute_watch_dirs(&added);
+                                for watch_path in new_dirs {
+                                    if let Err(e) = self._watcher.watch(&watch_path, RecursiveMode::NonRecursive) {
+                                        let watch_display = watch_path.display();
+                                        eprintln!("  Warning: Failed to watch {watch_display}: {e}");
+                                    }
+                                }
+                            }
+
+                            if !removed.is_empty() {
+                                let removed_count = removed.len();
+                                eprintln!("  Removed {removed_count} files from watch");
+                                if self.mcp_debug {
+                                    for path in &removed {
+                                        let path_display = path.display();
+                                        eprintln!("    - {path_display}");
+                                    }
+                                }
+                            }
+
+                            // Update the indexed set
+                            indexed_set = new_indexed_set;
+                            let total_files = indexed_set.len();
+                            eprintln!("  ✓ Now watching {total_files} files");
+                        }
+                        _ => {
+                            // Ignore other event types
                         }
                     }
                 }
@@ -288,7 +434,13 @@ impl FileSystemWatcher {
 
         for path in paths {
             if let Some(parent) = path.parent() {
-                dirs.insert(parent.to_path_buf());
+                // Handle root-level files (parent is empty string)
+                if parent.as_os_str().is_empty() {
+                    // Watch current directory for root-level files
+                    dirs.insert(PathBuf::from("."));
+                } else {
+                    dirs.insert(parent.to_path_buf());
+                }
             }
         }
 

@@ -2,6 +2,7 @@ pub mod context;
 
 use crate::types::{CompactString, FileId, Range, SymbolId, SymbolKind, compact_string};
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 /// Visibility of a symbol
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -128,6 +129,43 @@ impl Symbol {
             symbol_id: self.id.value(),
             _padding: [0; 2],
         }
+    }
+}
+
+impl fmt::Display for Symbol {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.name)?;
+
+        if let Some(sig) = &self.signature {
+            write!(f, "\n  Signature: {sig}")?;
+        }
+
+        write!(f, "\n  Kind: {:?}", self.kind)?;
+        write!(f, "\n  Visibility: {:?}", self.visibility)?;
+        write!(
+            f,
+            "\n  Location: file#{} {}:{}-{}:{}",
+            self.file_id.value(),
+            self.range.start_line,
+            self.range.start_column,
+            self.range.end_line,
+            self.range.end_column
+        )?;
+
+        if let Some(module) = &self.module_path {
+            write!(f, "\n  Module: {module}")?;
+        }
+
+        if let Some(doc) = &self.doc_comment {
+            let truncated = if doc.len() > 100 {
+                format!("{}...", &doc[..100])
+            } else {
+                doc.to_string()
+            };
+            write!(f, "\n  Doc: {truncated}")?;
+        }
+
+        Ok(())
     }
 }
 

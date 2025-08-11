@@ -66,6 +66,8 @@ pub struct SimpleIndexer {
     trait_resolver: TraitResolver,
     settings: Arc<Settings>,
     document_index: DocumentIndex,
+    /// Optional fast symbol cache for O(1) lookups
+    symbol_cache: Option<Arc<crate::storage::symbol_cache::ConcurrentSymbolCache>>,
     /// Unresolved relationships to be resolved in a second pass
     unresolved_relationships: Vec<UnresolvedRelationship>,
     /// Variable type information for method resolution
@@ -83,6 +85,12 @@ pub struct SimpleIndexer {
     pending_embeddings: Vec<(SymbolId, String)>,
     /// Optional semantic search for documentation
     semantic_search: Option<Arc<Mutex<SimpleSemanticSearch>>>,
+}
+
+impl Default for SimpleIndexer {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SimpleIndexer {
@@ -108,12 +116,17 @@ impl SimpleIndexer {
             DocumentIndex::new(tantivy_path).expect("Failed to create Tantivy index");
 
         let debug = settings.debug;
+
+        // Try to load symbol cache if it exists
+        let symbol_cache = None; // Will be loaded lazily when index is opened
+
         let mut indexer = Self {
             parser_factory: ParserFactory::new(settings.clone()),
             import_resolver: ImportResolver::with_debug(debug),
             trait_resolver: TraitResolver::new(),
             settings,
             document_index,
+            symbol_cache,
             unresolved_relationships: Vec::new(),
             variable_types: std::collections::HashMap::new(),
             trait_symbols_by_file: std::collections::HashMap::new(),
@@ -131,6 +144,69 @@ impl SimpleIndexer {
         );
         if let Err(e) = indexer.reconstruct_trait_resolver() {
             eprintln!("WARNING: Failed to reconstruct trait resolver: {e}");
+        }
+
+        // Try to load symbol cache for fast lookups
+        if let Err(e) = indexer.load_symbol_cache() {
+            debug_print!(indexer, "Could not load symbol cache: {e}");
+        }
+
+        indexer
+    }
+
+    /// Create indexer with lazy initialization for faster CLI startup
+    pub fn with_settings_lazy(settings: Arc<Settings>, skip_trait_resolver: bool) -> Self {
+        // Construct the full index path
+        let index_base = if let Some(ref workspace_root) = settings.workspace_root {
+            workspace_root.join(&settings.index_path)
+        } else {
+            settings.index_path.clone()
+        };
+
+        // Tantivy data always goes under index_path/tantivy
+        let tantivy_path = index_base.join("tantivy");
+
+        let document_index =
+            DocumentIndex::new(tantivy_path).expect("Failed to create Tantivy index");
+
+        let debug = settings.debug;
+
+        let mut indexer = Self {
+            parser_factory: ParserFactory::new(settings.clone()),
+            import_resolver: ImportResolver::with_debug(debug),
+            trait_resolver: TraitResolver::new(),
+            settings,
+            document_index,
+            symbol_cache: None,
+            unresolved_relationships: Vec::new(),
+            variable_types: std::collections::HashMap::new(),
+            trait_symbols_by_file: std::collections::HashMap::new(),
+            method_calls_by_file: std::collections::HashMap::new(),
+            vector_engine: None,
+            embedding_generator: None,
+            pending_embeddings: Vec::new(),
+            semantic_search: None,
+        };
+
+        // Only reconstruct trait resolver if needed (for trait-related commands)
+        if !skip_trait_resolver {
+            debug_print!(
+                indexer,
+                "Reconstructing trait resolver from stored relationships"
+            );
+            if let Err(e) = indexer.reconstruct_trait_resolver() {
+                eprintln!("WARNING: Failed to reconstruct trait resolver: {e}");
+            }
+        } else {
+            debug_print!(
+                indexer,
+                "Skipping trait resolver reconstruction for faster startup"
+            );
+        }
+
+        // Try to load symbol cache for fast lookups
+        if let Err(e) = indexer.load_symbol_cache() {
+            debug_print!(indexer, "Could not load symbol cache: {e}");
         }
 
         indexer
@@ -285,6 +361,13 @@ impl SimpleIndexer {
             _ => {} // No vector support or no pending embeddings
         }
 
+        // Build or update symbol cache after batch commit
+        // This happens alongside embedding cache for consistency
+        if let Err(e) = self.build_symbol_cache() {
+            // Non-fatal: we can continue without cache
+            eprintln!("Warning: Failed to build symbol cache: {e}");
+        }
+
         Ok(())
     }
 
@@ -422,6 +505,78 @@ impl SimpleIndexer {
         self.reindex_file_content(path, path_str, file_id, &content)?;
 
         Ok(crate::IndexingResult::Indexed(file_id))
+    }
+
+    /// Remove a file and all its symbols from the index
+    pub fn remove_file(&mut self, path: impl AsRef<Path>) -> IndexResult<()> {
+        let path = path.as_ref();
+        let path_display = path.display();
+        eprintln!("  remove_file called with path: {path_display}");
+        let path_str = path.to_str().ok_or_else(|| IndexError::FileRead {
+            path: path.to_path_buf(),
+            source: std::io::Error::new(std::io::ErrorKind::InvalidInput, "Invalid UTF-8 in path"),
+        })?;
+        eprintln!("  Querying index for path: '{path_str}'");
+
+        // Get the FileId for this file path
+        let file_info =
+            self.document_index
+                .get_file_info(path_str)
+                .map_err(|e| IndexError::TantivyError {
+                    operation: "get_file_info".to_string(),
+                    cause: e.to_string(),
+                })?;
+
+        eprintln!("  get_file_info result: {file_info:?}");
+
+        let symbols_to_remove = if let Some(info) = file_info {
+            // Get all symbols for this file before removing
+            self.document_index
+                .find_symbols_by_file(info.0)
+                .map_err(|e| IndexError::TantivyError {
+                    operation: "find_symbols_by_file".to_string(),
+                    cause: e.to_string(),
+                })?
+        } else {
+            // File not in index, nothing to remove
+            eprintln!("  File not found in index: {path_str}");
+            return Ok(());
+        };
+
+        // Remove ALL documents for this file from Tantivy
+        self.document_index
+            .remove_file_documents(path_str)
+            .map_err(|e| IndexError::TantivyError {
+                operation: "remove_file_documents".to_string(),
+                cause: e.to_string(),
+            })?;
+
+        // Remove embeddings for the symbols if semantic search is enabled
+        if !symbols_to_remove.is_empty() {
+            if let Some(semantic) = &self.semantic_search {
+                let symbol_ids: Vec<SymbolId> = symbols_to_remove.iter().map(|s| s.id).collect();
+                semantic.lock().unwrap().remove_embeddings(&symbol_ids);
+            }
+        }
+
+        let symbol_count = symbols_to_remove.len();
+        eprintln!("  Removed {symbol_count} symbols from {path_str}");
+
+        // Commit the changes to persist them
+        self.document_index
+            .commit_batch()
+            .map_err(|e| IndexError::TantivyError {
+                operation: "commit after removal".to_string(),
+                cause: e.to_string(),
+            })?;
+        eprintln!("  Changes committed to index");
+
+        // Rebuild symbol cache after file removal to remove stale entries
+        if let Err(e) = self.build_symbol_cache() {
+            eprintln!("Warning: Failed to rebuild symbol cache after file removal: {e}");
+        }
+
+        Ok(())
     }
 
     /// Read file content and calculate its hash
@@ -1143,6 +1298,22 @@ impl SimpleIndexer {
     // Query methods using Tantivy
 
     pub fn find_symbol(&self, name: &str) -> Option<SymbolId> {
+        // Try cache first for O(1) lookup
+        if let Some(ref cache) = self.symbol_cache {
+            if let Some(id) = cache.lookup_by_name(name) {
+                debug_print!(self, "Symbol '{}' found in cache (fast path)", name);
+                return Some(id);
+            }
+            debug_print!(
+                self,
+                "Symbol '{}' not in cache, falling back to Tantivy",
+                name
+            );
+        } else {
+            debug_print!(self, "Symbol cache not loaded");
+        }
+
+        // Fallback to Tantivy
         self.document_index
             .find_symbols_by_name(name)
             .ok()
@@ -1150,6 +1321,8 @@ impl SimpleIndexer {
     }
 
     pub fn find_symbols_by_name(&self, name: &str) -> Vec<Symbol> {
+        // For now, still use Tantivy for full symbol retrieval
+        // Cache only helps with ID lookups
         self.document_index
             .find_symbols_by_name(name)
             .unwrap_or_default()
@@ -2477,25 +2650,66 @@ impl SimpleIndexer {
 
         Ok(())
     }
-}
 
-impl Default for SimpleIndexer {
-    fn default() -> Self {
-        Self::new()
+    /// Build or rebuild the symbol cache from current index
+    pub fn build_symbol_cache(&mut self) -> IndexResult<()> {
+        let cache_path = self.get_cache_path();
+
+        // Get all symbols from the index (use the existing public method)
+        let all_symbols = self.get_all_symbols();
+
+        // Build the cache file
+        crate::storage::symbol_cache::SymbolHashCache::build_from_symbols(
+            &cache_path,
+            all_symbols.iter(),
+        )
+        .map_err(|e| IndexError::General(format!("Failed to build symbol cache: {e}")))?;
+
+        // Load the cache for immediate use
+        self.load_symbol_cache()?;
+
+        debug_print!(
+            self,
+            "Built symbol cache with {} symbols",
+            all_symbols.len()
+        );
+        Ok(())
     }
-}
 
-impl std::fmt::Debug for SimpleIndexer {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SimpleIndexer")
-            .field("settings", &self.settings)
-            .field("document_index", &self.document_index)
-            .field("unresolved_relationships", &self.unresolved_relationships)
-            .field("trait_symbols_count", &self.trait_symbols_by_file.len())
-            .field("vector_engine", &self.vector_engine.is_some())
-            .field("embedding_generator", &self.embedding_generator.is_some())
-            .field("pending_embeddings_count", &self.pending_embeddings.len())
-            .finish()
+    /// Load symbol cache if it exists
+    pub fn load_symbol_cache(&mut self) -> IndexResult<()> {
+        let cache_path = self.get_cache_path();
+
+        if cache_path.exists() {
+            match crate::storage::symbol_cache::SymbolHashCache::open(&cache_path) {
+                Ok(cache) => {
+                    self.symbol_cache = Some(Arc::new(
+                        crate::storage::symbol_cache::ConcurrentSymbolCache::new(cache),
+                    ));
+                    debug_print!(self, "Loaded symbol cache from {}", cache_path.display());
+                    Ok(())
+                }
+                Err(e) => {
+                    eprintln!("Warning: Failed to load symbol cache: {e}");
+                    self.symbol_cache = None;
+                    Ok(()) // Non-fatal, continue without cache
+                }
+            }
+        } else {
+            debug_print!(self, "No symbol cache found at {}", cache_path.display());
+            Ok(())
+        }
+    }
+
+    /// Get the path for the symbol cache file
+    fn get_cache_path(&self) -> PathBuf {
+        let index_base = if let Some(ref workspace_root) = self.settings.workspace_root {
+            workspace_root.join(&self.settings.index_path)
+        } else {
+            self.settings.index_path.clone()
+        };
+
+        index_base.join("symbol_cache.bin")
     }
 }
 

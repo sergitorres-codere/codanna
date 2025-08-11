@@ -1,6 +1,8 @@
 //! Table formatting utilities for structured output.
 
-use comfy_table::{Attribute, Cell, Table, presets::UTF8_FULL};
+use comfy_table::{
+    Attribute, Cell, Color, Table, modifiers::UTF8_ROUND_CORNERS, presets::UTF8_FULL,
+};
 
 /// Builder for creating formatted tables.
 pub struct TableBuilder {
@@ -18,6 +20,8 @@ impl TableBuilder {
     pub fn new() -> Self {
         let mut table = Table::new();
         table.load_preset(UTF8_FULL);
+        // Apply rounded corners
+        table.apply_modifier(UTF8_ROUND_CORNERS);
         Self { table }
     }
 
@@ -53,6 +57,8 @@ pub fn create_benchmark_table(
 ) -> String {
     let mut table = Table::new();
     table.load_preset(UTF8_FULL);
+    // Apply rounded corners for a modern look
+    table.apply_modifier(UTF8_ROUND_CORNERS);
 
     // Create the header
     table.set_header(vec![
@@ -75,14 +81,26 @@ pub fn create_benchmark_table(
 
     table.add_row(vec!["Rate", &format!("{rate:.0} symbols/second")]);
 
-    // Performance indicator (plain text without ANSI codes)
+    // Performance indicator with color
     let performance_ratio = rate / 10_000.0;
-    let performance_text = if performance_ratio >= 1.0 {
-        format!("✓ {performance_ratio:.1}x faster than target")
+    let (performance_text, color) = if performance_ratio >= 1.0 {
+        (
+            format!("✓ {performance_ratio:.1}x faster than target"),
+            Color::Green,
+        )
     } else {
-        format!("⚠ {performance_ratio:.1}x of target")
+        (
+            format!("⚠ {performance_ratio:.1}x of target"),
+            Color::Yellow,
+        )
     };
-    table.add_row(vec!["Performance", &performance_text]);
+
+    table.add_row(vec![
+        Cell::new("Performance"),
+        Cell::new(performance_text)
+            .fg(color)
+            .add_attribute(Attribute::Bold),
+    ]);
 
     table.to_string()
 }
@@ -93,6 +111,8 @@ pub fn create_summary_table(
 ) -> String {
     let mut table = Table::new();
     table.load_preset(UTF8_FULL);
+    // Apply rounded corners for consistency
+    table.apply_modifier(UTF8_ROUND_CORNERS);
 
     // Header
     table.set_header(vec![

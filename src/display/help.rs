@@ -34,51 +34,16 @@ pub fn create_help_text() -> String {
     let mut help = String::new();
 
     // Quick Start section
-    let quick_start = r#"$ codanna init              # Set up in current directory
+    let quick_start = r#"$ codanna init              # Initialize in current directory
 $ codanna index src         # Index your source code  
-$ codanna mcp-test          # Verify Claude can connect"#;
+$ codanna serve --http --watch      # HTTP server with OAuth
+$ codanna serve --https --watch     # HTTPS server with TLS"#;
 
     help.push_str(&format_help_section("QUICK START", quick_start, true));
     help.push('\n');
 
-    // Examples section
-    let examples = r#"# First time setup
-$ codanna init
-$ codanna index src --progress
-$ codanna mcp-test
-
-# Index a single file
-$ codanna index src/main.rs
-
-# Check what calls your main function  
-$ codanna retrieve callers main
-
-# Natural language search (if semantic search enabled)
-$ codanna mcp semantic_search_docs --args '{"query": "error handling"}'
-
-# Show detailed loading information
-$ codanna --info retrieve symbol main"#;
-
-    help.push_str(&format_help_section("EXAMPLES", examples, true));
-    help.push('\n');
-
-    // Benchmarks section
-    let benchmarks = r#"# Test parser performance (all languages)
-$ codanna benchmark all
-
-# Benchmark specific language
-$ codanna benchmark python
-$ codanna benchmark rust
-
-# Benchmark with your own file
-$ codanna benchmark python --file large_module.py"#;
-
-    help.push_str(&format_help_section("BENCHMARKS", benchmarks, true));
-    help.push('\n');
-
     // Learn More section
-    let learn_more = r#"GitHub: https://github.com/bartolli/codanna
-Commands: codanna help <COMMAND>"#;
+    let learn_more = r#"GitHub: https://github.com/bartolli/codanna"#;
 
     help.push_str(&format_help_section("LEARN MORE", learn_more, true));
 

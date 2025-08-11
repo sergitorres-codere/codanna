@@ -317,7 +317,7 @@ impl ClusterCache {
 }
 
 /// Search result with rich metadata
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct SearchResult {
     pub symbol_id: SymbolId,
     pub name: String,
@@ -334,7 +334,7 @@ pub struct SearchResult {
 }
 
 /// Highlighted text region
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct TextHighlight {
     pub field: String,
     pub start: usize,

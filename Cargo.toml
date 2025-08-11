@@ -1,6 +1,6 @@
 [package]
 name = "codanna"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["Angel Bartolli <bartolli@gmail.com>"]
 edition = "2024"
 description = "Code Intelligence for Large Language Models"
@@ -21,7 +21,7 @@ strip = true
 [dependencies]
 anyhow = "1.0.98"
 bitflags = "2.6"
-clap = { version = "4.5.41", features = ["derive"] }
+clap = { version = "4.5.41", features = ["derive", "color", "env"] }
 crossbeam-channel = "0.5.15"
 dashmap = "6.1.0"
 dirs = "6.0.0"

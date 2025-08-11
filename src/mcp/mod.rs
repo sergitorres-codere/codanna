@@ -20,23 +20,27 @@
 pub mod client;
 pub mod http_server;
 pub mod https_server;
+pub mod notifications;
 pub mod watcher;
 
 use rmcp::{
     ServerHandler,
     handler::server::{router::tool::ToolRouter, tool::Parameters},
     model::{ErrorData as McpError, *},
-    schemars, tool, tool_handler, tool_router,
+    schemars,
+    service::{Peer, RequestContext, RoleServer},
+    tool, tool_handler, tool_router,
 };
 use serde::{Deserialize, Serialize};
+use serde_json;
 use std::future::Future;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 
 use crate::{IndexPersistence, Settings, SimpleIndexer, Symbol};
 
 /// Format a Unix timestamp as relative time (e.g., "2 hours ago")
-fn format_relative_time(timestamp: u64) -> String {
+pub fn format_relative_time(timestamp: u64) -> String {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -145,8 +149,9 @@ fn default_context_limit() -> usize {
 
 #[derive(Clone)]
 pub struct CodeIntelligenceServer {
-    indexer: Arc<RwLock<SimpleIndexer>>,
+    pub indexer: Arc<RwLock<SimpleIndexer>>,
     tool_router: ToolRouter<Self>,
+    peer: Arc<Mutex<Option<Peer<RoleServer>>>>,
 }
 
 #[tool_router]
@@ -155,6 +160,7 @@ impl CodeIntelligenceServer {
         Self {
             indexer: Arc::new(RwLock::new(indexer)),
             tool_router: Self::tool_router(),
+            peer: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -163,6 +169,7 @@ impl CodeIntelligenceServer {
         Self {
             indexer,
             tool_router: Self::tool_router(),
+            peer: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -172,12 +179,38 @@ impl CodeIntelligenceServer {
         Self {
             indexer,
             tool_router: Self::tool_router(),
+            peer: Arc::new(Mutex::new(None)),
         }
     }
 
     /// Get a reference to the indexer Arc for external management (e.g., hot-reload)
     pub fn get_indexer_arc(&self) -> Arc<RwLock<SimpleIndexer>> {
         self.indexer.clone()
+    }
+
+    /// Send a notification when a file is re-indexed
+    pub async fn notify_file_reindexed(&self, file_path: &str) {
+        let peer_guard = self.peer.lock().await;
+        if let Some(peer) = peer_guard.as_ref() {
+            // Send a resource updated notification
+            let _ = peer
+                .notify_resource_updated(ResourceUpdatedNotificationParam {
+                    uri: format!("file://{file_path}"),
+                })
+                .await;
+
+            // Also send a logging message for visibility
+            let _ = peer
+                .notify_logging_message(LoggingMessageNotificationParam {
+                    level: LoggingLevel::Info,
+                    logger: Some("codanna".to_string()),
+                    data: serde_json::json!({
+                        "action": "re-indexed",
+                        "file": file_path
+                    }),
+                })
+                .await;
+        }
     }
 
     pub async fn from_persistence(settings: &Settings) -> Result<Self, Box<dyn std::error::Error>> {
@@ -1104,5 +1137,18 @@ impl ServerHandler for CodeIntelligenceServer {
                 .to_string()
             ),
         }
+    }
+
+    async fn initialize(
+        &self,
+        _request: InitializeRequestParam,
+        context: RequestContext<RoleServer>,
+    ) -> Result<InitializeResult, McpError> {
+        // Store the peer reference for sending notifications
+        let mut peer_guard = self.peer.lock().await;
+        *peer_guard = Some(context.peer.clone());
+
+        // Return the server info
+        Ok(self.get_info())
     }
 }

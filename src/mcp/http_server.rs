@@ -5,7 +5,9 @@
 
 #[cfg(feature = "http-server")]
 pub async fn serve_http(config: crate::Settings, watch: bool, bind: String) -> anyhow::Result<()> {
-    use crate::mcp::CodeIntelligenceServer;
+    use crate::mcp::{
+        CodeIntelligenceServer, notifications::NotificationBroadcaster, watcher::IndexWatcher,
+    };
     use crate::{IndexPersistence, SimpleIndexer};
     use axum::Router;
     use rmcp::transport::{SseServer, sse_server::SseServerConfig};
@@ -15,6 +17,9 @@ pub async fn serve_http(config: crate::Settings, watch: bool, bind: String) -> a
     use tokio_util::sync::CancellationToken;
 
     eprintln!("Starting HTTP MCP server on {bind}");
+
+    // Create notification broadcaster for file change events
+    let broadcaster = Arc::new(NotificationBroadcaster::new(100).with_debug(config.mcp.debug));
 
     // Create shared indexer
     let indexer = Arc::new(RwLock::new(SimpleIndexer::with_settings(Arc::new(
@@ -41,18 +46,64 @@ pub async fn serve_http(config: crate::Settings, watch: bool, bind: String) -> a
         eprintln!("No existing index found, starting fresh");
     }
 
+    // Create cancellation token for coordinated shutdown
+    let ct = CancellationToken::new();
+
+    // Start index watcher if watch mode is enabled
+    if watch {
+        let index_watcher_indexer = indexer.clone();
+        let index_watcher_settings = Arc::new(config.clone());
+        let index_watcher_broadcaster = broadcaster.clone();
+        let index_watcher_ct = ct.clone();
+
+        // Default to 5 second interval
+        let watch_interval = 5u64;
+
+        let index_watcher = IndexWatcher::new(
+            index_watcher_indexer,
+            index_watcher_settings,
+            Duration::from_secs(watch_interval),
+        )
+        .with_broadcaster(index_watcher_broadcaster);
+
+        tokio::spawn(async move {
+            tokio::select! {
+                _ = index_watcher.watch() => {
+                    eprintln!("Index watcher ended");
+                }
+                _ = index_watcher_ct.cancelled() => {
+                    eprintln!("Index watcher stopped by cancellation token");
+                }
+            }
+        });
+
+        eprintln!(
+            "Index watcher started (checks every {watch_interval} seconds for index changes)"
+        );
+    }
+
     // Start file watcher if enabled (uses event-driven FileSystemWatcher)
     if watch || config.file_watch.enabled {
         use crate::indexing::FileSystemWatcher;
 
         let watcher_indexer = indexer.clone();
+        let watcher_broadcaster = broadcaster.clone();
         let debounce_ms = config.file_watch.debounce_ms;
 
         match FileSystemWatcher::new(watcher_indexer, debounce_ms, config.mcp.debug) {
             Ok(watcher) => {
+                let watcher = watcher.with_broadcaster(watcher_broadcaster);
+                let watcher_ct = ct.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = watcher.watch().await {
-                        eprintln!("File watcher error: {e}");
+                    tokio::select! {
+                        result = watcher.watch() => {
+                            if let Err(e) = result {
+                                eprintln!("File watcher error: {e}");
+                            }
+                        }
+                        _ = watcher_ct.cancelled() => {
+                            eprintln!("File watcher stopped by cancellation token");
+                        }
                     }
                 });
                 eprintln!(
@@ -74,7 +125,7 @@ pub async fn serve_http(config: crate::Settings, watch: bool, bind: String) -> a
         bind: addr,
         sse_path: "/mcp/sse".to_string(),      // SSE endpoint path
         post_path: "/mcp/message".to_string(), // POST endpoint path
-        ct: CancellationToken::new(),
+        ct: ct.clone(),
         sse_keep_alive: Some(Duration::from_secs(15)),
     };
 
@@ -84,17 +135,54 @@ pub async fn serve_http(config: crate::Settings, watch: bool, bind: String) -> a
     // Configure SSE server to create MCP service for each connection
     let indexer_for_service = indexer.clone();
     let config_for_service = Arc::new(config.clone());
+    let broadcaster_for_service = broadcaster.clone();
+    let ct_for_service = ct.clone();
 
     sse_server.with_service(move || {
-        CodeIntelligenceServer::new_with_indexer(
+        let mcp_debug = config_for_service.mcp.debug;
+        if mcp_debug {
+            eprintln!("DEBUG: Creating new MCP server instance for SSE connection");
+        }
+        let server = CodeIntelligenceServer::new_with_indexer(
             indexer_for_service.clone(),
             config_for_service.clone(),
-        )
+        );
+
+        // Start notification listener for this connection
+        // Note: We need to wait for initialize() to be called first
+        let server_clone = server.clone();
+        let receiver = broadcaster_for_service.subscribe();
+        let listener_ct = ct_for_service.clone();
+        if mcp_debug {
+            eprintln!("DEBUG: Subscribing to broadcaster for notifications");
+        }
+        tokio::spawn(async move {
+            // Wait a bit for the MCP handshake to complete
+            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+            if mcp_debug {
+                eprintln!("DEBUG: Starting notification listener");
+            }
+
+            // Run listener until cancelled
+            tokio::select! {
+                _ = server_clone.start_notification_listener(receiver, mcp_debug) => {
+                    if mcp_debug {
+                        eprintln!("DEBUG: Notification listener ended");
+                    }
+                }
+                _ = listener_ct.cancelled() => {
+                    if mcp_debug {
+                        eprintln!("DEBUG: Notification listener stopped by cancellation token");
+                    }
+                }
+            }
+        });
+
+        server
     });
 
     // Helper function for health check endpoint
     async fn health_check() -> &'static str {
-        eprintln!("Health check endpoint called");
         "OK"
     }
 
@@ -259,7 +347,7 @@ pub async fn serve_http(config: crate::Settings, watch: bool, bind: String) -> a
         axum::response::Html(html)
     }
 
-    // Helper function for shutdown signal
+    // Helper function for shutdown signal with cancellation token
     async fn shutdown_signal() {
         tokio::signal::ctrl_c()
             .await
@@ -326,9 +414,19 @@ pub async fn serve_http(config: crate::Settings, watch: bool, bind: String) -> a
     eprintln!("Health check: http://{bind}/health");
     eprintln!("Press Ctrl+C to stop the server");
 
-    axum::serve(listener, router)
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
+    // Create server future
+    let server = axum::serve(listener, router);
+
+    // Handle graceful shutdown with tokio::select!
+    tokio::select! {
+        result = server => {
+            result?;
+        }
+        _ = shutdown_signal() => {
+            eprintln!("Shutting down HTTP server...");
+            ct.cancel();
+        }
+    }
 
     eprintln!("HTTP server shut down gracefully");
     Ok(())

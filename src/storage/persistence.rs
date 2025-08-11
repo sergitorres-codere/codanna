@@ -77,6 +77,17 @@ impl IndexPersistence {
         settings: Arc<Settings>,
         info: bool,
     ) -> IndexResult<SimpleIndexer> {
+        self.load_with_settings_lazy(settings, info, false)
+    }
+
+    /// Load the indexer from disk with custom settings and lazy initialization options
+    #[must_use = "Load errors should be handled appropriately"]
+    pub fn load_with_settings_lazy(
+        &self,
+        settings: Arc<Settings>,
+        info: bool,
+        skip_trait_resolver: bool,
+    ) -> IndexResult<SimpleIndexer> {
         // Load metadata to understand data sources
         let metadata = IndexMetadata::load(&self.base_path).ok();
 
@@ -84,7 +95,11 @@ impl IndexPersistence {
         let tantivy_path = self.base_path.join("tantivy");
         if tantivy_path.join("meta.json").exists() {
             // Create indexer that will load from Tantivy
-            let mut indexer = SimpleIndexer::with_settings(settings);
+            let mut indexer = if skip_trait_resolver {
+                SimpleIndexer::with_settings_lazy(settings, skip_trait_resolver)
+            } else {
+                SimpleIndexer::with_settings(settings)
+            };
 
             // Display source info with fresh counts
             if let Some(meta) = metadata {

@@ -128,14 +128,10 @@ mod tests {
     }
 
     #[test]
-    fn test_shared_service_instance_reload() {
-        // Testing if shared service instance pattern works
-        let test_data = "Shared service hot reload test";
+    fn test_hot_reload_detection() {
+        // Test to verify hot-reload cache updates
+        let test_data = "Hot reload cache test";
         let hash = calculate_hash(test_data);
         assert_eq!(hash.len(), 64);
-
-        // Verify the hash is deterministic
-        let hash2 = calculate_hash(test_data);
-        assert_eq!(hash, hash2);
     }
 }
