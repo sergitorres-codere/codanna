@@ -10,7 +10,7 @@ pub mod python_behavior;
 pub mod rust;
 pub mod rust_behavior;
 
-pub use factory::ParserFactory;
+pub use factory::{ParserFactory, ParserWithBehavior};
 pub use language::Language;
 pub use language_behavior::{LanguageBehavior, LanguageMetadata};
 pub use method_call::MethodCall;

@@ -3,6 +3,42 @@
 //! This module provides the LanguageBehavior trait which encapsulates
 //! all language-specific logic that was previously hardcoded in SimpleIndexer.
 //! Each language implements this trait to define its specific conventions.
+//!
+//! # Architecture
+//!
+//! The LanguageBehavior trait is part of a larger refactoring to achieve true
+//! language modularity in the codanna indexing system. It works in conjunction
+//! with:
+//!
+//! - `LanguageParser`: Handles AST parsing for each language
+//! - `ParserFactory`: Creates parser-behavior pairs
+//! - `SimpleIndexer`: Uses behaviors to process symbols without language-specific code
+//!
+//! # Example Usage
+//!
+//! ```rust,ignore
+//! use codanna::parsing::{ParserFactory, Language};
+//!
+//! let factory = ParserFactory::new(settings);
+//! let pair = factory.create_parser_with_behavior(Language::Rust)?;
+//!
+//! // Parse code with the parser
+//! let symbols = pair.parser.parse(path, content, &mut counter)?;
+//!
+//! // Process symbols with the behavior
+//! for mut symbol in symbols {
+//!     pair.behavior.configure_symbol(&mut symbol, Some("crate::module"));
+//! }
+//! ```
+//!
+//! # Implementing a New Language
+//!
+//! To add support for a new language:
+//!
+//! 1. Create a parser implementing `LanguageParser`
+//! 2. Create a behavior implementing `LanguageBehavior`
+//! 3. Register both in `ParserFactory`
+//! 4. (Future) Register in the language registry for auto-discovery
 
 use crate::{Symbol, Visibility};
 use tree_sitter::Language;
@@ -15,6 +51,13 @@ use tree_sitter::Language;
 /// - Format module paths according to language conventions
 /// - Parse visibility from signatures
 /// - Validate node types using tree-sitter metadata
+///
+/// # Design Principles
+///
+/// 1. **Zero allocation where possible**: Methods return static strings or reuse inputs
+/// 2. **Language agnostic core**: The indexer should never check language types
+/// 3. **Extensible**: New languages can be added without modifying existing code
+/// 4. **Type safe**: Use tree-sitter's ABI-15 for compile-time validation
 pub trait LanguageBehavior: Send + Sync {
     /// Format a module path according to language conventions
     /// 
