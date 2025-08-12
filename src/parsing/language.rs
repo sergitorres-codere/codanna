@@ -16,6 +16,21 @@ pub enum Language {
 }
 
 impl Language {
+    /// Convert to LanguageId for registry usage
+    /// 
+    /// This is a transitional method that will be removed when
+    /// we fully migrate to the registry system.
+    pub fn to_language_id(&self) -> super::LanguageId {
+        // We need to use static strings for LanguageId
+        match self {
+            Language::Rust => super::LanguageId::new("rust"),
+            Language::Python => super::LanguageId::new("python"),
+            Language::JavaScript => super::LanguageId::new("javascript"),
+            Language::TypeScript => super::LanguageId::new("typescript"),
+            Language::Php => super::LanguageId::new("php"),
+        }
+    }
+    
     /// Detect language from file extension
     pub fn from_extension(ext: &str) -> Option<Self> {
         match ext.to_lowercase().as_str() {
