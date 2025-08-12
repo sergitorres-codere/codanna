@@ -16,5 +16,8 @@ pub use language_behavior::{LanguageBehavior, LanguageMetadata};
 pub use method_call::MethodCall;
 pub use parser::LanguageParser;
 pub use php::PhpParser;
+pub use php_behavior::PhpBehavior;
 pub use python::PythonParser;
+pub use python_behavior::PythonBehavior;
 pub use rust::RustParser;
+pub use rust_behavior::RustBehavior;

@@ -26,8 +26,9 @@ impl Default for PythonBehavior {
 }
 
 impl LanguageBehavior for PythonBehavior {
-    fn format_module_path(&self, base_path: &str, symbol_name: &str) -> String {
-        format!("{}.{}", base_path, symbol_name)
+    fn format_module_path(&self, base_path: &str, _symbol_name: &str) -> String {
+        // Python typically uses file paths as module paths, not including the symbol name
+        base_path.to_string()
     }
     
     fn parse_visibility(&self, signature: &str) -> Visibility {
@@ -65,6 +66,10 @@ impl LanguageBehavior for PythonBehavior {
     fn get_language(&self) -> Language {
         self.language.clone()
     }
+    
+    fn get_language_type(&self) -> crate::parsing::Language {
+        crate::parsing::Language::Python
+    }
 }
 
 #[cfg(test)]
@@ -76,7 +81,7 @@ mod tests {
         let behavior = PythonBehavior::new();
         assert_eq!(
             behavior.format_module_path("module.submodule", "function"),
-            "module.submodule.function"
+            "module.submodule"
         );
     }
     

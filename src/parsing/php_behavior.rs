@@ -26,9 +26,10 @@ impl Default for PhpBehavior {
 }
 
 impl LanguageBehavior for PhpBehavior {
-    fn format_module_path(&self, base_path: &str, symbol_name: &str) -> String {
-        // PHP uses :: for static methods/constants, but we'll use it consistently
-        format!("{}::{}", base_path, symbol_name)
+    fn format_module_path(&self, base_path: &str, _symbol_name: &str) -> String {
+        // PHP typically uses file paths as module paths, not including the symbol name
+        // PHP parsers should set more specific paths for methods in the parser itself
+        base_path.to_string()
     }
     
     fn parse_visibility(&self, signature: &str) -> Visibility {
@@ -60,6 +61,10 @@ impl LanguageBehavior for PhpBehavior {
     fn get_language(&self) -> Language {
         self.language.clone()
     }
+    
+    fn get_language_type(&self) -> crate::parsing::Language {
+        crate::parsing::Language::Php
+    }
 }
 
 #[cfg(test)]
@@ -71,7 +76,7 @@ mod tests {
         let behavior = PhpBehavior::new();
         assert_eq!(
             behavior.format_module_path("App\\Controllers", "UserController"),
-            "App\\Controllers::UserController"
+            "App\\Controllers"
         );
     }
     

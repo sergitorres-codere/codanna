@@ -643,7 +643,9 @@ impl SimpleIndexer {
             path.is_absolute()
         );
         let language = self.detect_language(path)?;
-        let mut parser = self.create_parser(language)?;
+        let parser_with_behavior = self.create_parser_with_behavior(language)?;
+        let mut parser = parser_with_behavior.parser;
+        let behavior = parser_with_behavior.behavior;
         let module_path = self.calculate_module_path(path);
 
         // Register the file with ImportResolver
@@ -667,7 +669,7 @@ impl SimpleIndexer {
             file_id,
             path_str,
             &module_path,
-            language,
+            behavior.as_ref(),
             &mut symbol_counter,
         )?;
         self.extract_and_store_relationships(&mut parser, content, file_id)?;
@@ -686,12 +688,12 @@ impl SimpleIndexer {
         })
     }
 
-    /// Create a parser for the given language
-    fn create_parser(
+    /// Create a parser with its language-specific behavior
+    fn create_parser_with_behavior(
         &self,
         language: Language,
-    ) -> IndexResult<Box<dyn crate::parsing::LanguageParser>> {
-        self.parser_factory.create_parser(language)
+    ) -> IndexResult<crate::parsing::ParserWithBehavior> {
+        self.parser_factory.create_parser_with_behavior(language)
     }
 
     /// Calculate module path relative to workspace root
@@ -759,7 +761,7 @@ impl SimpleIndexer {
         file_id: FileId,
         path_str: &str,
         module_path: &Option<String>,
-        language: Language,
+        behavior: &dyn crate::parsing::LanguageBehavior,
         symbol_counter: &mut SymbolCounter,
     ) -> IndexResult<()> {
         let symbols = parser.parse(content, file_id, symbol_counter);
@@ -795,7 +797,7 @@ impl SimpleIndexer {
             // Track trait symbols
             trait_symbols.insert(symbol.name.to_string(), symbol.kind);
 
-            self.configure_symbol(&mut symbol, module_path, language);
+            self.configure_symbol(&mut symbol, module_path, behavior);
             self.store_symbol(symbol, path_str)?;
         }
 
@@ -817,21 +819,13 @@ impl SimpleIndexer {
         &self,
         symbol: &mut crate::Symbol,
         module_path: &Option<String>,
-        language: Language,
+        behavior: &dyn crate::parsing::LanguageBehavior,
     ) {
         // Set module path if available
         if symbol.module_path.is_none() {
             if let Some(mod_path) = module_path {
-                // TODO: Replace with language_config.resolve_module_path(mod_path, symbol.name)
-                // For Rust, create full qualified path including symbol name
-                // For other languages, just use the module path (file path)
-                let full_path = if language == Language::Rust {
-                    format!("{}::{}", mod_path, symbol.name)
-                } else {
-                    // For non-Rust files, use the file path as module path
-                    // PHP parsers should set more specific paths for methods. Read the TODOs above.
-                    mod_path.clone()
-                };
+                // Use behavior to format the module path according to language conventions
+                let full_path = behavior.format_module_path(mod_path, &symbol.name);
                 symbol.module_path = Some(full_path.into());
                 debug_print!(
                     self,
@@ -849,14 +843,9 @@ impl SimpleIndexer {
             );
         }
 
-        // Determine visibility based on language rules
-        if language == Language::Rust {
-            // In Rust, items are private by default unless marked pub
-            if let Some(sig) = &symbol.signature {
-                if sig.contains("pub ") {
-                    symbol.visibility = Visibility::Public;
-                }
-            }
+        // Parse visibility using language-specific behavior
+        if let Some(sig) = &symbol.signature {
+            symbol.visibility = behavior.parse_visibility(sig);
         }
     }
 
@@ -2757,6 +2746,8 @@ mod tests {
     use std::path::PathBuf;
 
     use crate::{FileId, RelationKind, Symbol, SymbolId, SymbolKind, Visibility};
+    use crate::types::SymbolCounter;
+    use crate::parsing::{RustBehavior, PythonBehavior, PhpBehavior};
 
     #[test]
     fn test_trait_implementations_resolution() {
@@ -3620,5 +3611,169 @@ pub struct Another {
             SymbolKind::Field,
             RelationKind::Defines
         ));
+    }
+
+    // ===== Stage 3 Baseline Tests =====
+    // These tests capture the CURRENT behavior of configure_symbol
+    // to ensure refactoring doesn't change functionality
+
+    #[test]
+    fn test_configure_symbol_baseline_rust() {
+        use crate::parsing::rust_behavior::RustBehavior;
+        
+        let indexer = SimpleIndexer::new();
+        let behavior = RustBehavior::new();
+        
+        // Test case 1: Rust with public function
+        let mut symbol = Symbol {
+            id: SymbolId(1),
+            name: "test_function".into(),
+            kind: SymbolKind::Function,
+            signature: Some("pub fn test_function() -> Result<()>".into()),
+            module_path: None,
+            file_id: FileId(1),
+            range: crate::Range::new(0, 10, 0, 20),
+            visibility: Visibility::Private,
+            doc_comment: None,
+        };
+        
+        let module_path = Some("crate::module".to_string());
+        indexer.configure_symbol(&mut symbol, &module_path, &behavior);
+        
+        // CURRENT BEHAVIOR: Rust adds symbol name to module path
+        assert_eq!(symbol.module_path.as_deref(), Some("crate::module::test_function"));
+        
+        // CURRENT BEHAVIOR: Updates visibility to Public because signature contains "pub "
+        assert_eq!(symbol.visibility, Visibility::Public);
+    }
+
+    #[test]
+    fn test_configure_symbol_baseline_python() {
+        use crate::parsing::python_behavior::PythonBehavior;
+        
+        let indexer = SimpleIndexer::new();
+        let behavior = PythonBehavior::new();
+        
+        let mut symbol = Symbol {
+            id: SymbolId(1),
+            name: "test_function".into(),
+            kind: SymbolKind::Function,
+            signature: Some("def test_function():".into()),
+            module_path: None,
+            file_id: FileId(1),
+            range: crate::Range::new(0, 10, 0, 20),
+            visibility: Visibility::Public,
+            doc_comment: None,
+        };
+        
+        let module_path = Some("test_module".to_string());
+        indexer.configure_symbol(&mut symbol, &module_path, &behavior);
+        
+        // Python doesn't add symbol name to module path
+        assert_eq!(
+            symbol.module_path.as_deref(),
+            Some("test_module")
+        );
+        
+        // Python doesn't have visibility parsing in configure_symbol
+        assert_eq!(symbol.visibility, Visibility::Public);
+    }
+
+    #[test]
+    fn test_configure_symbol_php_baseline() {
+        use crate::parsing::php_behavior::PhpBehavior;
+        
+        let indexer = SimpleIndexer::new();
+        let behavior = PhpBehavior::new();
+        
+        let mut symbol = Symbol {
+            id: SymbolId(1),
+            name: "testFunction".into(),
+            kind: SymbolKind::Function,
+            signature: Some("public function testFunction()".into()),
+            module_path: None,
+            file_id: FileId(1),
+            range: crate::Range::new(0, 10, 0, 20),
+            visibility: Visibility::Public,
+            doc_comment: None,
+        };
+        
+        let module_path = Some("App\\Utils".to_string());
+        indexer.configure_symbol(&mut symbol, &module_path, &behavior);
+        
+        // PHP doesn't add symbol name to module path
+        assert_eq!(
+            symbol.module_path.as_deref(),
+            Some("App\\Utils")
+        );
+        
+        // PHP doesn't have visibility parsing in configure_symbol
+        assert_eq!(symbol.visibility, Visibility::Public);
+    }
+
+    #[test]
+    fn test_configure_symbol_different_languages() {
+        use crate::parsing::{rust_behavior::RustBehavior, python_behavior::PythonBehavior, php_behavior::PhpBehavior};
+        
+        let indexer = SimpleIndexer::new();
+        let rust_behavior = RustBehavior::new();
+        let python_behavior = PythonBehavior::new();
+        let php_behavior = PhpBehavior::new();
+        let module_path = Some("test_module".to_string());
+        
+        // Use SymbolCounter for proper ID generation
+        let mut symbol_counter = SymbolCounter::new();
+        
+        // Test symbols with language-appropriate signatures
+        let mut rust_symbol = Symbol {
+            id: symbol_counter.next(),
+            name: "test".into(),
+            kind: SymbolKind::Function,
+            signature: Some("pub fn test()".into()),
+            module_path: None,
+            file_id: FileId(1),
+            range: crate::Range::new(0, 10, 0, 20),
+            visibility: Visibility::Private,
+            doc_comment: None,
+        };
+        
+        let mut python_symbol = Symbol {
+            id: symbol_counter.next(),
+            name: "test".into(),
+            kind: SymbolKind::Function,
+            signature: Some("def test():".into()),  // Python signature
+            module_path: None,
+            file_id: FileId(2),
+            range: crate::Range::new(0, 10, 0, 20),
+            visibility: Visibility::Private,
+            doc_comment: None,
+        };
+        
+        let mut php_symbol = Symbol {
+            id: symbol_counter.next(),
+            name: "test".into(),
+            kind: SymbolKind::Function,
+            signature: Some("public function test()".into()),  // PHP signature
+            module_path: None,
+            file_id: FileId(3),
+            range: crate::Range::new(0, 10, 0, 20),
+            visibility: Visibility::Private,
+            doc_comment: None,
+        };
+        
+        // Configure each symbol with its behavior
+        indexer.configure_symbol(&mut rust_symbol, &module_path, &rust_behavior);
+        indexer.configure_symbol(&mut python_symbol, &module_path, &python_behavior);
+        indexer.configure_symbol(&mut php_symbol, &module_path, &php_behavior);
+        
+        // Verify different behaviors
+        assert_eq!(rust_symbol.module_path.as_deref(), Some("test_module::test"));
+        assert_eq!(python_symbol.module_path.as_deref(), Some("test_module"));
+        assert_eq!(php_symbol.module_path.as_deref(), Some("test_module"));
+        
+        // Visibility parsed according to each language's rules
+        assert_eq!(rust_symbol.visibility, Visibility::Public); // Rust: "pub " means public
+        assert_eq!(python_symbol.visibility, Visibility::Public); // Python: no underscore prefix means public
+        assert_eq!(php_symbol.visibility, Visibility::Public); // PHP: "public function" means public
     }
 }
