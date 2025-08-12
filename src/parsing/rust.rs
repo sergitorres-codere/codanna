@@ -816,6 +816,71 @@ impl RustParser {
         }
     }
 
+    /// Extract the full type name including generic parameters
+    /// Returns an owned String to support complex type construction
+    fn extract_full_type_name(&self, node: Node, code: &str) -> String {
+        match node.kind() {
+            "type_identifier" => code[node.byte_range()].to_string(),
+            "primitive_type" => code[node.byte_range()].to_string(),
+            "scoped_type_identifier" => code[node.byte_range()].to_string(),
+            "generic_type" => {
+                // For generic types like Option<T>, Vec<T>, construct the full name
+                let mut result = String::new();
+                
+                // Get the base type
+                if let Some(type_node) = node.child_by_field_name("type") {
+                    result.push_str(&self.extract_full_type_name(type_node, code));
+                }
+                
+                // Get the generic arguments
+                if let Some(args_node) = node.child_by_field_name("type_arguments") {
+                    result.push('<');
+                    let mut first = true;
+                    for child in args_node.children(&mut args_node.walk()) {
+                        if child.kind() != "," && child.kind() != "<" && child.kind() != ">" {
+                            if !first {
+                                result.push_str(", ");
+                            }
+                            result.push_str(&self.extract_full_type_name(child, code));
+                            first = false;
+                        }
+                    }
+                    result.push('>');
+                }
+                
+                result
+            }
+            "reference_type" => {
+                // Handle &T, &mut T
+                let mut result = String::from("&");
+                if node.child_by_field_name("mutable").is_some() {
+                    result.push_str("mut ");
+                }
+                if let Some(type_node) = node.child_by_field_name("type") {
+                    result.push_str(&self.extract_full_type_name(type_node, code));
+                }
+                result
+            }
+            "pointer_type" => {
+                // Handle *const T, *mut T
+                let mut result = String::from("*");
+                if node.child_by_field_name("mutable").is_some() {
+                    result.push_str("mut ");
+                } else {
+                    result.push_str("const ");
+                }
+                if let Some(type_node) = node.child_by_field_name("type") {
+                    result.push_str(&self.extract_full_type_name(type_node, code));
+                }
+                result
+            }
+            _ => {
+                // Default: use the text range of the node
+                code[node.byte_range()].to_string()
+            }
+        }
+    }
+
     /// Recursive type extraction from AST nodes requires &self for traversal context
     #[allow(clippy::only_used_in_recursion)]
     fn extract_type_name<'a>(&self, node: Node, code: &'a str) -> Option<&'a str> {
@@ -1008,27 +1073,28 @@ impl RustParser {
             // Check if this is an inherent impl (no trait field)
             if node.child_by_field_name("trait").is_none() {
                 if let Some(type_node) = node.child_by_field_name("type") {
-                    if let Some(type_name) = self.extract_type_name(type_node, code) {
-                        // Find method definitions in the impl body
-                        if let Some(body_node) = node.child_by_field_name("body") {
-                            for child in body_node.children(&mut body_node.walk()) {
-                                if child.kind() == "function_item" {
-                                    if let Some(method_name_node) =
-                                        child.child_by_field_name("name")
-                                    {
-                                        let method_name = &code[method_name_node.byte_range()];
-                                        let range = Range::new(
-                                            child.start_position().row as u32,
-                                            child.start_position().column as u16,
-                                            child.end_position().row as u32,
-                                            child.end_position().column as u16,
-                                        );
-                                        methods.push((
-                                            type_name.to_string(),
-                                            method_name.to_string(),
-                                            range,
-                                        ));
-                                    }
+                    // Extract the full type name including generics
+                    let type_name = self.extract_full_type_name(type_node, code);
+                    
+                    // Find method definitions in the impl body
+                    if let Some(body_node) = node.child_by_field_name("body") {
+                        for child in body_node.children(&mut body_node.walk()) {
+                            if child.kind() == "function_item" {
+                                if let Some(method_name_node) =
+                                    child.child_by_field_name("name")
+                                {
+                                    let method_name = &code[method_name_node.byte_range()];
+                                    let range = Range::new(
+                                        child.start_position().row as u32,
+                                        child.start_position().column as u16,
+                                        child.end_position().row as u32,
+                                        child.end_position().column as u16,
+                                    );
+                                    methods.push((
+                                        type_name.clone(),
+                                        method_name.to_string(),
+                                        range,
+                                    ));
                                 }
                             }
                         }
@@ -1219,6 +1285,10 @@ impl LanguageParser for RustParser {
         self.find_variable_types_in_node(root_node, code, &mut bindings);
 
         bindings
+    }
+    
+    fn find_inherent_methods(&mut self, code: &str) -> Vec<(String, String, Range)> {
+        self.find_inherent_methods(code)
     }
 }
 
@@ -1631,6 +1701,61 @@ mod tests {
             .expect("Should find Point implements std::fmt::Debug");
         assert_eq!(debug_impl.0, "Point");
         assert_eq!(debug_impl.1, "std::fmt::Debug");
+    }
+
+    #[test]
+    fn test_find_inherent_methods() {
+        let mut parser = RustParser::new().unwrap();
+        let code = r#"
+            struct SimpleType {
+                value: i32,
+            }
+            
+            impl SimpleType {
+                fn simple_method(&self) -> i32 {
+                    self.value
+                }
+                
+                fn another_method(&mut self) {
+                    self.value += 1;
+                }
+            }
+            
+            impl Option<String> {
+                fn option_method(&self) -> bool {
+                    self.is_some()
+                }
+            }
+            
+            impl Vec<i32> {
+                fn vec_method(&self) -> i32 {
+                    self.iter().sum()
+                }
+            }
+            
+            // This has a trait, so not inherent
+            impl Display for SimpleType {
+                fn fmt(&self, f: &mut Formatter) -> Result {
+                    write!(f, "{}", self.value)
+                }
+            }
+        "#;
+        
+        let methods = parser.find_inherent_methods(code);
+        
+        // Should find 4 inherent methods
+        assert_eq!(methods.len(), 4);
+        
+        // Check SimpleType methods
+        assert!(methods.iter().any(|(t, m, _)| t == "SimpleType" && m == "simple_method"));
+        assert!(methods.iter().any(|(t, m, _)| t == "SimpleType" && m == "another_method"));
+        
+        // Check complex type methods
+        assert!(methods.iter().any(|(t, m, _)| t == "Option<String>" && m == "option_method"));
+        assert!(methods.iter().any(|(t, m, _)| t == "Vec<i32>" && m == "vec_method"));
+        
+        // Should NOT find Display::fmt (it's a trait impl)
+        assert!(!methods.iter().any(|(_, m, _)| m == "fmt"));
     }
 
     #[test]

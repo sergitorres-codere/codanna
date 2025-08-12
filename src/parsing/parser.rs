@@ -82,11 +82,13 @@ pub trait LanguageParser: Send + Sync {
 
     /// Find inherent methods (methods defined directly on types)
     /// Returns tuples of (type_name, method_name, range)
-    /// Zero-cost: Returns string slices into the source code
-    ///
+    /// 
     /// This is for methods defined directly on types (not through traits/interfaces).
     /// Default implementation returns empty - languages can override.
-    fn find_inherent_methods<'a>(&mut self, _code: &'a str) -> Vec<(&'a str, &'a str, Range)> {
+    /// 
+    /// Note: Returns owned strings to support complex type names that need construction
+    /// (e.g., Rust's `Option<String>`, `Vec<T>`, etc.)
+    fn find_inherent_methods(&mut self, _code: &str) -> Vec<(String, String, Range)> {
         Vec::new()
     }
 }
