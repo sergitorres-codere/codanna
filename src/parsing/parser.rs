@@ -81,6 +81,16 @@ pub trait LanguageParser: Send + Sync {
 
     /// Enable mutable downcasting to concrete parser types
     fn as_any_mut(&mut self) -> &mut dyn Any;
+
+    /// Find inherent methods (methods defined directly on types)
+    /// Returns tuples of (type_name, method_name, range)
+    /// Zero-cost: Returns string slices into the source code
+    ///
+    /// This is for methods defined directly on types (not through traits/interfaces).
+    /// Default implementation returns empty - languages can override.
+    fn find_inherent_methods<'a>(&mut self, _code: &'a str) -> Vec<(&'a str, &'a str, Range)> {
+        Vec::new()
+    }
 }
 
 /// Trait for creating language parsers

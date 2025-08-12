@@ -800,6 +800,13 @@ impl SimpleIndexer {
     }
 
     /// Configure a symbol with module path and visibility
+    ///
+    /// TODO: Extract language-specific module path resolution into a dedicated trait.
+    /// Current implementation violates single responsibility principle by embedding
+    /// language-specific logic within the indexer. Each language parser should implement
+    /// a `ModulePathResolver` trait that encapsulates its namespace/module conventions.
+    /// This would eliminate the need for language enum matching and enable proper
+    /// plugin architecture for new language support without modifying core indexing logic.
     fn configure_symbol(
         &self,
         symbol: &mut crate::Symbol,
@@ -809,8 +816,17 @@ impl SimpleIndexer {
         // Set module path if available
         if symbol.module_path.is_none() {
             if let Some(mod_path) = module_path {
-                // Create full qualified path including symbol name
-                symbol.module_path = Some(format!("{}::{}", mod_path, symbol.name).into());
+                // TODO: Replace with language_config.resolve_module_path(mod_path, symbol.name)
+                // For Rust, create full qualified path including symbol name
+                // For other languages, just use the module path (file path)
+                let full_path = if language == Language::Rust {
+                    format!("{}::{}", mod_path, symbol.name)
+                } else {
+                    // For non-Rust files, use the file path as module path
+                    // PHP parsers should set more specific paths for methods. Read the TODOs above.
+                    mod_path.clone()
+                };
+                symbol.module_path = Some(full_path.into());
                 debug_print!(
                     self,
                     "Set module path for symbol '{}': {:?}",
@@ -922,7 +938,14 @@ impl SimpleIndexer {
         }
 
         // Process method calls using MethodCall objects for enhanced resolution
+        debug_print!(self, "Processing {} method calls", method_calls.len());
         for method_call in &method_calls {
+            debug_print!(
+                self,
+                "Processing call: {} -> {}",
+                method_call.caller,
+                method_call.method_name
+            );
             debug_print!(
                 self,
                 "Processing method call with enhanced data: {} -> {}",
@@ -979,31 +1002,33 @@ impl SimpleIndexer {
         // 2.5. Inherent methods (for complex method resolution)
         if parser.language() == Language::Rust {
             // Downcast to RustParser to access find_inherent_methods
+            // This is needed because the Rust parser needs to allocate strings for complex type names
             if let Some(rust_parser) = parser
                 .as_any_mut()
                 .downcast_mut::<crate::parsing::rust::RustParser>()
             {
                 let inherent_methods = rust_parser.find_inherent_methods(content);
+                if !inherent_methods.is_empty() {
+                    // Group methods by type
+                    let mut methods_by_type: std::collections::HashMap<String, Vec<String>> =
+                        std::collections::HashMap::new();
+                    for (type_name, method_name, _range) in inherent_methods {
+                        debug_print!(
+                            self,
+                            "Found inherent method: {}::{}",
+                            type_name,
+                            method_name
+                        );
+                        methods_by_type
+                            .entry(type_name)
+                            .or_default()
+                            .push(method_name);
+                    }
 
-                // Group methods by type
-                let mut methods_by_type: std::collections::HashMap<String, Vec<String>> =
-                    std::collections::HashMap::new();
-                for (type_name, method_name, _range) in inherent_methods {
-                    debug_print!(
-                        self,
-                        "Found inherent method: {}::{}",
-                        type_name,
-                        method_name
-                    );
-                    methods_by_type
-                        .entry(type_name)
-                        .or_default()
-                        .push(method_name);
-                }
-
-                // Register with trait resolver
-                for (type_name, methods) in methods_by_type {
-                    self.trait_resolver.add_inherent_methods(type_name, methods);
+                    // Register with trait resolver
+                    for (type_name, methods) in methods_by_type {
+                        self.trait_resolver.add_inherent_methods(type_name, methods);
+                    }
                 }
             }
         }
@@ -1284,6 +1309,13 @@ impl SimpleIndexer {
         // This allows us to:
         // 1. Wait until all symbols in the batch are searchable
         // 2. Use import context for accurate resolution
+        debug_print!(
+            self,
+            "Adding unresolved relationship: {} -> {} (kind: {:?})",
+            from_name,
+            to_name,
+            kind
+        );
         self.unresolved_relationships.push(UnresolvedRelationship {
             from_name: from_name.into(),
             to_name: to_name.into(),

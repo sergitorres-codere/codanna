@@ -22,8 +22,8 @@ Thank you for your interest in contributing to Codanna! This guide will help you
 
 1. **Fork and clone the repository:**
    ```bash
-   git clone https://github.com/YOUR_USERNAME/codebase-intelligence.git
-   cd codebase-intelligence
+   git clone https://github.com/bartolli/codanna.git
+   cd codanna
    ```
 
 2. **Build the project:**

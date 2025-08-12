@@ -87,5 +87,7 @@ rustls = ["dep:rustls"]
 rcgen = ["dep:rcgen"]
 
 [lints.clippy]
+# Minimal lints - main enforcement via CI with `cargo clippy -- -D warnings`
+# See clippy.toml for behavior configuration (thresholds, etc.)
 uninlined_format_args = "warn"
 

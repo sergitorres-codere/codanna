@@ -156,7 +156,7 @@ impl PhpParser {
             file_id,
             self.node_to_range(node),
         );
-        symbol.doc_comment = self.extract_doc_comment(&node, code).map(|s| s.into());
+        symbol.doc_comment = self.extract_doc_comment(&node, code).map(Into::into);
         Some(symbol)
     }
 
@@ -181,7 +181,7 @@ impl PhpParser {
             file_id,
             self.node_to_range(node),
         );
-        symbol.doc_comment = self.extract_doc_comment(&node, code).map(|s| s.into());
+        symbol.doc_comment = self.extract_doc_comment(&node, code).map(Into::into);
         Some(symbol)
     }
 
@@ -207,7 +207,7 @@ impl PhpParser {
             file_id,
             self.node_to_range(node),
         );
-        symbol.doc_comment = self.extract_doc_comment(&node, code).map(|s| s.into());
+        symbol.doc_comment = self.extract_doc_comment(&node, code).map(Into::into);
         Some(symbol)
     }
 
@@ -233,7 +233,7 @@ impl PhpParser {
             file_id,
             self.node_to_range(node),
         );
-        symbol.doc_comment = self.extract_doc_comment(&node, code).map(|s| s.into());
+        symbol.doc_comment = self.extract_doc_comment(&node, code).map(Into::into);
         Some(symbol)
     }
 
@@ -258,7 +258,7 @@ impl PhpParser {
             file_id,
             self.node_to_range(node),
         );
-        symbol.doc_comment = self.extract_doc_comment(&node, code).map(|s| s.into());
+        symbol.doc_comment = self.extract_doc_comment(&node, code).map(Into::into);
         Some(symbol)
     }
 
@@ -289,7 +289,7 @@ impl PhpParser {
                         file_id,
                         self.node_to_range(node),
                     );
-                    symbol.doc_comment = self.extract_doc_comment(&node, code).map(|s| s.into());
+                    symbol.doc_comment = self.extract_doc_comment(&node, code).map(Into::into);
                     return Some(symbol);
                 }
             }
@@ -322,7 +322,7 @@ impl PhpParser {
                         file_id,
                         self.node_to_range(node),
                     );
-                    symbol.doc_comment = self.extract_doc_comment(&node, code).map(|s| s.into());
+                    symbol.doc_comment = self.extract_doc_comment(&node, code).map(Into::into);
                     return Some(symbol);
                 }
             }
@@ -353,7 +353,7 @@ impl LanguageParser for PhpParser {
             None => return Vec::new(),
         };
 
-        let mut symbols = Vec::new();
+        let mut symbols = Vec::with_capacity(64); // Reasonable initial capacity for most PHP files
         self.extract_symbols_from_node(
             tree.root_node(),
             code,
@@ -412,8 +412,8 @@ impl LanguageParser for PhpParser {
             None => return Vec::new(),
         };
 
-        let mut calls = Vec::new();
-        self.extract_calls_from_node(tree.root_node(), code, "", &mut calls);
+        let mut calls = Vec::with_capacity(32); // Typical function has <32 calls
+        self.extract_calls_from_node(tree.root_node(), code, None, &mut calls);
         calls
     }
 
@@ -430,7 +430,7 @@ impl LanguageParser for PhpParser {
             None => return Vec::new(),
         };
 
-        let mut implementations = Vec::new();
+        let mut implementations = Vec::with_capacity(8); // Most classes implement few interfaces
         self.extract_implementations_from_node(tree.root_node(), code, &mut implementations);
         implementations
     }
@@ -441,8 +441,8 @@ impl LanguageParser for PhpParser {
             None => return Vec::new(),
         };
 
-        let mut uses = Vec::new();
-        self.extract_uses_from_node(tree.root_node(), code, "", &mut uses);
+        let mut uses = Vec::with_capacity(16); // Typical number of type uses
+        self.extract_uses_from_node(tree.root_node(), code, None, &mut uses);
         uses
     }
 
@@ -452,7 +452,7 @@ impl LanguageParser for PhpParser {
             None => return Vec::new(),
         };
 
-        let mut defines = Vec::new();
+        let mut defines = Vec::with_capacity(16); // Typical class has <16 methods
         self.extract_defines_from_node(tree.root_node(), code, &mut defines);
         defines
     }
@@ -463,7 +463,7 @@ impl LanguageParser for PhpParser {
             None => return Vec::new(),
         };
 
-        let mut imports = Vec::new();
+        let mut imports = Vec::with_capacity(16); // Typical file has <16 imports
         Self::extract_imports_from_node(tree.root_node(), code, file_id, &mut imports);
         imports
     }
@@ -478,7 +478,7 @@ impl LanguageParser for PhpParser {
             None => return Vec::new(),
         };
 
-        let mut variable_types = Vec::new();
+        let mut variable_types = Vec::with_capacity(16); // Typical function parameters
         self.extract_variable_types_from_node(tree.root_node(), code, &mut variable_types);
         variable_types
     }
@@ -490,7 +490,7 @@ impl PhpParser {
         &self,
         node: Node,
         code: &'a str,
-        current_context: &'a str,
+        current_context: Option<&'a str>,
         calls: &mut Vec<(&'a str, &'a str, Range)>,
     ) {
         match node.kind() {
@@ -498,22 +498,25 @@ impl PhpParser {
                 if let Some(function_node) = node.child_by_field_name("function") {
                     let function_name = &code[function_node.byte_range()];
                     let range = self.node_to_range(node);
-                    calls.push((current_context, function_name, range));
+                    if let Some(context) = current_context {
+                        calls.push((context, function_name, range));
+                    }
                 }
             }
             "member_call_expression" => {
                 if let Some(name_node) = node.child_by_field_name("name") {
                     let method_name = &code[name_node.byte_range()];
                     let range = self.node_to_range(node);
-                    calls.push((current_context, method_name, range));
+                    if let Some(context) = current_context {
+                        calls.push((context, method_name, range));
+                    }
                 }
             }
             "function_definition" | "method_declaration" => {
-                let new_context = if let Some(name_node) = node.child_by_field_name("name") {
-                    &code[name_node.byte_range()]
-                } else {
-                    current_context
-                };
+                let new_context = node
+                    .child_by_field_name("name")
+                    .map(|name_node| &code[name_node.byte_range()])
+                    .or(current_context);
 
                 let mut cursor = node.walk();
                 for child in node.children(&mut cursor) {
@@ -566,7 +569,7 @@ impl PhpParser {
         &self,
         node: Node,
         code: &'a str,
-        current_context: &'a str,
+        current_context: Option<&'a str>,
         uses: &mut Vec<(&'a str, &'a str, Range)>,
     ) {
         match node.kind() {
@@ -574,21 +577,24 @@ impl PhpParser {
                 if let Some(type_node) = node.child_by_field_name("type") {
                     let type_name = &code[type_node.byte_range()];
                     let range = self.node_to_range(type_node);
-                    uses.push((current_context, type_name, range));
+                    if let Some(context) = current_context {
+                        uses.push((context, type_name, range));
+                    }
                 }
             }
             "function_definition" | "method_declaration" => {
-                let new_context = if let Some(name_node) = node.child_by_field_name("name") {
-                    &code[name_node.byte_range()]
-                } else {
-                    current_context
-                };
+                let new_context = node
+                    .child_by_field_name("name")
+                    .map(|name_node| &code[name_node.byte_range()])
+                    .or(current_context);
 
                 // Check return type
                 if let Some(return_type) = node.child_by_field_name("return_type") {
                     let type_name = &code[return_type.byte_range()];
                     let range = self.node_to_range(return_type);
-                    uses.push((new_context, type_name, range));
+                    if let Some(context) = new_context {
+                        uses.push((context, type_name, range));
+                    }
                 }
 
                 let mut cursor = node.walk();
