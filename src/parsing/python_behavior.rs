@@ -66,10 +66,6 @@ impl LanguageBehavior for PythonBehavior {
     fn get_language(&self) -> Language {
         self.language.clone()
     }
-    
-    fn get_language_type(&self) -> crate::parsing::Language {
-        crate::parsing::Language::Python
-    }
 }
 
 #[cfg(test)]

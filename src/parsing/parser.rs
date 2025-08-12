@@ -80,9 +80,6 @@ pub trait LanguageParser: Send + Sync {
         Vec::new()
     }
 
-    /// Enable mutable downcasting to concrete parser types
-    fn as_any_mut(&mut self) -> &mut dyn Any;
-
     /// Find inherent methods (methods defined directly on types)
     /// Returns tuples of (type_name, method_name, range)
     /// Zero-cost: Returns string slices into the source code

@@ -362,10 +362,6 @@ impl LanguageParser for PhpParser {
         self
     }
 
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
-
     fn extract_doc_comment(&self, node: &Node, code: &str) -> Option<String> {
         // Look for a comment node immediately before this node
         if let Some(prev) = node.prev_sibling() {

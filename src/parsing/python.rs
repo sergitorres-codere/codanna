@@ -955,10 +955,6 @@ impl LanguageParser for PythonParser {
         self
     }
 
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
-
     fn language(&self) -> Language {
         Language::Python
     }

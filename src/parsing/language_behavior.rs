@@ -97,10 +97,6 @@ pub trait LanguageBehavior: Send + Sync {
     /// Get the tree-sitter Language for ABI-15 metadata access
     fn get_language(&self) -> Language;
     
-    /// Get the Language enum type for this behavior
-    /// TODO: This is temporary - will be removed in Stage 3.4
-    fn get_language_type(&self) -> crate::parsing::Language;
-    
     /// Validate that a node kind exists in this language's grammar
     /// Uses ABI-15 to check if the node type is valid
     fn validate_node_kind(&self, node_kind: &str) -> bool {

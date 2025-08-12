@@ -13,7 +13,7 @@ use crate::types::SymbolCounter;
 use crate::vector::{EmbeddingGenerator, VectorSearchEngine, create_symbol_text};
 use crate::{
     FileId, IndexError, IndexResult, RelationKind, Relationship, Settings, Symbol, SymbolId,
-    SymbolKind, Visibility,
+    SymbolKind,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -672,7 +672,7 @@ impl SimpleIndexer {
             behavior.as_ref(),
             &mut symbol_counter,
         )?;
-        self.extract_and_store_relationships(&mut parser, content, file_id)?;
+        self.extract_and_store_relationships(&mut parser, content, file_id, behavior.as_ref())?;
         self.update_symbol_counter(&symbol_counter)?;
 
         Ok(file_id)
@@ -885,6 +885,7 @@ impl SimpleIndexer {
         parser: &mut Box<dyn crate::parsing::LanguageParser>,
         content: &str,
         file_id: FileId,
+        behavior: &dyn crate::parsing::LanguageBehavior,
     ) -> IndexResult<()> {
         // 1. Function/method calls
         let method_calls: Vec<MethodCall> = parser.find_method_calls(content);
@@ -995,35 +996,30 @@ impl SimpleIndexer {
         }
 
         // 2.5. Inherent methods (for complex method resolution)
-        if parser.language() == Language::Rust {
-            // Downcast to RustParser to access find_inherent_methods
-            // This is needed because the Rust parser needs to allocate strings for complex type names
-            if let Some(rust_parser) = parser
-                .as_any_mut()
-                .downcast_mut::<crate::parsing::rust::RustParser>()
-            {
-                let inherent_methods = rust_parser.find_inherent_methods(content);
-                if !inherent_methods.is_empty() {
-                    // Group methods by type
-                    let mut methods_by_type: std::collections::HashMap<String, Vec<String>> =
-                        std::collections::HashMap::new();
-                    for (type_name, method_name, _range) in inherent_methods {
-                        debug_print!(
-                            self,
-                            "Found inherent method: {}::{}",
-                            type_name,
-                            method_name
-                        );
-                        methods_by_type
-                            .entry(type_name)
-                            .or_default()
-                            .push(method_name);
-                    }
+        // TODO: Stage 4 will fix the trait signature to return Vec<(String, String, Range)>
+        // For now, we'll use the trait method directly and handle the borrowing issue
+        if behavior.supports_inherent_methods() {
+            let inherent_methods = parser.find_inherent_methods(content);
+            if !inherent_methods.is_empty() {
+                // Group methods by type
+                let mut methods_by_type: std::collections::HashMap<String, Vec<String>> =
+                    std::collections::HashMap::new();
+                for (type_name, method_name, _range) in inherent_methods {
+                    debug_print!(
+                        self,
+                        "Found inherent method: {}::{}",
+                        type_name,
+                        method_name
+                    );
+                    methods_by_type
+                        .entry(type_name.to_string())
+                        .or_default()
+                        .push(method_name.to_string());
+                }
 
-                    // Register with trait resolver
-                    for (type_name, methods) in methods_by_type {
-                        self.trait_resolver.add_inherent_methods(type_name, methods);
-                    }
+                // Register with trait resolver
+                for (type_name, methods) in methods_by_type {
+                    self.trait_resolver.add_inherent_methods(type_name, methods);
                 }
             }
         }
@@ -2745,7 +2741,7 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    use crate::{FileId, RelationKind, Symbol, SymbolId, SymbolKind, Visibility};
+    use crate::{FileId, RelationKind, Symbol, SymbolKind, Visibility};
     use crate::types::SymbolCounter;
     use crate::parsing::{RustBehavior, PythonBehavior, PhpBehavior};
 
@@ -3041,8 +3037,10 @@ fn main() {
 
     #[test]
     fn test_symbols_in_same_module() {
+        let mut symbol_counter = SymbolCounter::new();
+        
         let sym1 = Symbol::new(
-            SymbolId::new(1).unwrap(),
+            symbol_counter.next(),
             "test1",
             SymbolKind::Function,
             FileId::new(1).unwrap(),
@@ -3051,7 +3049,7 @@ fn main() {
         .with_module_path("crate::module_a");
 
         let sym2 = Symbol::new(
-            SymbolId::new(2).unwrap(),
+            symbol_counter.next(),
             "test2",
             SymbolKind::Function,
             FileId::new(1).unwrap(),
@@ -3060,7 +3058,7 @@ fn main() {
         .with_module_path("crate::module_a");
 
         let sym3 = Symbol::new(
-            SymbolId::new(3).unwrap(),
+            symbol_counter.next(),
             "test3",
             SymbolKind::Function,
             FileId::new(2).unwrap(),
@@ -3069,7 +3067,7 @@ fn main() {
         .with_module_path("crate::module_b");
 
         let sym4 = Symbol::new(
-            SymbolId::new(4).unwrap(),
+            symbol_counter.next(),
             "test4",
             SymbolKind::Function,
             FileId::new(2).unwrap(),
@@ -3084,8 +3082,10 @@ fn main() {
 
     #[test]
     fn test_is_symbol_visible_from() {
+        let mut symbol_counter = SymbolCounter::new();
+        
         let pub_sym = Symbol::new(
-            SymbolId::new(1).unwrap(),
+            symbol_counter.next(),
             "public_fn",
             SymbolKind::Function,
             FileId::new(1).unwrap(),
@@ -3095,7 +3095,7 @@ fn main() {
         .with_visibility(Visibility::Public);
 
         let priv_sym = Symbol::new(
-            SymbolId::new(2).unwrap(),
+            symbol_counter.next(),
             "private_fn",
             SymbolKind::Function,
             FileId::new(1).unwrap(),
@@ -3105,7 +3105,7 @@ fn main() {
         .with_visibility(Visibility::Private);
 
         let other_module_sym = Symbol::new(
-            SymbolId::new(3).unwrap(),
+            symbol_counter.next(),
             "other_fn",
             SymbolKind::Function,
             FileId::new(2).unwrap(),
@@ -3623,10 +3623,11 @@ pub struct Another {
         
         let indexer = SimpleIndexer::new();
         let behavior = RustBehavior::new();
+        let mut symbol_counter = SymbolCounter::new();
         
         // Test case 1: Rust with public function
         let mut symbol = Symbol {
-            id: SymbolId(1),
+            id: symbol_counter.next(),
             name: "test_function".into(),
             kind: SymbolKind::Function,
             signature: Some("pub fn test_function() -> Result<()>".into()),
@@ -3653,9 +3654,10 @@ pub struct Another {
         
         let indexer = SimpleIndexer::new();
         let behavior = PythonBehavior::new();
+        let mut symbol_counter = SymbolCounter::new();
         
         let mut symbol = Symbol {
-            id: SymbolId(1),
+            id: symbol_counter.next(),
             name: "test_function".into(),
             kind: SymbolKind::Function,
             signature: Some("def test_function():".into()),
@@ -3685,9 +3687,10 @@ pub struct Another {
         
         let indexer = SimpleIndexer::new();
         let behavior = PhpBehavior::new();
+        let mut symbol_counter = SymbolCounter::new();
         
         let mut symbol = Symbol {
-            id: SymbolId(1),
+            id: symbol_counter.next(),
             name: "testFunction".into(),
             kind: SymbolKind::Function,
             signature: Some("public function testFunction()".into()),

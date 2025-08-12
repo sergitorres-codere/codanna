@@ -57,10 +57,6 @@ impl LanguageBehavior for RustBehavior {
     fn get_language(&self) -> Language {
         self.language.clone()
     }
-    
-    fn get_language_type(&self) -> crate::parsing::Language {
-        crate::parsing::Language::Rust
-    }
 }
 
 #[cfg(test)]
