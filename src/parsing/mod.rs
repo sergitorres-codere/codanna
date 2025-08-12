@@ -1,13 +1,18 @@
 pub mod factory;
 pub mod language;
+pub mod language_behavior;
 pub mod method_call;
 pub mod parser;
 pub mod php;
+pub mod php_behavior;
 pub mod python;
+pub mod python_behavior;
 pub mod rust;
+pub mod rust_behavior;
 
 pub use factory::ParserFactory;
 pub use language::Language;
+pub use language_behavior::{LanguageBehavior, LanguageMetadata};
 pub use method_call::MethodCall;
 pub use parser::LanguageParser;
 pub use php::PhpParser;
