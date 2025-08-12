@@ -1,3 +1,7 @@
+mod symbol_counter;
+
+pub use symbol_counter::SymbolCounter;
+
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 

@@ -4,6 +4,7 @@
 //! must implement to work with the indexing system.
 
 use crate::parsing::method_call::MethodCall;
+use crate::types::SymbolCounter;
 use crate::{FileId, Range, Symbol};
 use std::any::Any;
 use tree_sitter::Node;
@@ -11,7 +12,7 @@ use tree_sitter::Node;
 /// Common interface for all language parsers
 pub trait LanguageParser: Send + Sync {
     /// Parse source code and extract symbols
-    fn parse(&mut self, code: &str, file_id: FileId, symbol_counter: &mut u32) -> Vec<Symbol>;
+    fn parse(&mut self, code: &str, file_id: FileId, symbol_counter: &mut SymbolCounter) -> Vec<Symbol>;
 
     /// Enable downcasting to concrete parser types
     fn as_any(&self) -> &dyn Any;

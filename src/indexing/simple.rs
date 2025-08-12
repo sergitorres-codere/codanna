@@ -9,6 +9,7 @@ use crate::parsing::{Language, MethodCall, ParserFactory};
 use crate::relationship::RelationshipMetadata;
 use crate::semantic::SimpleSemanticSearch;
 use crate::storage::{DocumentIndex, SearchResult};
+use crate::types::SymbolCounter;
 use crate::vector::{EmbeddingGenerator, VectorSearchEngine, create_symbol_text};
 use crate::{
     FileId, IndexError, IndexResult, RelationKind, Relationship, Settings, Symbol, SymbolId,
@@ -670,7 +671,7 @@ impl SimpleIndexer {
             &mut symbol_counter,
         )?;
         self.extract_and_store_relationships(&mut parser, content, file_id)?;
-        self.update_symbol_counter(symbol_counter)?;
+        self.update_symbol_counter(&symbol_counter)?;
 
         Ok(file_id)
     }
@@ -736,13 +737,18 @@ impl SimpleIndexer {
     }
 
     /// Get the next symbol counter from Tantivy
-    fn get_next_symbol_counter(&self) -> IndexResult<u32> {
-        self.document_index
+    fn get_next_symbol_counter(&self) -> IndexResult<SymbolCounter> {
+        let next_id = self.document_index
             .get_next_symbol_id()
             .map_err(|e| IndexError::TantivyError {
                 operation: "get_next_symbol_id".to_string(),
                 cause: e.to_string(),
-            })
+            })?;
+        
+        // Create a counter starting from the next available ID
+        // If next_id is 0 (shouldn't happen), start from 1
+        let start_value = if next_id == 0 { 1 } else { next_id };
+        Ok(SymbolCounter::from_value(start_value))
     }
 
     /// Extract symbols from content and store them in Tantivy
@@ -754,7 +760,7 @@ impl SimpleIndexer {
         path_str: &str,
         module_path: &Option<String>,
         language: Language,
-        symbol_counter: &mut u32,
+        symbol_counter: &mut SymbolCounter,
     ) -> IndexResult<()> {
         let symbols = parser.parse(content, file_id, symbol_counter);
 
@@ -1108,11 +1114,11 @@ impl SimpleIndexer {
     }
 
     /// Update the symbol counter in Tantivy metadata
-    fn update_symbol_counter(&mut self, symbol_counter: u32) -> IndexResult<()> {
+    fn update_symbol_counter(&mut self, symbol_counter: &SymbolCounter) -> IndexResult<()> {
         self.document_index
             .store_metadata(
                 crate::storage::MetadataKey::SymbolCounter,
-                symbol_counter as u64,
+                symbol_counter.current_count() as u64,
             )
             .map_err(|e| IndexError::TantivyError {
                 operation: "store_metadata".to_string(),
@@ -2774,11 +2780,10 @@ mod tests {
         // Start transaction to get proper symbol IDs
         indexer.start_tantivy_batch().unwrap();
 
-        // Get proper symbol IDs - counter starts at 0, so first ID is 1
-        let counter1 = indexer.get_next_symbol_counter().unwrap();
-        let counter2 = counter1 + 1;
-        let trait_id = SymbolId(counter1);
-        let struct_id = SymbolId(counter2);
+        // Get proper symbol IDs using the counter
+        let mut counter = indexer.get_next_symbol_counter().unwrap();
+        let trait_id = counter.next();
+        let struct_id = counter.next();
 
         // Create symbols with proper IDs
         let trait_symbol = Symbol {

@@ -9,6 +9,7 @@ use clap::{
 };
 use codanna::FileId;
 use codanna::parsing::{LanguageParser, PhpParser, PythonParser, RustParser};
+use codanna::types::SymbolCounter;
 use codanna::{IndexPersistence, RelationKind, Settings, SimpleIndexer, Symbol, SymbolKind};
 use serde::Serialize;
 use std::path::PathBuf;
@@ -3091,7 +3092,7 @@ fn benchmark_parser(
     file_path: Option<PathBuf>,
 ) {
     let file_id = FileId::new(1).expect("Failed to create file ID");
-    let mut counter = 1;
+    let mut counter = SymbolCounter::new();
 
     // Warm up
     let _ = parser.parse(code, file_id, &mut counter);
@@ -3101,7 +3102,7 @@ fn benchmark_parser(
     let mut symbols_count = 0;
 
     for _ in 0..3 {
-        counter = 1;
+        counter = SymbolCounter::new();
         let start = Instant::now();
         let symbols = parser.parse(code, file_id, &mut counter);
         total_duration += start.elapsed();

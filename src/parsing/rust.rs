@@ -28,7 +28,8 @@
 use crate::indexing::Import;
 use crate::parsing::method_call::MethodCall;
 use crate::parsing::{Language, LanguageParser};
-use crate::{FileId, Range, Symbol, SymbolId, SymbolKind};
+use crate::types::SymbolCounter;
+use crate::{FileId, Range, Symbol, SymbolKind};
 use tree_sitter::{Node, Parser};
 
 /// Debug print macro that respects the debug setting
@@ -243,7 +244,7 @@ impl RustParser {
         }
     }
 
-    pub fn parse(&mut self, code: &str, file_id: FileId, symbol_counter: &mut u32) -> Vec<Symbol> {
+    pub fn parse(&mut self, code: &str, file_id: FileId, symbol_counter: &mut SymbolCounter) -> Vec<Symbol> {
         let tree = match self.parser.parse(code, None) {
             Some(tree) => tree,
             None => return Vec::new(),
@@ -264,7 +265,7 @@ impl RustParser {
         code: &str,
         file_id: FileId,
         symbols: &mut Vec<Symbol>,
-        counter: &mut u32,
+        counter: &mut SymbolCounter,
     ) {
         match node.kind() {
             "function_item" => {
@@ -1044,7 +1045,7 @@ impl RustParser {
 
     fn create_symbol(
         &self,
-        counter: &mut u32,
+        counter: &mut SymbolCounter,
         name_node: Node,
         kind: SymbolKind,
         file_id: FileId,
@@ -1052,8 +1053,7 @@ impl RustParser {
     ) -> Option<Symbol> {
         let name = &code[name_node.byte_range()];
 
-        let symbol_id = SymbolId::new(*counter)?;
-        *counter += 1;
+        let symbol_id = counter.next();
 
         let range = Range::new(
             name_node.start_position().row as u32,
@@ -1147,7 +1147,7 @@ impl RustParser {
 }
 
 impl LanguageParser for RustParser {
-    fn parse(&mut self, code: &str, file_id: FileId, symbol_counter: &mut u32) -> Vec<Symbol> {
+    fn parse(&mut self, code: &str, file_id: FileId, symbol_counter: &mut SymbolCounter) -> Vec<Symbol> {
         self.parse(code, file_id, symbol_counter)
     }
 
@@ -1236,7 +1236,7 @@ mod tests {
         let code = "fn add(a: i32, b: i32) -> i32 { a + b }";
         let file_id = FileId::new(1).unwrap();
 
-        let mut counter = 1u32;
+        let mut counter = SymbolCounter::new();
         let symbols = parser.parse(code, file_id, &mut counter);
 
         assert_eq!(symbols.len(), 1);
@@ -1255,7 +1255,7 @@ mod tests {
         "#;
         let file_id = FileId::new(1).unwrap();
 
-        let mut counter = 1u32;
+        let mut counter = SymbolCounter::new();
         let symbols = parser.parse(code, file_id, &mut counter);
 
         assert_eq!(symbols.len(), 1);
@@ -1337,7 +1337,7 @@ mod tests {
         "#;
         let file_id = FileId::new(1).unwrap();
 
-        let mut counter = 1u32;
+        let mut counter = SymbolCounter::new();
         let symbols = parser.parse(code, file_id, &mut counter);
 
         // The parser correctly extracts 5 symbols including trait methods
@@ -1411,7 +1411,7 @@ mod tests {
         let code = std::fs::read_to_string(test_file).unwrap();
         let file_id = FileId::new(1).unwrap();
 
-        let mut counter = 1u32;
+        let mut counter = SymbolCounter::new();
         let symbols = parser.parse(&code, file_id, &mut counter);
 
         // Should find: add, multiply, Point, Point::new, Point::distance,
@@ -1669,7 +1669,7 @@ fn simple_doc() {}
         "#;
 
         let file_id = FileId::new(1).unwrap();
-        let mut counter = 1u32;
+        let mut counter = SymbolCounter::new();
         let symbols = parser.parse(code, file_id, &mut counter);
 
         // Find documented_function
@@ -1736,7 +1736,7 @@ struct PrivateStruct {}
         "#;
 
         let file_id = FileId::new(1).unwrap();
-        let mut counter = 1u32;
+        let mut counter = SymbolCounter::new();
         let symbols = parser.parse(code, file_id, &mut counter);
 
         // Find public_function
@@ -1778,7 +1778,7 @@ fn trim_test() {}
         "#;
 
         let file_id = FileId::new(1).unwrap();
-        let mut counter = 1u32;
+        let mut counter = SymbolCounter::new();
         let symbols = parser.parse(code, file_id, &mut counter);
 
         // Test multi-line joining

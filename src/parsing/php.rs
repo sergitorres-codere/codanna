@@ -6,7 +6,8 @@
 
 use crate::indexing::Import;
 use crate::parsing::{Language, LanguageParser, MethodCall};
-use crate::{FileId, Range, Symbol, SymbolId, SymbolKind};
+use crate::types::SymbolCounter;
+use crate::{FileId, Range, Symbol, SymbolKind};
 use std::any::Any;
 use thiserror::Error;
 use tree_sitter::{Node, Parser};
@@ -80,7 +81,7 @@ impl PhpParser {
         code: &str,
         file_id: FileId,
         symbols: &mut Vec<Symbol>,
-        counter: &mut u32,
+        counter: &mut SymbolCounter,
     ) {
         match node.kind() {
             "function_definition" => {
@@ -141,13 +142,12 @@ impl PhpParser {
         node: Node,
         code: &str,
         file_id: FileId,
-        counter: &mut u32,
+        counter: &mut SymbolCounter,
     ) -> Option<Symbol> {
         let name_node = node.child_by_field_name("name")?;
         let name = &code[name_node.byte_range()];
 
-        *counter += 1;
-        let id = SymbolId(*counter);
+        let id = counter.next();
 
         let mut symbol = Symbol::new(
             id,
@@ -166,13 +166,12 @@ impl PhpParser {
         node: Node,
         code: &str,
         file_id: FileId,
-        counter: &mut u32,
+        counter: &mut SymbolCounter,
     ) -> Option<Symbol> {
         let name_node = node.child_by_field_name("name")?;
         let name = &code[name_node.byte_range()];
 
-        *counter += 1;
-        let id = SymbolId(*counter);
+        let id = counter.next();
 
         let mut symbol = Symbol::new(
             id,
@@ -191,13 +190,12 @@ impl PhpParser {
         node: Node,
         code: &str,
         file_id: FileId,
-        counter: &mut u32,
+        counter: &mut SymbolCounter,
     ) -> Option<Symbol> {
         let name_node = node.child_by_field_name("name")?;
         let name = &code[name_node.byte_range()];
 
-        *counter += 1;
-        let id = SymbolId(*counter);
+        let id = counter.next();
 
         // Using Class for PHP classes
         let mut symbol = Symbol::new(
@@ -217,13 +215,12 @@ impl PhpParser {
         node: Node,
         code: &str,
         file_id: FileId,
-        counter: &mut u32,
+        counter: &mut SymbolCounter,
     ) -> Option<Symbol> {
         let name_node = node.child_by_field_name("name")?;
         let name = &code[name_node.byte_range()];
 
-        *counter += 1;
-        let id = SymbolId(*counter);
+        let id = counter.next();
 
         // Using Interface for PHP interfaces
         let mut symbol = Symbol::new(
@@ -243,13 +240,12 @@ impl PhpParser {
         node: Node,
         code: &str,
         file_id: FileId,
-        counter: &mut u32,
+        counter: &mut SymbolCounter,
     ) -> Option<Symbol> {
         let name_node = node.child_by_field_name("name")?;
         let name = &code[name_node.byte_range()];
 
-        *counter += 1;
-        let id = SymbolId(*counter);
+        let id = counter.next();
 
         let mut symbol = Symbol::new(
             id,
@@ -268,7 +264,7 @@ impl PhpParser {
         node: Node,
         code: &str,
         file_id: FileId,
-        counter: &mut u32,
+        counter: &mut SymbolCounter,
     ) -> Option<Symbol> {
         // Find the property element within the declaration
         let mut cursor = node.walk();
@@ -279,8 +275,7 @@ impl PhpParser {
                     // Remove $ prefix from property name if present
                     let clean_name = name.strip_prefix('$').unwrap_or(name);
 
-                    *counter += 1;
-                    let id = SymbolId(*counter);
+                    let id = counter.next();
 
                     let mut symbol = Symbol::new(
                         id,
@@ -303,7 +298,7 @@ impl PhpParser {
         node: Node,
         code: &str,
         file_id: FileId,
-        counter: &mut u32,
+        counter: &mut SymbolCounter,
     ) -> Option<Symbol> {
         // Find the const element within the declaration
         let mut cursor = node.walk();
@@ -312,8 +307,7 @@ impl PhpParser {
                 if let Some(name_node) = child.child_by_field_name("name") {
                     let name = &code[name_node.byte_range()];
 
-                    *counter += 1;
-                    let id = SymbolId(*counter);
+                    let id = counter.next();
 
                     let mut symbol = Symbol::new(
                         id,
@@ -337,7 +331,7 @@ impl PhpParser {
         code: &str,
         file_id: FileId,
         symbols: &mut Vec<Symbol>,
-        counter: &mut u32,
+        counter: &mut SymbolCounter,
     ) {
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
@@ -347,7 +341,7 @@ impl PhpParser {
 }
 
 impl LanguageParser for PhpParser {
-    fn parse(&mut self, code: &str, file_id: FileId, symbol_counter: &mut u32) -> Vec<Symbol> {
+    fn parse(&mut self, code: &str, file_id: FileId, symbol_counter: &mut SymbolCounter) -> Vec<Symbol> {
         let tree = match self.parser.parse(code, None) {
             Some(tree) => tree,
             None => return Vec::new(),

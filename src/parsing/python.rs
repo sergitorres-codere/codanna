@@ -6,7 +6,8 @@
 
 use crate::indexing::Import;
 use crate::parsing::{Language, LanguageParser, MethodCall};
-use crate::{FileId, Range, Symbol, SymbolId, SymbolKind};
+use crate::types::SymbolCounter;
+use crate::{FileId, Range, Symbol, SymbolKind};
 use std::any::Any;
 use thiserror::Error;
 use tree_sitter::{Node, Parser};
@@ -68,7 +69,7 @@ impl PythonParser {
         code: &str,
         file_id: FileId,
         symbols: &mut Vec<Symbol>,
-        counter: &mut u32,
+        counter: &mut SymbolCounter,
     ) {
         match node.kind() {
             "function_definition" => {
@@ -98,12 +99,11 @@ impl PythonParser {
         node: Node,
         code: &str,
         file_id: FileId,
-        counter: &mut u32,
+        counter: &mut SymbolCounter,
     ) -> Option<Symbol> {
         let name = self.extract_function_name(node, code)?;
         let range = self.node_to_range(node);
-        let symbol_id = SymbolId::new(*counter)?;
-        *counter += 1;
+        let symbol_id = counter.next();
 
         // Determine if this is a method by checking if it's inside a class
         let kind = if self.is_inside_class(node) {
@@ -132,12 +132,11 @@ impl PythonParser {
         node: Node,
         code: &str,
         file_id: FileId,
-        counter: &mut u32,
+        counter: &mut SymbolCounter,
     ) -> Option<Symbol> {
         let name = self.extract_class_name(node, code)?;
         let range = self.node_to_range(node);
-        let symbol_id = SymbolId::new(*counter)?;
-        *counter += 1;
+        let symbol_id = counter.next();
 
         // Extract docstring
         let doc_comment = self
@@ -156,7 +155,7 @@ impl PythonParser {
         code: &str,
         file_id: FileId,
         symbols: &mut Vec<Symbol>,
-        counter: &mut u32,
+        counter: &mut SymbolCounter,
     ) {
         for child in node.children(&mut node.walk()) {
             self.extract_symbols_from_node(child, code, file_id, symbols, counter);
@@ -938,7 +937,7 @@ impl PythonParser {
 }
 
 impl LanguageParser for PythonParser {
-    fn parse(&mut self, code: &str, file_id: FileId, symbol_counter: &mut u32) -> Vec<Symbol> {
+    fn parse(&mut self, code: &str, file_id: FileId, symbol_counter: &mut SymbolCounter) -> Vec<Symbol> {
         let tree = match self.parser.parse(code, None) {
             Some(tree) => tree,
             None => return Vec::new(),
@@ -1074,7 +1073,7 @@ mod tests {
         let code = "def hello():\n    pass";
         println!("Parsing: {code}");
         println!("---");
-        let symbols = parser.parse(code, FileId::new(1).unwrap(), &mut 1);
+        let symbols = parser.parse(code, FileId::new(1).unwrap(), &mut SymbolCounter::new());
 
         assert_eq!(symbols.len(), 1);
         let func = &symbols[0];
@@ -1111,7 +1110,7 @@ mod tests {
         let code = "class Person:\n    pass";
         println!("Parsing: {code}");
         println!("---");
-        let symbols = parser.parse(code, FileId::new(1).unwrap(), &mut 1);
+        let symbols = parser.parse(code, FileId::new(1).unwrap(), &mut SymbolCounter::new());
 
         assert_eq!(symbols.len(), 1);
         let class = &symbols[0];
@@ -1155,7 +1154,7 @@ class Calculator:
 "#;
         println!("Parsing class Calculator with methods...");
         println!("---");
-        let symbols = parser.parse(code, FileId::new(1).unwrap(), &mut 1);
+        let symbols = parser.parse(code, FileId::new(1).unwrap(), &mut SymbolCounter::new());
 
         assert_eq!(symbols.len(), 3); // Calculator, __init__, add
         assert!(
@@ -1224,7 +1223,7 @@ def outer():
         pass
     return inner
 "#;
-        let symbols = parser.parse(code, FileId::new(1).unwrap(), &mut 1);
+        let symbols = parser.parse(code, FileId::new(1).unwrap(), &mut SymbolCounter::new());
 
         // Both outer and inner should be functions (not methods) since they're not in a class
         assert_eq!(symbols.len(), 2);
@@ -1258,7 +1257,7 @@ def calculate_area(radius):
 "#;
         println!("Extracting docstring for function \"calculate_area\"...");
         println!("---");
-        let symbols = parser.parse(code, FileId::new(1).unwrap(), &mut 1);
+        let symbols = parser.parse(code, FileId::new(1).unwrap(), &mut SymbolCounter::new());
 
         let func = symbols
             .iter()
@@ -1296,7 +1295,7 @@ class DatabaseConnection:
 "#;
         println!("Extracting docstring for class \"DatabaseConnection\"...");
         println!("---");
-        let symbols = parser.parse(code, FileId::new(1).unwrap(), &mut 1);
+        let symbols = parser.parse(code, FileId::new(1).unwrap(), &mut SymbolCounter::new());
 
         let class = symbols
             .iter()
@@ -1327,7 +1326,7 @@ def simple():
     "This is a simple docstring."
     pass
 "#;
-        let symbols1 = parser.parse(code1, FileId::new(1).unwrap(), &mut 1);
+        let symbols1 = parser.parse(code1, FileId::new(1).unwrap(), &mut SymbolCounter::new());
         let func1 = symbols1
             .iter()
             .find(|s| s.name.as_ref() == "simple")
@@ -1344,7 +1343,7 @@ def another():
     'Another simple docstring.'
     pass
 "#;
-        let symbols2 = parser.parse(code2, FileId::new(1).unwrap(), &mut 10);
+        let symbols2 = parser.parse(code2, FileId::new(1).unwrap(), &mut SymbolCounter::from_value(10));
         let func2 = symbols2
             .iter()
             .find(|s| s.name.as_ref() == "another")
@@ -1361,7 +1360,7 @@ def no_doc():
     x = 42
     return x
 "#;
-        let symbols3 = parser.parse(code3, FileId::new(1).unwrap(), &mut 20);
+        let symbols3 = parser.parse(code3, FileId::new(1).unwrap(), &mut SymbolCounter::from_value(20));
         let func3 = symbols3
             .iter()
             .find(|s| s.name.as_ref() == "no_doc")
@@ -1384,7 +1383,7 @@ class TestClass:
     '''
     pass
 "#;
-        let symbols = parser.parse(code, FileId::new(1).unwrap(), &mut 1);
+        let symbols = parser.parse(code, FileId::new(1).unwrap(), &mut SymbolCounter::new());
         let class = symbols
             .iter()
             .find(|s| s.name.as_ref() == "TestClass")
@@ -1709,7 +1708,7 @@ def process_items(items: List[str], count: int = 10) -> Dict[str, int]:
 "#;
         println!("Parsing typed function signature...");
         println!("---");
-        let symbols = parser.parse(code, FileId::new(1).unwrap(), &mut 1);
+        let symbols = parser.parse(code, FileId::new(1).unwrap(), &mut SymbolCounter::new());
 
         let func = symbols
             .iter()
@@ -1735,7 +1734,7 @@ def process_items(items: List[str], count: int = 10) -> Dict[str, int]:
 
         // Function without type annotations
         let code1 = "def simple(x, y=10): pass";
-        let symbols1 = parser.parse(code1, FileId::new(1).unwrap(), &mut 1);
+        let symbols1 = parser.parse(code1, FileId::new(1).unwrap(), &mut SymbolCounter::new());
         let func1 = &symbols1[0];
         assert!(func1.signature.is_some());
         let sig1 = func1.signature.as_ref().unwrap();
@@ -1743,7 +1742,7 @@ def process_items(items: List[str], count: int = 10) -> Dict[str, int]:
 
         // Function with only return type
         let code2 = "def get_number() -> int: pass";
-        let symbols2 = parser.parse(code2, FileId::new(1).unwrap(), &mut 10);
+        let symbols2 = parser.parse(code2, FileId::new(1).unwrap(), &mut SymbolCounter::from_value(10));
         let func2 = &symbols2[0];
         assert!(func2.signature.is_some());
         let sig2 = func2.signature.as_ref().unwrap();
@@ -1751,7 +1750,7 @@ def process_items(items: List[str], count: int = 10) -> Dict[str, int]:
 
         // Mixed typed and untyped parameters
         let code3 = "def mixed(name, age: int, city='NYC'): pass";
-        let symbols3 = parser.parse(code3, FileId::new(1).unwrap(), &mut 20);
+        let symbols3 = parser.parse(code3, FileId::new(1).unwrap(), &mut SymbolCounter::from_value(20));
         let func3 = &symbols3[0];
         assert!(func3.signature.is_some());
         let sig3 = func3.signature.as_ref().unwrap();
@@ -1762,7 +1761,7 @@ def process_items(items: List[str], count: int = 10) -> Dict[str, int]:
         // Complex generic types
         let code4 =
             "def complex_types(data: Dict[str, List[int]]) -> Optional[Tuple[str, int]]: pass";
-        let symbols4 = parser.parse(code4, FileId::new(1).unwrap(), &mut 30);
+        let symbols4 = parser.parse(code4, FileId::new(1).unwrap(), &mut SymbolCounter::from_value(30));
         let func4 = &symbols4[0];
         assert!(func4.signature.is_some());
         let sig4 = func4.signature.as_ref().unwrap();
@@ -1778,7 +1777,7 @@ def process_items(items: List[str], count: int = 10) -> Dict[str, int]:
 async def fetch_data(url: str, timeout: float = 5.0) -> Dict[str, Any]:
     pass
 "#;
-        let symbols = parser.parse(code, FileId::new(1).unwrap(), &mut 1);
+        let symbols = parser.parse(code, FileId::new(1).unwrap(), &mut SymbolCounter::new());
 
         let func = symbols
             .iter()
@@ -2004,7 +2003,7 @@ async def fetch_data(url: str) -> Dict:
 "#;
         println!("Parsing async function...");
         println!("---");
-        let symbols = parser.parse(code, FileId::new(1).unwrap(), &mut 1);
+        let symbols = parser.parse(code, FileId::new(1).unwrap(), &mut SymbolCounter::new());
 
         let func = symbols
             .iter()
@@ -2033,7 +2032,7 @@ class APIClient:
     def sync_method(self):
         return "sync"
 "#;
-        let symbols = parser.parse(code, FileId::new(1).unwrap(), &mut 1);
+        let symbols = parser.parse(code, FileId::new(1).unwrap(), &mut SymbolCounter::new());
 
         // Should find class and both methods
         assert_eq!(symbols.len(), 3);
@@ -2069,7 +2068,7 @@ class APIClient:
 
         // Async function with no parameters
         let code1 = "async def background_task(): pass";
-        let symbols1 = parser.parse(code1, FileId::new(1).unwrap(), &mut 1);
+        let symbols1 = parser.parse(code1, FileId::new(1).unwrap(), &mut SymbolCounter::new());
         let func1 = &symbols1[0];
         assert!(func1.signature.as_ref().unwrap().contains("async"));
         assert!(func1.signature.as_ref().unwrap().contains("()"));
@@ -2080,7 +2079,7 @@ class APIClient:
     *args: Any, 
     **kwargs: Dict[str, Any]
 ) -> Optional[Result]: pass"#;
-        let symbols2 = parser.parse(code2, FileId::new(1).unwrap(), &mut 10);
+        let symbols2 = parser.parse(code2, FileId::new(1).unwrap(), &mut SymbolCounter::from_value(10));
         let func2 = &symbols2[0];
         assert!(func2.signature.as_ref().unwrap().contains("async"));
         assert!(
@@ -2097,7 +2096,7 @@ def regular_func(): pass
 async def async_func(): pass
 def another_regular(): pass
 "#;
-        let symbols3 = parser.parse(code3, FileId::new(1).unwrap(), &mut 20);
+        let symbols3 = parser.parse(code3, FileId::new(1).unwrap(), &mut SymbolCounter::from_value(20));
         assert_eq!(symbols3.len(), 3);
 
         let regular1 = symbols3
@@ -2157,7 +2156,7 @@ async def process_batch(items: List[str]) -> Dict[str, Any]:
     return {"processed": len(results), "items": results}
 "#;
 
-        let symbols = parser.parse(code, FileId::new(1).unwrap(), &mut 1);
+        let symbols = parser.parse(code, FileId::new(1).unwrap(), &mut SymbolCounter::new());
 
         // Should find: class, async method, sync method, async function
         assert_eq!(symbols.len(), 4);
