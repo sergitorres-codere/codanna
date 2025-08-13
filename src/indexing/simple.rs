@@ -3631,8 +3631,16 @@ pub struct Another {
     #[test]
     fn test_configure_symbol_baseline_rust() {
         use crate::parsing::rust_behavior::RustBehavior;
+        use tempfile::TempDir;
 
-        let indexer = SimpleIndexer::new();
+        // Create temp directory for test
+        let temp_dir = TempDir::new().unwrap();
+        let settings = Settings {
+            workspace_root: Some(temp_dir.path().to_path_buf()),
+            ..Settings::default()
+        };
+
+        let indexer = SimpleIndexer::with_settings(Arc::new(settings));
         let behavior = RustBehavior::new();
         let mut symbol_counter = SymbolCounter::new();
 
@@ -3665,8 +3673,16 @@ pub struct Another {
     #[test]
     fn test_configure_symbol_baseline_python() {
         use crate::parsing::python_behavior::PythonBehavior;
+        use tempfile::TempDir;
 
-        let indexer = SimpleIndexer::new();
+        // Create temp directory for test
+        let temp_dir = TempDir::new().unwrap();
+        let settings = Settings {
+            workspace_root: Some(temp_dir.path().to_path_buf()),
+            ..Settings::default()
+        };
+
+        let indexer = SimpleIndexer::with_settings(Arc::new(settings));
         let behavior = PythonBehavior::new();
         let mut symbol_counter = SymbolCounter::new();
 
@@ -3695,8 +3711,16 @@ pub struct Another {
     #[test]
     fn test_configure_symbol_php_baseline() {
         use crate::parsing::php_behavior::PhpBehavior;
+        use tempfile::TempDir;
 
-        let indexer = SimpleIndexer::new();
+        // Create temp directory for test
+        let temp_dir = TempDir::new().unwrap();
+        let settings = Settings {
+            workspace_root: Some(temp_dir.path().to_path_buf()),
+            ..Settings::default()
+        };
+
+        let indexer = SimpleIndexer::with_settings(Arc::new(settings));
         let behavior = PhpBehavior::new();
         let mut symbol_counter = SymbolCounter::new();
 
@@ -3728,7 +3752,16 @@ pub struct Another {
             php_behavior::PhpBehavior, python_behavior::PythonBehavior, rust_behavior::RustBehavior,
         };
 
-        let indexer = SimpleIndexer::new();
+        use tempfile::TempDir;
+
+        // Create temp directory for test
+        let temp_dir = TempDir::new().unwrap();
+        let settings = Settings {
+            workspace_root: Some(temp_dir.path().to_path_buf()),
+            ..Settings::default()
+        };
+
+        let indexer = SimpleIndexer::with_settings(Arc::new(settings));
         let rust_behavior = RustBehavior::new();
         let python_behavior = PythonBehavior::new();
         let php_behavior = PhpBehavior::new();

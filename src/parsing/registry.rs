@@ -143,7 +143,7 @@ pub trait LanguageDefinition: Send + Sync {
     fn create_behavior(&self) -> Box<dyn LanguageBehavior>;
 
     /// Check if this language is enabled in settings
-    /// Default implementation checks settings.languages[id].enabled
+    /// Default implementation checks `settings.languages\[id\].enabled`
     fn is_enabled(&self, settings: &Settings) -> bool {
         settings
             .languages
