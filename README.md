@@ -315,9 +315,9 @@ Parser benchmarks on a 750-symbol test file:
 
 | Language | Parsing Speed | vs. Target (10k/s) | Status |
 |----------|---------------|-------------------|--------|
-| **Rust** | 91,318 symbols/sec | 9.1x faster ✅ | Production |
-| **Python** | 75,047 symbols/sec | 7.5x faster ✅ | Production |
-| **PHP** | 68,432 symbols/sec | 6.8x faster ✅ | Production |
+| **Rust** | 91,318 symbols/sec | 9.1x faster ✓ | Production |
+| **Python** | 75,047 symbols/sec | 7.5x faster ✓ | Production |
+| **PHP** | 68,432 symbols/sec | 6.8x faster ✓ | Production |
 | JavaScript | - | - | v0.4.1 |
 | TypeScript | - | - | v0.4.1 |
 
@@ -371,64 +371,64 @@ codanna benchmark python       # Test specific language
 ### v0.3.0 (Released)
 | Feature | Description | Status |
 |---------|-------------|--------|
-| [JSON Output Support](#json-output-support) | Structured output for all commands | ✅ |
-| [Exit Codes](#exit-codes) | Semantic exit codes for scripting | ✅ |
-| [Unix-Friendly CLI](#unix-friendly-cli) | Positional args and key:value syntax | ✅ |
-| [Incremental Index Updates](#incremental-index-updates) | File watching with auto re-indexing | ✅ |
+| [JSON Output Support](#json-output-support) | Structured output for all commands | ✓ |
+| [Exit Codes](#exit-codes) | Semantic exit codes for scripting | ✓ |
+| [Unix-Friendly CLI](#unix-friendly-cli) | Positional args and key:value syntax | ✓ |
+| [Incremental Index Updates](#incremental-index-updates) | File watching with auto re-indexing | ✓ |
 
-### v0.4.0 (Next Release)
+### v0.4.0 (Released)
 | Feature | Description | Status |
 |---------|-------------|--------|
-| [Language Registry Architecture](#language-registry-architecture) | Modular parser system for easy language additions | ✅ |
-| [PHP Support](#php-support) | Full PHP parser implementation | ✅ |
-| [Python Enhancements](#python-enhancements) | Complete Python class and decorator support | 🔧 |
+| [Language Registry Architecture](#language-registry-architecture) | Modular parser system for easy language additions | ✓ |
+| [PHP Support](#php-support) | Full PHP parser implementation | ✓ |
+| [Enhanced Symbol Extraction](#enhanced-symbol-extraction) | Comprehensive symbol extraction for all parsers | ✓ |
 
 ### v0.4.1 (Planned)
 | Feature | Description | Status |
 |---------|-------------|--------|
-| [JavaScript Support](#javascript-support) | Full JavaScript/ES6+ parser | 📋 |
-| [TypeScript Support](#typescript-support) | TypeScript with type annotations | 📋 |
+| [JavaScript Support](#javascript-support) | Full JavaScript/ES6+ parser | ○ |
+| [TypeScript Support](#typescript-support) | TypeScript with type annotations | ○ |
 
 ### v0.4.2 (Planned)
 | Feature | Description | Status |
 |---------|-------------|--------|
-| [Go Support](#go-support) | Go language with interfaces and goroutines | 📋 |
+| [Go Support](#go-support) | Go language with interfaces and goroutines | ○ |
 
 ### v0.4.3 (Planned)
 | Feature | Description | Status |
 |---------|-------------|--------|
-| [C# Support](#csharp-support) | C# with .NET ecosystem support | 📋 |
+| [C# Support](#csharp-support) | C# with .NET ecosystem support | ○ |
 
 ### v0.4.4 (Planned)
 | Feature | Description | Status |
 |---------|-------------|--------|
-| [Java Support](#java-support) | Java with class hierarchies | 📋 |
+| [Java Support](#java-support) | Java with class hierarchies | ○ |
 
 ### v0.4.5 (Planned)
 | Feature | Description | Status |
 |---------|-------------|--------|
-| [C/C++ Support](#c-cpp-support) | C and C++ with headers and templates | 📋 |
+| [C/C++ Support](#c-cpp-support) | C and C++ with headers and templates | ○ |
 
 ### v0.5.0 (Future)
 | Feature | Description | Status |
 |---------|-------------|--------|
-| [Direct Semantic Search](#direct-semantic-search) | `retrieve semantic` command | 📋 |
-| [Batch Operations](#batch-operations) | Process multiple symbols in one call | 📋 |
-| [Output Format Control](#output-format-control) | Compact/full/json output modes | 📋 |
-| [Query Language](#query-language) | Advanced search with complex filters | 📋 |
-| [Configuration Profiles](#configuration-profiles) | Environment-specific settings | 📋 |
-| [Machine-Readable Progress](#machine-readable-progress) | JSON progress output | 📋 |
-| [Cross-Language References](#cross-language-references) | Track references across languages | 📋 |
-| [Language Server Protocol](#language-server-protocol) | LSP integration for IDEs | 📋 |
+| [Direct Semantic Search](#direct-semantic-search) | `retrieve semantic` command | ○ |
+| [Batch Operations](#batch-operations) | Process multiple symbols in one call | ○ |
+| [Output Format Control](#output-format-control) | Compact/full/json output modes | ○ |
+| [Query Language](#query-language) | Advanced search with complex filters | ○ |
+| [Configuration Profiles](#configuration-profiles) | Environment-specific settings | ○ |
+| [Machine-Readable Progress](#machine-readable-progress) | JSON progress output | ○ |
+| [Cross-Language References](#cross-language-references) | Track references across languages | ○ |
+| [Language Server Protocol](#language-server-protocol) | LSP integration for IDEs | ○ |
 
-**Legend:** ✅ Complete | 🔧 In Progress | 📋 Planned
+**Legend:** ✓ Complete | → In Progress | ○ Planned
 
 ### Supported Languages
 
 #### Currently Supported (v0.4.0)
-- **Rust** - Full support with trait implementations and generics
-- **Python** - Functions, classes, and imports  
-- **PHP** - Classes, functions, and namespaces
+- **Rust** - Full support with traits, generics, enums, type aliases, constants, and statics
+- **Python** - Functions, classes, module-level variables, constants, and lambda functions
+- **PHP** - Classes, functions, namespaces, traits, global constants, and variables
 
 #### Coming Soon
 Based on developer demand and tree-sitter support:
@@ -461,6 +461,9 @@ Modular parser system where languages self-register via a registry. Enables easy
 
 #### php-support
 Full PHP parser with classes, functions, namespaces, and traits. Supports PHP 5 through PHP 8 syntax (v0.4.0).
+
+#### enhanced-symbol-extraction
+Expanded symbol extraction across all parsers. Rust now extracts enums, type aliases, constants, and statics. Python extracts module-level variables, constants by naming convention, and lambda functions. PHP extracts global constants (const and define) and global variables (v0.4.0).
 
 ### Planned Features
 

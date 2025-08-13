@@ -3,6 +3,13 @@
 //! This parser provides Python language support for the codebase intelligence system.
 //! It extracts symbols, relationships, and documentation from Python source code using
 //! tree-sitter for AST parsing.
+//!
+//! **Tree-sitter ABI Version**: ABI-14 (tree-sitter-python 0.23.6)
+//!
+//! Note: This parser uses ABI-14 (not ABI-15 like Rust). The tree-sitter-python
+//! grammar hasn't been regenerated with the newer CLI yet. All required node types
+//! are available in ABI-14. When upgrading to a newer tree-sitter-python version,
+//! verify compatibility with node type names used in this implementation.
 
 use crate::indexing::Import;
 use crate::parsing::{Language, LanguageParser, MethodCall};
@@ -86,6 +93,19 @@ impl PythonParser {
                 // Continue processing children to find methods inside the class
                 self.process_children(node, code, file_id, symbols, counter);
             }
+            "expression_statement" => {
+                // Check for assignments at module level
+                if let Some(child) = node.child(0) {
+                    if child.kind() == "assignment" && self.is_module_level(node) {
+                        if let Some(symbol) = self.process_assignment(child, code, file_id, counter)
+                        {
+                            symbols.push(symbol);
+                        }
+                    }
+                }
+                // Continue processing children
+                self.process_children(node, code, file_id, symbols, counter);
+            }
             _ => {
                 // Recursively process children
                 self.process_children(node, code, file_id, symbols, counter);
@@ -160,6 +180,67 @@ impl PythonParser {
         for child in node.children(&mut node.walk()) {
             self.extract_symbols_from_node(child, code, file_id, symbols, counter);
         }
+    }
+
+    /// Check if a node is at module level (not inside a function or class)
+    fn is_module_level(&self, node: Node) -> bool {
+        let mut parent = node.parent();
+        while let Some(p) = parent {
+            match p.kind() {
+                "function_definition" | "class_definition" => return false,
+                "module" => return true,
+                _ => parent = p.parent(),
+            }
+        }
+        true
+    }
+
+    /// Process an assignment node (module-level variables and constants)
+    fn process_assignment(
+        &self,
+        node: Node,
+        code: &str,
+        file_id: FileId,
+        counter: &mut SymbolCounter,
+    ) -> Option<Symbol> {
+        // Get the left side of the assignment (the variable name)
+        let left = node.child_by_field_name("left")?;
+
+        // Handle simple identifier assignments (not tuple unpacking for now)
+        if left.kind() == "identifier" {
+            let name = &code[left.byte_range()];
+            let range = self.node_to_range(node);
+            let symbol_id = counter.next_id();
+
+            // Determine if it's a constant (UPPER_CASE naming convention)
+            let kind = if name
+                .chars()
+                .all(|c| c.is_uppercase() || c == '_' || c.is_numeric())
+                && name.chars().any(|c| c.is_alphabetic())
+            {
+                SymbolKind::Constant
+            } else {
+                SymbolKind::Variable
+            };
+
+            let mut symbol = Symbol::new(symbol_id, name, kind, file_id, range);
+
+            // Try to extract the value as a simple signature
+            if let Some(right) = node.child_by_field_name("right") {
+                let value_preview = &code[right.byte_range()];
+                // Limit the signature to first 100 chars for readability
+                let truncated = if value_preview.len() > 100 {
+                    format!("{}...", &value_preview[..100])
+                } else {
+                    value_preview.to_string()
+                };
+                symbol.signature = Some(format!("{name} = {truncated}").into());
+            }
+
+            return Some(symbol);
+        }
+
+        None
     }
 
     /// Extract function name from function_definition node

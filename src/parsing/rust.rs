@@ -1,5 +1,10 @@
 //! Rust language parser implementation
 //!
+//! **Tree-sitter ABI Version**: ABI-15 (tree-sitter-rust 0.24.0)
+//!
+//! Note: This parser uses ABI-15 which includes enhanced metadata support.
+//! When migrating or updating the parser, ensure compatibility with ABI-15 features.
+//!
 //! ## Design Trade-offs
 //!
 //! This parser implementation makes certain trade-offs between the project's

@@ -59,13 +59,31 @@ mod abi15_tests {
     fn explore_python_abi15_features() {
         let language: Language = tree_sitter_python::LANGUAGE.into();
 
-        println!("\nPython Language Metadata:");
-        println!("  ABI Version: {:?}", language.abi_version());
+        println!("\n=== Python Language ABI-15 Metadata ===");
+        println!("  ABI Version: {}", language.abi_version());
+        println!("  Field count: {}", language.field_count());
         println!("  Node kind count: {}", language.node_kind_count());
 
-        // Check for specific Python constructs
-        let class_id = language.id_for_node_kind("class_definition", true);
-        println!("  Class definition ID: {class_id:?}");
+        // Explore node types for symbol extraction
+        println!("\n  Key Node Types for Symbol Extraction:");
+        for node_kind in &[
+            "function_definition",
+            "class_definition",
+            "assignment",
+            "expression_statement",
+            "annotated_assignment",
+            "type_alias_statement",
+            "decorator",
+            "decorated_definition",
+            "global_statement",
+            "identifier",
+            "module",
+        ] {
+            let id = language.id_for_node_kind(node_kind, true);
+            if id != 0 {
+                println!("    {node_kind} -> ID: {id}");
+            }
+        }
     }
 
     #[test]
@@ -82,6 +100,15 @@ mod abi15_tests {
             "function_definition",
             "method_declaration",
             "interface_declaration",
+            "const_declaration",
+            "const_element",
+            "function_call_expression",
+            "assignment_expression",
+            "expression_statement",
+            "namespace_definition",
+            "enum_declaration",
+            "global_declaration",
+            "simple_parameter",
         ] {
             let id = language.id_for_node_kind(node_kind, true);
             if id != 0 {

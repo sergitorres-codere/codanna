@@ -3,6 +3,11 @@
 //! This parser provides PHP language support for the codebase intelligence system.
 //! It extracts symbols, relationships, and documentation from PHP source code using
 //! tree-sitter for AST parsing.
+//!
+//! **Tree-sitter ABI Version**: ABI-14 (tree-sitter-php 0.23.4)
+//!
+//! Note: This parser uses ABI-14 (same as Python). When upgrading the tree-sitter-php
+//! version, verify compatibility with node type names used in this implementation.
 
 use crate::indexing::Import;
 use crate::parsing::{Language, LanguageParser, MethodCall};
@@ -60,6 +65,50 @@ impl PhpParser {
             })?;
 
         Ok(Self { parser })
+    }
+
+    #[cfg(test)]
+    fn debug_parse(&mut self, code: &str) {
+        let tree = self.parser.parse(code, None).unwrap();
+        let root = tree.root_node();
+        eprintln!("=== PHP Parse Debug ===");
+        self.debug_node(root, code, 0);
+    }
+
+    #[cfg(test)]
+    #[allow(clippy::only_used_in_recursion)]
+    fn debug_node(&self, node: Node, code: &str, indent: usize) {
+        let indent_str = "  ".repeat(indent);
+        let text_preview = if node.child_count() == 0 {
+            let text = &code[node.byte_range()];
+            if text.len() > 50 {
+                format!(" = '{}'...", &text[..50])
+            } else {
+                format!(" = '{text}'")
+            }
+        } else {
+            String::new()
+        };
+
+        eprintln!("{}{}{}", indent_str, node.kind(), text_preview);
+
+        // Show interesting nodes in detail
+        if matches!(
+            node.kind(),
+            "const_declaration" | "const_element" | "expression_statement"
+        ) {
+            eprintln!(
+                "{}  ^^ Range: {:?}, Parent: {:?}",
+                indent_str,
+                node.byte_range(),
+                node.parent().map(|p| p.kind())
+            );
+        }
+
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            self.debug_node(child, code, indent + 1);
+        }
     }
 
     /// Convert tree-sitter node to Range
@@ -124,10 +173,78 @@ impl PhpParser {
                     symbols.push(symbol);
                 }
             }
-            "const_declaration" | "class_const_declaration" => {
+            "const_declaration" => {
+                // Process const declarations - they contain const_element children
+                // Process children to extract the const_elements
+                self.process_children(node, code, file_id, symbols, counter);
+            }
+            "const_element" => {
+                // Process individual const elements
+                // Check if we're at global scope (not inside a class)
+                if self.is_global_scope(node) {
+                    // The first child is the name, third child is the value
+                    if let Some(name_node) = node.child(0) {
+                        if name_node.kind() == "name" {
+                            let name = &code[name_node.byte_range()];
+                            let id = counter.next_id();
+
+                            let mut symbol = Symbol::new(
+                                id,
+                                name,
+                                SymbolKind::Constant,
+                                file_id,
+                                self.node_to_range(node),
+                            );
+
+                            // Try to get the value (third child after name and =)
+                            if let Some(value_node) = node.child(2) {
+                                let value = &code[value_node.byte_range()];
+                                symbol.signature = Some(format!("const {name} = {value}").into());
+                            }
+
+                            symbol.doc_comment =
+                                self.extract_doc_comment(&node, code).map(Into::into);
+                            symbols.push(symbol);
+                        }
+                    }
+                } else {
+                    // This is a class constant, handled elsewhere
+                }
+            }
+            "class_const_declaration" => {
                 if let Some(symbol) = self.process_constant(node, code, file_id, counter) {
                     symbols.push(symbol);
                 }
+            }
+            "expression_statement" => {
+                // Check for global constants via define() or global variables
+                if let Some(child) = node.child(0) {
+                    match child.kind() {
+                        "function_call_expression" => {
+                            // Check if it's a define() call
+                            if self.is_define_call(child, code) && self.is_global_scope(node) {
+                                if let Some(symbol) =
+                                    self.process_define(child, code, file_id, counter)
+                                {
+                                    symbols.push(symbol);
+                                }
+                            }
+                        }
+                        "assignment_expression" => {
+                            // Global variable assignment
+                            if self.is_global_scope(node) {
+                                if let Some(symbol) =
+                                    self.process_global_assignment(child, code, file_id, counter)
+                                {
+                                    symbols.push(symbol);
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                // Continue processing children
+                self.process_children(node, code, file_id, symbols, counter);
             }
             _ => {
                 // Recursively process children
@@ -337,6 +454,132 @@ impl PhpParser {
         for child in node.children(&mut cursor) {
             self.extract_symbols_from_node(child, code, file_id, symbols, counter);
         }
+    }
+
+    /// Check if a node is at global scope (not inside a class, function, etc.)
+    fn is_global_scope(&self, node: Node) -> bool {
+        let mut parent = node.parent();
+        while let Some(p) = parent {
+            match p.kind() {
+                "class_declaration"
+                | "function_definition"
+                | "method_declaration"
+                | "interface_declaration"
+                | "trait_declaration" => return false,
+                "program" => return true,
+                _ => parent = p.parent(),
+            }
+        }
+        true
+    }
+
+    /// Check if a function call is a define() call
+    fn is_define_call(&self, node: Node, code: &str) -> bool {
+        if let Some(function_node) = node.child_by_field_name("function") {
+            let function_name = &code[function_node.byte_range()];
+            function_name == "define"
+        } else {
+            false
+        }
+    }
+
+    /// Process a define() function call to extract a constant
+    fn process_define(
+        &self,
+        node: Node,
+        code: &str,
+        file_id: FileId,
+        counter: &mut SymbolCounter,
+    ) -> Option<Symbol> {
+        // Get the arguments of the define() call
+        let arguments = node.child_by_field_name("arguments")?;
+
+        // Find the first argument (constant name)
+        let mut cursor = arguments.walk();
+        let mut arg_count = 0;
+        let mut name_str = String::new();
+        let mut value_str = String::new();
+
+        for child in arguments.children(&mut cursor) {
+            if child.kind() == "argument" {
+                if let Some(arg_child) = child.child(0) {
+                    let arg_text = &code[arg_child.byte_range()];
+                    if arg_count == 0 {
+                        // First argument is the constant name (remove quotes)
+                        name_str = arg_text.trim_matches('"').trim_matches('\'').to_string();
+                    } else if arg_count == 1 {
+                        // Second argument is the value
+                        value_str = arg_text.to_string();
+                    }
+                    arg_count += 1;
+                }
+            }
+        }
+
+        if name_str.is_empty() {
+            return None;
+        }
+
+        let id = counter.next_id();
+        let mut symbol = Symbol::new(
+            id,
+            name_str.as_str(),
+            SymbolKind::Constant,
+            file_id,
+            self.node_to_range(node),
+        );
+
+        // Add signature with value if available
+        if !value_str.is_empty() {
+            symbol.signature = Some(format!("define('{name_str}', {value_str})").into());
+        }
+
+        symbol.doc_comment = self.extract_doc_comment(&node, code).map(Into::into);
+        Some(symbol)
+    }
+
+    /// Process a global variable assignment
+    fn process_global_assignment(
+        &self,
+        node: Node,
+        code: &str,
+        file_id: FileId,
+        counter: &mut SymbolCounter,
+    ) -> Option<Symbol> {
+        // Get the left side of the assignment (variable name)
+        let left = node.child_by_field_name("left")?;
+
+        // Handle simple variable assignments
+        if left.kind() == "variable_name" {
+            let name = &code[left.byte_range()];
+            // Remove the $ prefix for the symbol name
+            let clean_name = name.strip_prefix('$').unwrap_or(name);
+
+            let id = counter.next_id();
+            let mut symbol = Symbol::new(
+                id,
+                clean_name,
+                SymbolKind::Variable,
+                file_id,
+                self.node_to_range(node),
+            );
+
+            // Try to extract the value as a simple signature
+            if let Some(right) = node.child_by_field_name("right") {
+                let value_preview = &code[right.byte_range()];
+                // Limit the signature to first 100 chars for readability
+                let truncated = if value_preview.len() > 100 {
+                    format!("{}...", &value_preview[..100])
+                } else {
+                    value_preview.to_string()
+                };
+                symbol.signature = Some(format!("${clean_name} = {truncated}").into());
+            }
+
+            return Some(symbol);
+        }
+
+        None
     }
 }
 
@@ -743,5 +986,56 @@ impl PhpParser {
         for child in node.children(&mut cursor) {
             self.extract_variable_types_from_node(child, code, variable_types);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_php_const_declarations() {
+        let code = r#"<?php
+const DEFAULT_TIMEOUT = 30;
+const CACHE_TTL = 3600;
+define('MAX_CONNECTIONS', 100);
+$globalVar = 'test';
+"#;
+
+        let mut parser = PhpParser::new().unwrap();
+        parser.debug_parse(code);
+
+        // Now parse for real
+        let mut counter = SymbolCounter::new();
+        let file_id = FileId(1);
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        eprintln!("\n=== Extracted Symbols ===");
+        for symbol in &symbols {
+            eprintln!(
+                "  {} ({:?}) at line {}",
+                symbol.name.as_ref(),
+                symbol.kind,
+                symbol.range.start_line
+            );
+        }
+
+        // Check we found the constants
+        assert!(
+            symbols.iter().any(|s| s.name.as_ref() == "MAX_CONNECTIONS"),
+            "Should find MAX_CONNECTIONS from define()"
+        );
+        assert!(
+            symbols.iter().any(|s| s.name.as_ref() == "DEFAULT_TIMEOUT"),
+            "Should find DEFAULT_TIMEOUT from const"
+        );
+        assert!(
+            symbols.iter().any(|s| s.name.as_ref() == "CACHE_TTL"),
+            "Should find CACHE_TTL from const"
+        );
+        assert!(
+            symbols.iter().any(|s| s.name.as_ref() == "globalVar"),
+            "Should find globalVar"
+        );
     }
 }
