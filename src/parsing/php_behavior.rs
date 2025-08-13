@@ -2,6 +2,7 @@
 
 use crate::Visibility;
 use crate::parsing::language_behavior::LanguageBehavior;
+use std::path::Path;
 use tree_sitter::Language;
 
 /// PHP language behavior implementation
@@ -60,6 +61,48 @@ impl LanguageBehavior for PhpBehavior {
 
     fn get_language(&self) -> Language {
         self.language.clone()
+    }
+
+    fn module_path_from_file(&self, file_path: &Path, project_root: &Path) -> Option<String> {
+        // Get relative path from project root
+        let relative_path = file_path.strip_prefix(project_root).ok()?;
+
+        // Convert path to string
+        let path_str = relative_path.to_str()?;
+
+        // Remove common PHP source directories if present (PSR-4 style)
+        let path_without_src = path_str
+            .strip_prefix("src/")
+            .or_else(|| path_str.strip_prefix("app/"))
+            .or_else(|| path_str.strip_prefix("lib/"))
+            .or_else(|| path_str.strip_prefix("classes/"))
+            .unwrap_or(path_str);
+
+        // Remove the .php extension (check .class.php first since it's longer)
+        let path_without_ext = path_without_src
+            .strip_suffix(".class.php")
+            .or_else(|| path_without_src.strip_suffix(".php"))
+            .or_else(|| path_without_src.strip_suffix(".inc"))
+            .unwrap_or(path_without_src);
+
+        // Skip special files that aren't typically namespaced
+        if path_without_ext == "index"
+            || path_without_ext == "config"
+            || path_without_ext.starts_with(".")
+        {
+            return None;
+        }
+
+        // Convert path separators to PHP namespace separators
+        // PHP uses backslash for namespaces
+        let namespace_path = path_without_ext.replace('/', "\\");
+
+        // Add leading backslash for fully qualified namespace
+        if namespace_path.is_empty() {
+            None
+        } else {
+            Some(format!("\\{namespace_path}"))
+        }
     }
 }
 
@@ -129,5 +172,54 @@ mod tests {
 
         // Invalid node kind
         assert!(!behavior.validate_node_kind("struct_item")); // Rust-specific
+    }
+
+    #[test]
+    fn test_module_path_from_file() {
+        let behavior = PhpBehavior::new();
+        let root = Path::new("/project");
+
+        // Test PSR-4 style namespace
+        let class_path = Path::new("/project/src/App/Controllers/UserController.php");
+        assert_eq!(
+            behavior.module_path_from_file(class_path, root),
+            Some("\\App\\Controllers\\UserController".to_string())
+        );
+
+        // Test without src directory
+        let no_src_path = Path::new("/project/Models/User.php");
+        assert_eq!(
+            behavior.module_path_from_file(no_src_path, root),
+            Some("\\Models\\User".to_string())
+        );
+
+        // Test nested namespace
+        let nested_path = Path::new("/project/src/App/Http/Middleware/Auth.php");
+        assert_eq!(
+            behavior.module_path_from_file(nested_path, root),
+            Some("\\App\\Http\\Middleware\\Auth".to_string())
+        );
+
+        // Test index.php (should return None)
+        let index_path = Path::new("/project/index.php");
+        assert_eq!(behavior.module_path_from_file(index_path, root), None);
+
+        // Test config.php (should return None)
+        let config_path = Path::new("/project/config.php");
+        assert_eq!(behavior.module_path_from_file(config_path, root), None);
+
+        // Test class.php extension
+        let class_ext_path = Path::new("/project/src/MyClass.class.php");
+        assert_eq!(
+            behavior.module_path_from_file(class_ext_path, root),
+            Some("\\MyClass".to_string())
+        );
+
+        // Test app directory
+        let app_path = Path::new("/project/app/Services/PaymentService.php");
+        assert_eq!(
+            behavior.module_path_from_file(app_path, root),
+            Some("\\Services\\PaymentService".to_string())
+        );
     }
 }

@@ -40,7 +40,9 @@
 //! 3. Register both in `ParserFactory`
 //! 4. (Future) Register in the language registry for auto-discovery
 
-use crate::{Symbol, Visibility};
+use crate::storage::DocumentIndex;
+use crate::{Symbol, SymbolId, Visibility};
+use std::path::Path;
 use tree_sitter::Language;
 
 /// Trait for language-specific behavior and configuration
@@ -123,6 +125,71 @@ pub trait LanguageBehavior: Send + Sync {
         if let Some(ref sig) = symbol.signature {
             symbol.visibility = self.parse_visibility(sig);
         }
+    }
+
+    /// Calculate the module path from a file path according to language conventions
+    ///
+    /// This method converts a file system path to a language-specific module path.
+    /// Each language has different conventions for how file paths map to module/namespace paths.
+    ///
+    /// # Examples
+    /// - Rust: `"src/foo/bar.rs"` → `"crate::foo::bar"`
+    /// - Python: `"src/package/module.py"` → `"package.module"`
+    /// - PHP: `"src/Namespace/Class.php"` → `"\\Namespace\\Class"`
+    ///
+    /// # Default Implementation
+    /// Returns None by default. Languages should override this if they have
+    /// specific module path conventions.
+    fn module_path_from_file(&self, _file_path: &Path, _project_root: &Path) -> Option<String> {
+        None
+    }
+
+    /// Resolve an import path to a symbol ID using language-specific conventions
+    ///
+    /// This method handles the language-specific logic for resolving import paths
+    /// to actual symbols in the index. Each language has different import semantics
+    /// and path formats.
+    ///
+    /// # Examples
+    /// - Rust: `"crate::foo::Bar"` → looks for Bar in module crate::foo
+    /// - Python: `"package.module.Class"` → looks for Class in package.module
+    /// - PHP: `"\\App\\Controllers\\UserController"` → looks for UserController in \\App\\Controllers
+    ///
+    /// # Default Implementation
+    /// The default implementation:
+    /// 1. Splits the path using the language's module separator
+    /// 2. Extracts the symbol name (last segment)
+    /// 3. Searches for symbols with that name
+    /// 4. Matches against the full module path
+    fn resolve_import_path(
+        &self,
+        import_path: &str,
+        document_index: &DocumentIndex,
+    ) -> Option<SymbolId> {
+        // Split the path using this language's separator
+        let separator = self.module_separator();
+        let segments: Vec<&str> = import_path.split(separator).collect();
+
+        if segments.is_empty() {
+            return None;
+        }
+
+        // The symbol name is the last segment
+        let symbol_name = segments.last()?;
+
+        // Find symbols with this name
+        let candidates = document_index.find_symbols_by_name(symbol_name).ok()?;
+
+        // Find the one with matching full module path
+        for candidate in &candidates {
+            if let Some(module_path) = &candidate.module_path {
+                if module_path.as_ref() == import_path {
+                    return Some(candidate.id);
+                }
+            }
+        }
+
+        None
     }
 }
 

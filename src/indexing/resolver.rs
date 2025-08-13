@@ -5,6 +5,7 @@
 //! - Resolving module paths to actual symbols
 //! - Building cross-file relationships
 
+use crate::parsing::LanguageId;
 use crate::storage::DocumentIndex;
 use crate::{FileId, SymbolId};
 use std::collections::HashMap;
@@ -43,6 +44,8 @@ pub struct ImportResolver {
     pub imports_by_file: HashMap<FileId, Vec<Import>>,
     /// Maps file paths to FileIds
     path_to_file_id: HashMap<PathBuf, FileId>,
+    /// Maps FileId to LanguageId for knowing which behavior to use
+    file_to_language: HashMap<FileId, LanguageId>,
     /// Debug flag from settings
     debug: bool,
 }
@@ -64,16 +67,24 @@ impl ImportResolver {
             module_to_file: HashMap::new(),
             imports_by_file: HashMap::new(),
             path_to_file_id: HashMap::new(),
+            file_to_language: HashMap::new(),
             debug,
         }
     }
 
-    /// Register a file with its module path
-    pub fn register_file(&mut self, file_path: PathBuf, file_id: FileId, module_path: String) {
+    /// Register a file with its module path and language
+    pub fn register_file(
+        &mut self,
+        file_path: PathBuf,
+        file_id: FileId,
+        module_path: String,
+        language_id: LanguageId,
+    ) {
         self.file_to_module
             .insert(file_path.clone(), module_path.clone());
         self.module_to_file.insert(module_path, file_path.clone());
         self.path_to_file_id.insert(file_path, file_id);
+        self.file_to_language.insert(file_id, language_id);
     }
 
     /// Add an import statement for a file
@@ -91,12 +102,16 @@ impl ImportResolver {
     /// 1. Direct imports in the file
     /// 2. Glob imports
     /// 3. Prelude items (for Rust)
-    pub fn resolve_symbol(
+    pub fn resolve_symbol<F>(
         &self,
         name: &str,
         from_file: FileId,
         document_index: &DocumentIndex,
-    ) -> Option<SymbolId> {
+        get_behavior: F,
+    ) -> Option<SymbolId>
+    where
+        F: Fn(LanguageId) -> Box<dyn crate::parsing::LanguageBehavior>,
+    {
         debug_print!(
             self,
             "ImportResolver: Trying to resolve '{}' from file {:?}",
@@ -104,13 +119,19 @@ impl ImportResolver {
             from_file
         );
 
-        // If the name already contains "::", it's a full path, resolve it directly
-        if name.contains("::") {
+        // Get the language for this file
+        let language_id = self.file_to_language.get(&from_file)?;
+        let behavior = get_behavior(*language_id);
+
+        // Check if the name contains the language's separator (full path)
+        let separator = behavior.module_separator();
+        if name.contains(separator) {
             debug_print!(
                 self,
-                "ImportResolver: Name contains '::', treating as full path"
+                "ImportResolver: Name contains '{}', treating as full path",
+                separator
             );
-            return self.resolve_import_path(name, document_index);
+            return behavior.resolve_import_path(name, document_index);
         }
 
         // Check if there's a direct import for this name
@@ -124,14 +145,14 @@ impl ImportResolver {
                 // Handle aliased imports
                 if let Some(alias) = &import.alias {
                     if alias == name {
-                        // The import path might be like "crate::foo::Bar"
-                        // We need to find the symbol "Bar" in the appropriate module
-                        return self.resolve_import_path(&import.path, document_index);
+                        // The import path might be like "crate::foo::Bar" or "package.module.Class"
+                        // We need to find the symbol in the appropriate module
+                        return behavior.resolve_import_path(&import.path, document_index);
                     }
                 }
 
                 // Handle direct imports (e.g., "use foo::Bar" and we're looking for "Bar")
-                if let Some(last_segment) = import.path.split("::").last() {
+                if let Some(last_segment) = import.path.split(separator).last() {
                     debug_print!(
                         self,
                         "ImportResolver: Checking import path '{}', last segment: '{}'",
@@ -144,7 +165,7 @@ impl ImportResolver {
                             "ImportResolver: Match! Resolving import path '{}'",
                             import.path
                         );
-                        return self.resolve_import_path(&import.path, document_index);
+                        return behavior.resolve_import_path(&import.path, document_index);
                     }
                 }
 
@@ -163,56 +184,6 @@ impl ImportResolver {
 
         // TODO: Handle prelude items and other implicit imports
 
-        None
-    }
-
-    /// Resolve an import path to a symbol
-    fn resolve_import_path(&self, path: &str, document_index: &DocumentIndex) -> Option<SymbolId> {
-        debug_print!(self, "resolve_import_path: Resolving path '{}'", path);
-
-        // Split the path to get the symbol name (last segment)
-        let segments: Vec<&str> = path.split("::").collect();
-        if segments.is_empty() {
-            return None;
-        }
-
-        let symbol_name = segments.last()?;
-        debug_print!(
-            self,
-            "resolve_import_path: Looking for symbol '{}' with full path '{}''",
-            symbol_name,
-            path
-        );
-
-        // Find symbols with this name
-        let candidates = document_index.find_symbols_by_name(symbol_name).ok()?;
-        debug_print!(
-            self,
-            "resolve_import_path: Found {} candidates for '{}'",
-            candidates.len(),
-            symbol_name
-        );
-
-        // Find the one with matching full module path
-        for candidate in &candidates {
-            debug_print!(
-                self,
-                "resolve_import_path: Checking candidate with module_path: {:?}",
-                candidate.module_path
-            );
-            if let Some(module_path) = &candidate.module_path {
-                if module_path.as_ref() == path {
-                    debug_print!(self, "resolve_import_path: Found exact match!");
-                    return Some(candidate.id);
-                }
-            }
-        }
-
-        debug_print!(
-            self,
-            "resolve_import_path: No exact match found for '{}'",
-            path
-        );
         None
     }
 
@@ -247,6 +218,14 @@ impl ImportResolver {
     /// Build module path from file path (for Rust projects)
     ///
     /// Converts a file path like "src/foo/bar.rs" to a module path like "crate::foo::bar"
+    ///
+    /// **DEPRECATED**: This functionality has been moved to `RustBehavior::module_path_from_file`.
+    /// Each language now implements its own module path calculation through the LanguageBehavior trait.
+    /// This function is kept only for backward compatibility and testing.
+    #[deprecated(
+        since = "0.4.0",
+        note = "Use LanguageBehavior::module_path_from_file instead"
+    )]
     pub fn module_path_from_file(file_path: &Path, project_root: &Path) -> Option<String> {
         let relative_path = file_path.strip_prefix(project_root).ok()?;
 
@@ -283,8 +262,10 @@ impl ImportResolver {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parsing::LanguageId;
 
     #[test]
+    #[allow(deprecated)]
     fn test_module_path_from_file() {
         let root = Path::new("/project");
 
@@ -329,8 +310,14 @@ mod tests {
             PathBuf::from("src/module_a.rs"),
             file_id_1,
             "crate::module_a".to_string(),
+            LanguageId::new("rust"),
         );
-        resolver.register_file(PathBuf::from("src/main.rs"), file_id_2, "crate".to_string());
+        resolver.register_file(
+            PathBuf::from("src/main.rs"),
+            file_id_2,
+            "crate".to_string(),
+            LanguageId::new("rust"),
+        );
 
         // Add an import
         resolver.add_import(Import {
@@ -356,7 +343,9 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_import_path() {
+    fn test_resolve_import_path_via_behavior() {
+        use crate::parsing::LanguageBehavior;
+        use crate::parsing::rust_behavior::RustBehavior;
         use crate::storage::DocumentIndex;
         use crate::{Range, Symbol, SymbolId, SymbolKind};
         use tempfile::TempDir;
@@ -394,18 +383,19 @@ mod tests {
             .unwrap();
         doc_index.commit_batch().unwrap();
 
-        let resolver = ImportResolver::new();
+        // Use RustBehavior's resolve_import_path
+        let behavior = RustBehavior::new();
 
         // Test resolving the correct ConfigA
-        let result = resolver.resolve_import_path("crate::module_a::ConfigA", &doc_index);
+        let result = behavior.resolve_import_path("crate::module_a::ConfigA", &doc_index);
         assert_eq!(result, Some(SymbolId::new(1).unwrap()));
 
         // Test resolving the other ConfigA
-        let result = resolver.resolve_import_path("crate::module_b::ConfigA", &doc_index);
+        let result = behavior.resolve_import_path("crate::module_b::ConfigA", &doc_index);
         assert_eq!(result, Some(SymbolId::new(2).unwrap()));
 
         // Test non-existent path
-        let result = resolver.resolve_import_path("crate::module_c::ConfigA", &doc_index);
+        let result = behavior.resolve_import_path("crate::module_c::ConfigA", &doc_index);
         assert_eq!(result, None);
     }
 }

@@ -220,6 +220,23 @@ impl ParserFactory {
         Ok(result)
     }
 
+    /// Create just the behavior for a language from registry
+    pub fn create_behavior_from_registry(
+        &self,
+        language_id: LanguageId,
+    ) -> Box<dyn LanguageBehavior> {
+        let registry = get_registry();
+        let registry = registry.lock().unwrap();
+
+        if let Some(definition) = registry.get(language_id) {
+            definition.create_behavior()
+        } else {
+            // Fallback to a default behavior if language not found
+            // This shouldn't happen in practice
+            Box::new(RustBehavior::new())
+        }
+    }
+
     /// Returns list of all enabled languages from configuration.
     ///
     /// Filters all supported languages against settings.languages map.

@@ -646,7 +646,7 @@ impl SimpleIndexer {
         let parser_with_behavior = self.create_parser_with_behavior(language_id)?;
         let mut parser = parser_with_behavior.parser;
         let behavior = parser_with_behavior.behavior;
-        let module_path = self.calculate_module_path(path);
+        let module_path = self.calculate_module_path(path, &*behavior);
 
         // Register the file with ImportResolver
         if let Some(ref mod_path) = module_path {
@@ -656,8 +656,12 @@ impl SimpleIndexer {
                 path,
                 mod_path
             );
-            self.import_resolver
-                .register_file(path.to_path_buf(), file_id, mod_path.clone());
+            self.import_resolver.register_file(
+                path.to_path_buf(),
+                file_id,
+                mod_path.clone(),
+                language_id,
+            );
         } else {
             debug_print!(self, "No module path for file {:?}", path);
         }
@@ -708,9 +712,12 @@ impl SimpleIndexer {
     }
 
     /// Calculate module path relative to workspace root
-    /// This is language-agnostic - just returns the relative path
-    /// Language-specific parsers can override this in the symbol's module_path
-    fn calculate_module_path(&self, path: &Path) -> Option<String> {
+    /// Uses the language behavior to determine proper module path conventions
+    fn calculate_module_path(
+        &self,
+        path: &Path,
+        behavior: &dyn crate::parsing::LanguageBehavior,
+    ) -> Option<String> {
         // Use workspace_root from settings, or fall back to indexing.project_root
         let root = self.settings.workspace_root.as_ref().or(self
             .settings
@@ -725,25 +732,24 @@ impl SimpleIndexer {
             root
         );
 
-        // Use ImportResolver's module_path_from_file for Rust files
-        let module_path = if path.extension().and_then(|e| e.to_str()) == Some("rs") {
-            // Make path absolute if it's relative
-            let abs_path = if path.is_absolute() {
-                path.to_path_buf()
-            } else {
-                root.join(path)
-            };
-            let result = ImportResolver::module_path_from_file(&abs_path, root);
-            debug_print!(self, "ImportResolver returned: {:?}", result);
-            result
+        // Make path absolute if it's relative
+        let abs_path = if path.is_absolute() {
+            path.to_path_buf()
         } else {
-            // For other languages, just return the relative path
+            root.join(path)
+        };
+
+        // Use the language behavior to calculate module path
+        let module_path = behavior.module_path_from_file(&abs_path, root);
+
+        // If behavior doesn't provide a module path, fall back to relative path
+        let module_path = module_path.or_else(|| {
             path.canonicalize()
                 .ok()?
                 .strip_prefix(root.canonicalize().ok()?)
                 .ok()
                 .and_then(|relative_path| relative_path.to_str().map(|s| s.to_string()))
-        };
+        });
 
         debug_print!(self, "Module path for {:?}: {:?}", path, module_path);
         module_path
@@ -820,13 +826,6 @@ impl SimpleIndexer {
     }
 
     /// Configure a symbol with module path and visibility
-    ///
-    /// TODO: Extract language-specific module path resolution into a dedicated trait.
-    /// Current implementation violates single responsibility principle by embedding
-    /// language-specific logic within the indexer. Each language parser should implement
-    /// a `ModulePathResolver` trait that encapsulates its namespace/module conventions.
-    /// This would eliminate the need for language enum matching and enable proper
-    /// plugin architecture for new language support without modifying core indexing logic.
     fn configure_symbol(
         &self,
         symbol: &mut crate::Symbol,
@@ -2298,6 +2297,7 @@ impl SimpleIndexer {
                     &import.path, // Pass full path, not just last segment
                     file_id,
                     &self.document_index,
+                    |lang_id| self.parser_factory.create_behavior_from_registry(lang_id),
                 ) {
                     let name = if let Some(alias) = &import.alias {
                         alias.clone()
@@ -3040,6 +3040,11 @@ fn main() {
             "create_config",
             main_file_id,
             &indexer.document_index,
+            |lang_id| {
+                indexer
+                    .parser_factory
+                    .create_behavior_from_registry(lang_id)
+            },
         );
 
         // Should resolve to config::create_config, not another::create_config
@@ -3210,6 +3215,11 @@ fn main() {
             "helper_function",
             file_id,
             &indexer.document_index,
+            |lang_id| {
+                indexer
+                    .parser_factory
+                    .create_behavior_from_registry(lang_id)
+            },
         );
 
         assert!(
