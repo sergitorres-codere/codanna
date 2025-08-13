@@ -906,8 +906,15 @@ async fn main() {
                 // Single file indexing
                 match indexer.index_file_with_force(&path, force) {
                     Ok(result) => {
-                        let language_name = codanna::parsing::Language::from_path(&path)
-                            .map(|l| l.to_string())
+                        let language_name = path
+                            .extension()
+                            .and_then(|ext| ext.to_str())
+                            .and_then(|ext| {
+                                let registry = codanna::parsing::get_registry();
+                                registry.lock().ok().and_then(|r| {
+                                    r.get_by_extension(ext).map(|def| def.name().to_string())
+                                })
+                            })
                             .unwrap_or_else(|| "unknown".to_string());
 
                         if result.is_cached() {

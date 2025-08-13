@@ -244,7 +244,12 @@ impl RustParser {
         }
     }
 
-    pub fn parse(&mut self, code: &str, file_id: FileId, symbol_counter: &mut SymbolCounter) -> Vec<Symbol> {
+    pub fn parse(
+        &mut self,
+        code: &str,
+        file_id: FileId,
+        symbol_counter: &mut SymbolCounter,
+    ) -> Vec<Symbol> {
         let tree = match self.parser.parse(code, None) {
             Some(tree) => tree,
             None => return Vec::new(),
@@ -818,6 +823,7 @@ impl RustParser {
 
     /// Extract the full type name including generic parameters
     /// Returns an owned String to support complex type construction
+    #[allow(clippy::only_used_in_recursion)]
     fn extract_full_type_name(&self, node: Node, code: &str) -> String {
         match node.kind() {
             "type_identifier" => code[node.byte_range()].to_string(),
@@ -826,12 +832,12 @@ impl RustParser {
             "generic_type" => {
                 // For generic types like Option<T>, Vec<T>, construct the full name
                 let mut result = String::new();
-                
+
                 // Get the base type
                 if let Some(type_node) = node.child_by_field_name("type") {
                     result.push_str(&self.extract_full_type_name(type_node, code));
                 }
-                
+
                 // Get the generic arguments
                 if let Some(args_node) = node.child_by_field_name("type_arguments") {
                     result.push('<');
@@ -847,7 +853,7 @@ impl RustParser {
                     }
                     result.push('>');
                 }
-                
+
                 result
             }
             "reference_type" => {
@@ -1075,14 +1081,12 @@ impl RustParser {
                 if let Some(type_node) = node.child_by_field_name("type") {
                     // Extract the full type name including generics
                     let type_name = self.extract_full_type_name(type_node, code);
-                    
+
                     // Find method definitions in the impl body
                     if let Some(body_node) = node.child_by_field_name("body") {
                         for child in body_node.children(&mut body_node.walk()) {
                             if child.kind() == "function_item" {
-                                if let Some(method_name_node) =
-                                    child.child_by_field_name("name")
-                                {
+                                if let Some(method_name_node) = child.child_by_field_name("name") {
                                     let method_name = &code[method_name_node.byte_range()];
                                     let range = Range::new(
                                         child.start_position().row as u32,
@@ -1119,7 +1123,7 @@ impl RustParser {
     ) -> Option<Symbol> {
         let name = &code[name_node.byte_range()];
 
-        let symbol_id = counter.next();
+        let symbol_id = counter.next_id();
 
         let range = Range::new(
             name_node.start_position().row as u32,
@@ -1213,7 +1217,12 @@ impl RustParser {
 }
 
 impl LanguageParser for RustParser {
-    fn parse(&mut self, code: &str, file_id: FileId, symbol_counter: &mut SymbolCounter) -> Vec<Symbol> {
+    fn parse(
+        &mut self,
+        code: &str,
+        file_id: FileId,
+        symbol_counter: &mut SymbolCounter,
+    ) -> Vec<Symbol> {
         self.parse(code, file_id, symbol_counter)
     }
 
@@ -1286,7 +1295,7 @@ impl LanguageParser for RustParser {
 
         bindings
     }
-    
+
     fn find_inherent_methods(&mut self, code: &str) -> Vec<(String, String, Range)> {
         self.find_inherent_methods(code)
     }
@@ -1740,20 +1749,36 @@ mod tests {
                 }
             }
         "#;
-        
+
         let methods = parser.find_inherent_methods(code);
-        
+
         // Should find 4 inherent methods
         assert_eq!(methods.len(), 4);
-        
+
         // Check SimpleType methods
-        assert!(methods.iter().any(|(t, m, _)| t == "SimpleType" && m == "simple_method"));
-        assert!(methods.iter().any(|(t, m, _)| t == "SimpleType" && m == "another_method"));
-        
+        assert!(
+            methods
+                .iter()
+                .any(|(t, m, _)| t == "SimpleType" && m == "simple_method")
+        );
+        assert!(
+            methods
+                .iter()
+                .any(|(t, m, _)| t == "SimpleType" && m == "another_method")
+        );
+
         // Check complex type methods
-        assert!(methods.iter().any(|(t, m, _)| t == "Option<String>" && m == "option_method"));
-        assert!(methods.iter().any(|(t, m, _)| t == "Vec<i32>" && m == "vec_method"));
-        
+        assert!(
+            methods
+                .iter()
+                .any(|(t, m, _)| t == "Option<String>" && m == "option_method")
+        );
+        assert!(
+            methods
+                .iter()
+                .any(|(t, m, _)| t == "Vec<i32>" && m == "vec_method")
+        );
+
         // Should NOT find Display::fmt (it's a trait impl)
         assert!(!methods.iter().any(|(_, m, _)| m == "fmt"));
     }

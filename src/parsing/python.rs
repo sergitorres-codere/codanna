@@ -103,7 +103,7 @@ impl PythonParser {
     ) -> Option<Symbol> {
         let name = self.extract_function_name(node, code)?;
         let range = self.node_to_range(node);
-        let symbol_id = counter.next();
+        let symbol_id = counter.next_id();
 
         // Determine if this is a method by checking if it's inside a class
         let kind = if self.is_inside_class(node) {
@@ -136,7 +136,7 @@ impl PythonParser {
     ) -> Option<Symbol> {
         let name = self.extract_class_name(node, code)?;
         let range = self.node_to_range(node);
-        let symbol_id = counter.next();
+        let symbol_id = counter.next_id();
 
         // Extract docstring
         let doc_comment = self
@@ -937,7 +937,12 @@ impl PythonParser {
 }
 
 impl LanguageParser for PythonParser {
-    fn parse(&mut self, code: &str, file_id: FileId, symbol_counter: &mut SymbolCounter) -> Vec<Symbol> {
+    fn parse(
+        &mut self,
+        code: &str,
+        file_id: FileId,
+        symbol_counter: &mut SymbolCounter,
+    ) -> Vec<Symbol> {
         let tree = match self.parser.parse(code, None) {
             Some(tree) => tree,
             None => return Vec::new(),
@@ -1339,7 +1344,11 @@ def another():
     'Another simple docstring.'
     pass
 "#;
-        let symbols2 = parser.parse(code2, FileId::new(1).unwrap(), &mut SymbolCounter::from_value(10));
+        let symbols2 = parser.parse(
+            code2,
+            FileId::new(1).unwrap(),
+            &mut SymbolCounter::from_value(10),
+        );
         let func2 = symbols2
             .iter()
             .find(|s| s.name.as_ref() == "another")
@@ -1356,7 +1365,11 @@ def no_doc():
     x = 42
     return x
 "#;
-        let symbols3 = parser.parse(code3, FileId::new(1).unwrap(), &mut SymbolCounter::from_value(20));
+        let symbols3 = parser.parse(
+            code3,
+            FileId::new(1).unwrap(),
+            &mut SymbolCounter::from_value(20),
+        );
         let func3 = symbols3
             .iter()
             .find(|s| s.name.as_ref() == "no_doc")
@@ -1738,7 +1751,11 @@ def process_items(items: List[str], count: int = 10) -> Dict[str, int]:
 
         // Function with only return type
         let code2 = "def get_number() -> int: pass";
-        let symbols2 = parser.parse(code2, FileId::new(1).unwrap(), &mut SymbolCounter::from_value(10));
+        let symbols2 = parser.parse(
+            code2,
+            FileId::new(1).unwrap(),
+            &mut SymbolCounter::from_value(10),
+        );
         let func2 = &symbols2[0];
         assert!(func2.signature.is_some());
         let sig2 = func2.signature.as_ref().unwrap();
@@ -1746,7 +1763,11 @@ def process_items(items: List[str], count: int = 10) -> Dict[str, int]:
 
         // Mixed typed and untyped parameters
         let code3 = "def mixed(name, age: int, city='NYC'): pass";
-        let symbols3 = parser.parse(code3, FileId::new(1).unwrap(), &mut SymbolCounter::from_value(20));
+        let symbols3 = parser.parse(
+            code3,
+            FileId::new(1).unwrap(),
+            &mut SymbolCounter::from_value(20),
+        );
         let func3 = &symbols3[0];
         assert!(func3.signature.is_some());
         let sig3 = func3.signature.as_ref().unwrap();
@@ -1757,7 +1778,11 @@ def process_items(items: List[str], count: int = 10) -> Dict[str, int]:
         // Complex generic types
         let code4 =
             "def complex_types(data: Dict[str, List[int]]) -> Optional[Tuple[str, int]]: pass";
-        let symbols4 = parser.parse(code4, FileId::new(1).unwrap(), &mut SymbolCounter::from_value(30));
+        let symbols4 = parser.parse(
+            code4,
+            FileId::new(1).unwrap(),
+            &mut SymbolCounter::from_value(30),
+        );
         let func4 = &symbols4[0];
         assert!(func4.signature.is_some());
         let sig4 = func4.signature.as_ref().unwrap();
@@ -2075,7 +2100,11 @@ class APIClient:
     *args: Any, 
     **kwargs: Dict[str, Any]
 ) -> Optional[Result]: pass"#;
-        let symbols2 = parser.parse(code2, FileId::new(1).unwrap(), &mut SymbolCounter::from_value(10));
+        let symbols2 = parser.parse(
+            code2,
+            FileId::new(1).unwrap(),
+            &mut SymbolCounter::from_value(10),
+        );
         let func2 = &symbols2[0];
         assert!(func2.signature.as_ref().unwrap().contains("async"));
         assert!(
@@ -2092,7 +2121,11 @@ def regular_func(): pass
 async def async_func(): pass
 def another_regular(): pass
 "#;
-        let symbols3 = parser.parse(code3, FileId::new(1).unwrap(), &mut SymbolCounter::from_value(20));
+        let symbols3 = parser.parse(
+            code3,
+            FileId::new(1).unwrap(),
+            &mut SymbolCounter::from_value(20),
+        );
         assert_eq!(symbols3.len(), 3);
 
         let regular1 = symbols3

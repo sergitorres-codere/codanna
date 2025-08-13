@@ -12,7 +12,12 @@ use tree_sitter::Node;
 /// Common interface for all language parsers
 pub trait LanguageParser: Send + Sync {
     /// Parse source code and extract symbols
-    fn parse(&mut self, code: &str, file_id: FileId, symbol_counter: &mut SymbolCounter) -> Vec<Symbol>;
+    fn parse(
+        &mut self,
+        code: &str,
+        file_id: FileId,
+        symbol_counter: &mut SymbolCounter,
+    ) -> Vec<Symbol>;
 
     /// Enable downcasting to concrete parser types
     fn as_any(&self) -> &dyn Any;
@@ -82,10 +87,10 @@ pub trait LanguageParser: Send + Sync {
 
     /// Find inherent methods (methods defined directly on types)
     /// Returns tuples of (type_name, method_name, range)
-    /// 
+    ///
     /// This is for methods defined directly on types (not through traits/interfaces).
     /// Default implementation returns empty - languages can override.
-    /// 
+    ///
     /// Note: Returns owned strings to support complex type names that need construction
     /// (e.g., Rust's `Option<String>`, `Vec<T>`, etc.)
     fn find_inherent_methods(&mut self, _code: &str) -> Vec<(String, String, Range)> {

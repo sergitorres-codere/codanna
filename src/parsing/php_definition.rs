@@ -5,11 +5,10 @@
 
 use std::sync::Arc;
 
-use crate::{Settings, IndexResult, IndexError};
 use super::{
-    LanguageId, LanguageDefinition, LanguageParser, LanguageBehavior,
-    PhpParser, PhpBehavior,
+    LanguageBehavior, LanguageDefinition, LanguageId, LanguageParser, PhpBehavior, PhpParser,
 };
+use crate::{IndexError, IndexResult, Settings};
 
 /// PHP language definition
 pub struct PhpLanguage;
@@ -23,27 +22,29 @@ impl LanguageDefinition for PhpLanguage {
     fn id(&self) -> LanguageId {
         Self::ID
     }
-    
+
     fn name(&self) -> &'static str {
         "PHP"
     }
-    
+
     fn extensions(&self) -> &'static [&'static str] {
-        &["php", "php3", "php4", "php5", "php7", "php8", "phps", "phtml"]
+        &[
+            "php", "php3", "php4", "php5", "php7", "php8", "phps", "phtml",
+        ]
     }
-    
+
     fn create_parser(&self, _settings: &Settings) -> IndexResult<Box<dyn LanguageParser>> {
-        let parser = PhpParser::new()
-            .map_err(|e| IndexError::General(e.to_string()))?;
+        let parser = PhpParser::new().map_err(|e| IndexError::General(e.to_string()))?;
         Ok(Box::new(parser))
     }
-    
+
     fn create_behavior(&self) -> Box<dyn LanguageBehavior> {
         Box::new(PhpBehavior::new())
     }
-    
+
     fn is_enabled(&self, settings: &Settings) -> bool {
-        settings.languages
+        settings
+            .languages
             .get(self.id().as_str())
             .map(|config| config.enabled)
             .unwrap_or(true) // PHP is enabled by default
@@ -58,23 +59,30 @@ pub(super) fn register(registry: &mut super::LanguageRegistry) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+    use crate::parsing::{LanguageId, get_registry};
+
     #[test]
     fn test_php_definition() {
         let php = PhpLanguage;
-        
+
         assert_eq!(php.id(), LanguageId::new("php"));
         assert_eq!(php.name(), "PHP");
         assert!(php.extensions().contains(&"php"));
         assert!(php.extensions().contains(&"php5"));
         assert!(php.extensions().contains(&"phtml"));
     }
-    
+
     #[test]
-    fn test_php_enabled_by_default() {
+    fn test_php_disabled_by_default() {
         let php = PhpLanguage;
         let settings = Settings::default();
-        
-        assert!(php.is_enabled(&settings));
+
+        // PHP is disabled by default in Settings
+        assert!(!php.is_enabled(&settings));
+
+        // But it should be available in the registry
+        let registry = get_registry();
+        let registry = registry.lock().unwrap();
+        assert!(registry.is_available(LanguageId::new("php")));
     }
 }

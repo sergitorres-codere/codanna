@@ -23,6 +23,6 @@ pub use php::PhpParser;
 pub use php_behavior::PhpBehavior;
 pub use python::PythonParser;
 pub use python_behavior::PythonBehavior;
-pub use registry::{LanguageId, LanguageDefinition, LanguageRegistry, RegistryError, get_registry};
+pub use registry::{LanguageDefinition, LanguageId, LanguageRegistry, RegistryError, get_registry};
 pub use rust::RustParser;
 pub use rust_behavior::RustBehavior;

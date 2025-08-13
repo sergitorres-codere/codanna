@@ -4,14 +4,11 @@
 //! Validates language enablement and provides discovery of supported languages.
 
 use super::{
-    Language, LanguageBehavior, LanguageParser, 
-    PhpParser, PythonParser, RustParser,
-    LanguageId, get_registry,
+    Language, LanguageBehavior, LanguageId, LanguageParser, PhpParser, PythonParser, RustParser,
+    get_registry,
 };
 use crate::parsing::{
-    php_behavior::PhpBehavior,
-    python_behavior::PythonBehavior,
-    rust_behavior::RustBehavior,
+    php_behavior::PhpBehavior, python_behavior::PythonBehavior, rust_behavior::RustBehavior,
 };
 use crate::{IndexError, IndexResult, Settings};
 use std::sync::Arc;
@@ -38,43 +35,48 @@ impl ParserFactory {
     pub fn new(settings: Arc<Settings>) -> Self {
         Self { settings }
     }
-    
+
     // ========== Registry-based methods (new approach) ==========
-    
+
     /// Creates parser using the registry system
-    /// 
+    ///
     /// This method uses the global language registry instead of hardcoded match statements.
     /// It will eventually replace create_parser() once migration is complete.
     #[must_use = "Parser creation may fail and should be handled"]
-    pub fn create_parser_from_registry(&self, language_id: LanguageId) -> IndexResult<Box<dyn LanguageParser>> {
+    pub fn create_parser_from_registry(
+        &self,
+        language_id: LanguageId,
+    ) -> IndexResult<Box<dyn LanguageParser>> {
         let registry = get_registry();
-        let registry = registry.lock().map_err(|e| {
-            IndexError::General(format!("Failed to acquire registry lock: {}", e))
-        })?;
-        
-        registry.create_parser(language_id, &self.settings)
+        let registry = registry
+            .lock()
+            .map_err(|e| IndexError::General(format!("Failed to acquire registry lock: {e}")))?;
+
+        registry
+            .create_parser(language_id, &self.settings)
             .map_err(|e| IndexError::General(e.to_string()))
     }
-    
+
     /// Creates parser with behavior using the registry system
-    /// 
+    ///
     /// This method uses the global language registry instead of hardcoded match statements.
     /// It will eventually replace create_parser_with_behavior() once migration is complete.
     pub fn create_parser_with_behavior_from_registry(
-        &self, 
-        language_id: LanguageId
+        &self,
+        language_id: LanguageId,
     ) -> IndexResult<ParserWithBehavior> {
         let registry = get_registry();
-        let registry = registry.lock().map_err(|e| {
-            IndexError::General(format!("Failed to acquire registry lock: {}", e))
-        })?;
-        
-        let (parser, behavior) = registry.create_parser_with_behavior(language_id, &self.settings)
+        let registry = registry
+            .lock()
+            .map_err(|e| IndexError::General(format!("Failed to acquire registry lock: {e}")))?;
+
+        let (parser, behavior) = registry
+            .create_parser_with_behavior(language_id, &self.settings)
             .map_err(|e| IndexError::General(e.to_string()))?;
-            
+
         Ok(ParserWithBehavior { parser, behavior })
     }
-    
+
     /// Checks if a language is enabled using the registry
     pub fn is_language_enabled_in_registry(&self, language_id: LanguageId) -> bool {
         let registry = get_registry();
@@ -84,19 +86,20 @@ impl ParserFactory {
             false
         }
     }
-    
+
     /// Get language by file extension using the registry
     pub fn get_language_for_extension(&self, extension: &str) -> Option<LanguageId> {
         let registry = get_registry();
         if let Ok(registry) = registry.lock() {
-            registry.get_by_extension(extension)
+            registry
+                .get_by_extension(extension)
                 .filter(|def| def.is_enabled(&self.settings))
                 .map(|def| def.id())
         } else {
             None
         }
     }
-    
+
     // ========== Legacy methods (will be removed after migration) ==========
 
     /// Creates parser instance for the specified language.
@@ -165,7 +168,10 @@ impl ParserFactory {
     ///
     /// This method pairs each parser with its language-specific behavior,
     /// enabling the removal of hardcoded language logic from indexing.
-    pub fn create_parser_with_behavior(&self, language: Language) -> IndexResult<ParserWithBehavior> {
+    pub fn create_parser_with_behavior(
+        &self,
+        language: Language,
+    ) -> IndexResult<ParserWithBehavior> {
         // Validate language enablement
         let lang_key = language.config_key();
         if let Some(config) = self.settings.languages.get(lang_key) {
@@ -182,24 +188,22 @@ impl ParserFactory {
         // Create parser and behavior pair
         let result = match language {
             Language::Rust => {
-                let parser = RustParser::with_debug(self.settings.debug)
-                    .map_err(IndexError::General)?;
+                let parser =
+                    RustParser::with_debug(self.settings.debug).map_err(IndexError::General)?;
                 ParserWithBehavior {
                     parser: Box::new(parser),
                     behavior: Box::new(RustBehavior::new()),
                 }
             }
             Language::Python => {
-                let parser = PythonParser::new()
-                    .map_err(|e| IndexError::General(e.to_string()))?;
+                let parser = PythonParser::new().map_err(|e| IndexError::General(e.to_string()))?;
                 ParserWithBehavior {
                     parser: Box::new(parser),
                     behavior: Box::new(PythonBehavior::new()),
                 }
             }
             Language::Php => {
-                let parser = PhpParser::new()
-                    .map_err(|e| IndexError::General(e.to_string()))?;
+                let parser = PhpParser::new().map_err(|e| IndexError::General(e.to_string()))?;
                 ParserWithBehavior {
                     parser: Box::new(parser),
                     behavior: Box::new(PhpBehavior::new()),
@@ -236,7 +240,7 @@ impl ParserFactory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_registry_based_parser_creation() {
         let mut settings = Settings::default();
@@ -246,61 +250,73 @@ mod tests {
         }
         let settings = Arc::new(settings);
         let factory = ParserFactory::new(settings.clone());
-        
+
         // Test creating parser from registry
         let rust_id = LanguageId::new("rust");
         let parser = factory.create_parser_from_registry(rust_id);
         assert!(parser.is_ok(), "Should create Rust parser from registry");
-        
+
         // Test creating parser with behavior from registry
         let python_id = LanguageId::new("python");
         let parser_with_behavior = factory.create_parser_with_behavior_from_registry(python_id);
         if let Err(e) = &parser_with_behavior {
-            eprintln!("Failed to create Python parser with behavior: {}", e);
+            eprintln!("Failed to create Python parser with behavior: {e}");
         }
-        assert!(parser_with_behavior.is_ok(), "Should create Python parser with behavior from registry");
-        
+        assert!(
+            parser_with_behavior.is_ok(),
+            "Should create Python parser with behavior from registry"
+        );
+
         // Test checking if language is enabled
         assert!(factory.is_language_enabled_in_registry(rust_id));
         assert!(factory.is_language_enabled_in_registry(python_id));
-        
+
         // Test getting language by extension
         assert_eq!(factory.get_language_for_extension("rs"), Some(rust_id));
         assert_eq!(factory.get_language_for_extension("py"), Some(python_id));
-        assert_eq!(factory.get_language_for_extension("php"), Some(LanguageId::new("php")));
+        assert_eq!(
+            factory.get_language_for_extension("php"),
+            Some(LanguageId::new("php"))
+        );
         assert_eq!(factory.get_language_for_extension("unknown"), None);
     }
-    
+
     #[test]
     fn test_language_to_language_id_conversion() {
         // Test the transitional conversion method
         assert_eq!(Language::Rust.to_language_id(), LanguageId::new("rust"));
         assert_eq!(Language::Python.to_language_id(), LanguageId::new("python"));
         assert_eq!(Language::Php.to_language_id(), LanguageId::new("php"));
-        assert_eq!(Language::JavaScript.to_language_id(), LanguageId::new("javascript"));
-        assert_eq!(Language::TypeScript.to_language_id(), LanguageId::new("typescript"));
+        assert_eq!(
+            Language::JavaScript.to_language_id(),
+            LanguageId::new("javascript")
+        );
+        assert_eq!(
+            Language::TypeScript.to_language_id(),
+            LanguageId::new("typescript")
+        );
     }
-    
-    #[test]  
+
+    #[test]
     fn test_registry_legacy_parity() {
         let settings = Arc::new(Settings::default());
         let factory = ParserFactory::new(settings.clone());
-        
+
         // Verify that both methods produce the same results for Rust
         let language = Language::Rust;
         let language_id = language.to_language_id();
-        
+
         // Both should report enabled
         assert_eq!(
             factory.is_language_enabled(language),
             factory.is_language_enabled_in_registry(language_id),
             "Registry and legacy should agree on enabled status"
         );
-        
+
         // Both should successfully create parsers
         let legacy_result = factory.create_parser(language);
         let registry_result = factory.create_parser_from_registry(language_id);
-        
+
         assert!(legacy_result.is_ok());
         assert!(registry_result.is_ok());
     }
@@ -325,7 +341,7 @@ mod tests {
         // Create settings with all languages enabled
         let mut settings = Settings::default();
         let mut languages = HashMap::new();
-        
+
         // Enable Rust (already enabled by default, but be explicit)
         languages.insert(
             "rust".to_string(),
@@ -335,7 +351,7 @@ mod tests {
                 parser_options: HashMap::new(),
             },
         );
-        
+
         // Enable Python
         languages.insert(
             "python".to_string(),
@@ -345,7 +361,7 @@ mod tests {
                 parser_options: HashMap::new(),
             },
         );
-        
+
         // Enable PHP
         languages.insert(
             "php".to_string(),
@@ -355,7 +371,7 @@ mod tests {
                 parser_options: HashMap::new(),
             },
         );
-        
+
         settings.languages = languages;
         let factory = ParserFactory::new(Arc::new(settings));
 
@@ -365,14 +381,14 @@ mod tests {
         let rust_pair = result.unwrap();
         assert_eq!(rust_pair.parser.language(), Language::Rust);
         assert_eq!(rust_pair.behavior.module_separator(), "::");
-        
+
         // Test Python
         let result = factory.create_parser_with_behavior(Language::Python);
         assert!(result.is_ok());
         let python_pair = result.unwrap();
         assert_eq!(python_pair.parser.language(), Language::Python);
         assert_eq!(python_pair.behavior.module_separator(), ".");
-        
+
         // Test PHP
         let result = factory.create_parser_with_behavior(Language::Php);
         assert!(result.is_ok());

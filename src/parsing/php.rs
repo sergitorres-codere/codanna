@@ -147,7 +147,7 @@ impl PhpParser {
         let name_node = node.child_by_field_name("name")?;
         let name = &code[name_node.byte_range()];
 
-        let id = counter.next();
+        let id = counter.next_id();
 
         let mut symbol = Symbol::new(
             id,
@@ -171,7 +171,7 @@ impl PhpParser {
         let name_node = node.child_by_field_name("name")?;
         let name = &code[name_node.byte_range()];
 
-        let id = counter.next();
+        let id = counter.next_id();
 
         let mut symbol = Symbol::new(
             id,
@@ -195,7 +195,7 @@ impl PhpParser {
         let name_node = node.child_by_field_name("name")?;
         let name = &code[name_node.byte_range()];
 
-        let id = counter.next();
+        let id = counter.next_id();
 
         // Using Class for PHP classes
         let mut symbol = Symbol::new(
@@ -220,7 +220,7 @@ impl PhpParser {
         let name_node = node.child_by_field_name("name")?;
         let name = &code[name_node.byte_range()];
 
-        let id = counter.next();
+        let id = counter.next_id();
 
         // Using Interface for PHP interfaces
         let mut symbol = Symbol::new(
@@ -245,7 +245,7 @@ impl PhpParser {
         let name_node = node.child_by_field_name("name")?;
         let name = &code[name_node.byte_range()];
 
-        let id = counter.next();
+        let id = counter.next_id();
 
         let mut symbol = Symbol::new(
             id,
@@ -275,7 +275,7 @@ impl PhpParser {
                     // Remove $ prefix from property name if present
                     let clean_name = name.strip_prefix('$').unwrap_or(name);
 
-                    let id = counter.next();
+                    let id = counter.next_id();
 
                     let mut symbol = Symbol::new(
                         id,
@@ -307,7 +307,7 @@ impl PhpParser {
                 if let Some(name_node) = child.child_by_field_name("name") {
                     let name = &code[name_node.byte_range()];
 
-                    let id = counter.next();
+                    let id = counter.next_id();
 
                     let mut symbol = Symbol::new(
                         id,
@@ -341,7 +341,12 @@ impl PhpParser {
 }
 
 impl LanguageParser for PhpParser {
-    fn parse(&mut self, code: &str, file_id: FileId, symbol_counter: &mut SymbolCounter) -> Vec<Symbol> {
+    fn parse(
+        &mut self,
+        code: &str,
+        file_id: FileId,
+        symbol_counter: &mut SymbolCounter,
+    ) -> Vec<Symbol> {
         let tree = match self.parser.parse(code, None) {
             Some(tree) => tree,
             None => return Vec::new(),

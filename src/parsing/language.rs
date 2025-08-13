@@ -17,7 +17,7 @@ pub enum Language {
 
 impl Language {
     /// Convert to LanguageId for registry usage
-    /// 
+    ///
     /// This is a transitional method that will be removed when
     /// we fully migrate to the registry system.
     pub fn to_language_id(&self) -> super::LanguageId {
@@ -30,10 +30,40 @@ impl Language {
             Language::Php => super::LanguageId::new("php"),
         }
     }
-    
+
+    /// Create Language from LanguageId (for backward compatibility)
+    ///
+    /// Returns None if the LanguageId doesn't correspond to a known Language variant.
+    /// This is a transitional method for migration.
+    pub fn from_language_id(id: super::LanguageId) -> Option<Self> {
+        match id.as_str() {
+            "rust" => Some(Language::Rust),
+            "python" => Some(Language::Python),
+            "javascript" => Some(Language::JavaScript),
+            "typescript" => Some(Language::TypeScript),
+            "php" => Some(Language::Php),
+            _ => None,
+        }
+    }
+
     /// Detect language from file extension
+    ///
+    /// This now uses the registry internally for consistency.
+    /// Will be deprecated once all code migrates to registry.
     pub fn from_extension(ext: &str) -> Option<Self> {
-        match ext.to_lowercase().as_str() {
+        let ext_lower = ext.to_lowercase();
+
+        // Try the registry first for registered languages
+        let registry = super::get_registry();
+        if let Ok(registry) = registry.lock() {
+            if let Some(def) = registry.get_by_extension(&ext_lower) {
+                return Self::from_language_id(def.id());
+            }
+        }
+
+        // Fallback to hardcoded for languages not yet in registry
+        // (JavaScript and TypeScript don't have definitions yet)
+        match ext_lower.as_str() {
             "rs" => Some(Language::Rust),
             "py" | "pyi" => Some(Language::Python),
             "js" | "jsx" | "mjs" | "cjs" => Some(Language::JavaScript),

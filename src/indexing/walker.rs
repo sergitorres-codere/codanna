@@ -7,7 +7,7 @@
 //! - Hidden file handling
 
 use crate::Settings;
-use crate::parsing::Language;
+use crate::parsing::get_registry;
 use ignore::WalkBuilder;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -49,8 +49,8 @@ impl FileWalker {
         // One approach would be to create a temporary .codanna-ignore file
         // or use the glob filtering in the iterator below
 
-        // Get enabled languages for filtering
-        let enabled_languages = self.get_enabled_languages();
+        // Get enabled extensions from the registry
+        let enabled_extensions = self.get_enabled_extensions();
 
         // Build and filter the walker
         builder
@@ -69,10 +69,12 @@ impl FileWalker {
                     }
                 }
 
-                // Check if this is a supported and enabled language file
-                if let Some(language) = Language::from_path(path) {
-                    if enabled_languages.contains(&language) {
-                        return Some(path.to_path_buf());
+                // Check if this file extension is enabled
+                if let Some(extension) = path.extension() {
+                    if let Some(ext_str) = extension.to_str() {
+                        if enabled_extensions.iter().any(|ext| ext == ext_str) {
+                            return Some(path.to_path_buf());
+                        }
                     }
                 }
 
@@ -80,24 +82,18 @@ impl FileWalker {
             })
     }
 
-    /// Get list of enabled languages from settings
-    fn get_enabled_languages(&self) -> Vec<Language> {
-        vec![
-            Language::Rust,
-            Language::Python,
-            Language::JavaScript,
-            Language::TypeScript,
-            Language::Php,
-        ]
-        .into_iter()
-        .filter(|&lang| {
-            self.settings
-                .languages
-                .get(lang.config_key())
-                .map(|config| config.enabled)
-                .unwrap_or(false)
-        })
-        .collect()
+    /// Get list of enabled file extensions from the registry
+    fn get_enabled_extensions(&self) -> Vec<String> {
+        let registry = get_registry();
+        if let Ok(registry) = registry.lock() {
+            registry
+                .enabled_extensions(&self.settings)
+                .map(|ext| ext.to_string())
+                .collect()
+        } else {
+            // Fallback to empty if registry lock fails
+            Vec::new()
+        }
     }
 
     /// Count files that would be indexed (useful for dry runs)
