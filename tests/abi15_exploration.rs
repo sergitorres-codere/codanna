@@ -29,6 +29,13 @@ mod abi15_tests {
             "struct_item",
             "trait_item",
             "mod_item",
+            "enum_item",
+            "type_alias",
+            "type_item",
+            "const_item",
+            "static_item",
+            "macro_definition",
+            "macro_rules",
         ] {
             let id = language.id_for_node_kind(node_kind, true);
             if id != 0 {

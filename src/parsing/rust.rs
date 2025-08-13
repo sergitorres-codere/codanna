@@ -272,6 +272,11 @@ impl RustParser {
         symbols: &mut Vec<Symbol>,
         counter: &mut SymbolCounter,
     ) {
+        // Debug: print node types that contain "type" or "const"
+        if (node.kind().contains("type") || node.kind().contains("const")) && self.debug {
+            eprintln!("DEBUG: Found node kind: {}", node.kind());
+        }
+
         match node.kind() {
             "function_item" => {
                 // Check if this function is inside an impl block
@@ -314,6 +319,58 @@ impl RustParser {
                             node.end_position().row as u32,
                             node.end_position().column as u16,
                         );
+                        symbols.push(sym);
+                    }
+                }
+            }
+            "enum_item" => {
+                if let Some(name_node) = node.child_by_field_name("name") {
+                    let symbol =
+                        self.create_symbol(counter, name_node, SymbolKind::Enum, file_id, code);
+
+                    if let Some(mut sym) = symbol {
+                        // Update the range to include the entire enum body
+                        sym.range = Range::new(
+                            node.start_position().row as u32,
+                            node.start_position().column as u16,
+                            node.end_position().row as u32,
+                            node.end_position().column as u16,
+                        );
+                        symbols.push(sym);
+                    }
+                }
+            }
+            "type_item" => {
+                if let Some(name_node) = node.child_by_field_name("name") {
+                    let symbol = self.create_symbol(
+                        counter,
+                        name_node,
+                        SymbolKind::TypeAlias,
+                        file_id,
+                        code,
+                    );
+
+                    if let Some(sym) = symbol {
+                        symbols.push(sym);
+                    }
+                }
+            }
+            "const_item" => {
+                if let Some(name_node) = node.child_by_field_name("name") {
+                    let symbol =
+                        self.create_symbol(counter, name_node, SymbolKind::Constant, file_id, code);
+
+                    if let Some(sym) = symbol {
+                        symbols.push(sym);
+                    }
+                }
+            }
+            "static_item" => {
+                if let Some(name_node) = node.child_by_field_name("name") {
+                    let symbol =
+                        self.create_symbol(counter, name_node, SymbolKind::Constant, file_id, code);
+
+                    if let Some(sym) = symbol {
                         symbols.push(sym);
                     }
                 }
