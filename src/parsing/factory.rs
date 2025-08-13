@@ -441,8 +441,11 @@ mod tests {
         let factory = ParserFactory::new(settings);
 
         let enabled = factory.enabled_languages();
-        // By default, only Rust is enabled
-        assert_eq!(enabled, vec![Language::Rust]);
+        // All three languages (Rust, Python, PHP) are enabled by default now
+        assert_eq!(enabled.len(), 3);
+        assert!(enabled.contains(&Language::Rust));
+        assert!(enabled.contains(&Language::Python));
+        assert!(enabled.contains(&Language::Php));
     }
 
     #[test]

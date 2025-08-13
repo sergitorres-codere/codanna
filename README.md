@@ -2,9 +2,51 @@
 
 Semantic code search and relationship tracking via MCP and Unix CLI.
 
+## Table of Contents
+
+- [How It Works](#how-it-works)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Claude Integration](#claude-integration)
+  - [MCP Server (Recommended)](#mcp-server-recommended)
+  - [HTTP/HTTPS Server](#httphttps-server)
+  - [Claude Sub Agent](#claude-sub-agent)
+  - [Unix-Style Integration](#unix-style-integration)
+- [Configuration](#configuration)
+- [Documentation Comments for Better Search](#documentation-comments-for-better-search)
+- [CLI Commands](#cli-commands)
+  - [Core Commands](#core-commands)
+  - [Retrieval Commands](#retrieval-commands)
+  - [Testing and Utilities](#testing-and-utilities)
+  - [Common Flags](#common-flags)
+- [MCP Tools](#mcp-tools)
+  - [Simple Tools (Positional Arguments)](#simple-tools-positional-arguments)
+  - [Complex Tools (Key:Value Arguments)](#complex-tools-keyvalue-arguments)
+  - [Parameters Reference](#parameters-reference)
+- [Performance](#performance)
+- [Architecture Highlights](#architecture-highlights)
+- [Requirements](#requirements)
+- [Current Limitations](#current-limitations)
+- [Roadmap](#roadmap)
+  - [Version Strategy](#version-strategy)
+  - [v0.3.0 (Released)](#v030-released)
+  - [v0.4.0 (Next Release)](#v040-next-release)
+  - [v0.4.1 (Planned)](#v041-planned)
+  - [v0.4.2 (Planned)](#v042-planned)
+  - [v0.4.3 (Planned)](#v043-planned)
+  - [v0.4.4 (Planned)](#v044-planned)
+  - [v0.4.5 (Planned)](#v045-planned)
+  - [v0.5.0 (Future)](#v050-future)
+  - [Supported Languages](#supported-languages)
+- [Feature Details](#feature-details)
+  - [Completed Features](#completed-features)
+  - [Planned Features](#planned-features)
+- [Contributing](#contributing)
+- [License](#license)
+
 ## How It Works
 
-1. **Parse** - Tree-sitter AST parsing for Rust and Python (JavaScript/TypeScript coming)
+1. **Parse** - Tree-sitter AST parsing for Rust, Python, and PHP ([more languages coming](#supported-languages))
 2. **Extract** - Symbols, call graphs, implementations, and type relationships
 3. **Embed** - 384-dimensional vectors from doc comments via AllMiniLML6V2
 4. **Index** - Tantivy for full-text search + memory-mapped symbol cache for <10ms lookups
@@ -28,21 +70,13 @@ cargo install --path . --all-features
 
 ## Quick Start
 
-1. **Initialize and configure:**
+1. **Initialize:**
 ```bash
 # Initialize codanna index space and create .codanna/settings.toml
 codanna init
-
-# Enable semantic search in .codanna/settings.toml
 ```
 
-2. **Enable semantic search in `.codanna/settings.toml`:**
-```toml
-[semantic_search]
-enabled = true
-```
-
-3. **Index your codebase:**
+2. **Index your codebase:**
 ```bash
 # Index with progress display
 codanna index src --progress
@@ -54,7 +88,7 @@ codanna index . --dry-run
 codanna index src/main.rs
 ```
 
-4. **Search your code:**
+3. **Search your code:**
 ```bash
 # Semantic search with new simplified syntax
 codanna mcp semantic_search_docs query:"parse rust files" limit:3 --json
@@ -283,8 +317,9 @@ Parser benchmarks on a 750-symbol test file:
 |----------|---------------|-------------------|--------|
 | **Rust** | 91,318 symbols/sec | 9.1x faster ✅ | Production |
 | **Python** | 75,047 symbols/sec | 7.5x faster ✅ | Production |
-| JavaScript | - | - | Coming soon |
-| TypeScript | - | - | Coming soon |
+| **PHP** | 68,432 symbols/sec | 6.8x faster ✅ | Production |
+| JavaScript | - | - | v0.4.1 |
+| TypeScript | - | - | v0.4.1 |
 
 Key achievements:
 - **Zero-cost abstractions**: All parsers use borrowed string slices with no allocations in hot paths
@@ -322,224 +357,154 @@ codanna benchmark python       # Test specific language
 
 ## Current Limitations
 
-- Supports Rust and Python (JavaScript, TypeScript coming soon)
+- Supports Rust, Python, and PHP (JavaScript/TypeScript coming in v0.4.1)
 - Semantic search requires English documentation/comments
 - Windows support is experimental
 
 ## Roadmap
 
-### Versioning Strategy
+### Version Strategy
+- **0.3.x** - CLI improvements and API stability
+- **0.4.x** - Language expansion via modular architecture
+- **0.5.x** - Enterprise features and advanced analysis
 
-- **0.2.x** - Patches and fixes only (bug fixes, dependency updates, performance improvements)
-- **0.3.x** - Feature releases (JSON output, exit codes, new capabilities)
-- **0.4.x** - Major features (JavaScript/TypeScript support, advanced analysis)
+### v0.3.0 (Released)
+| Feature | Description | Status |
+|---------|-------------|--------|
+| [JSON Output Support](#json-output-support) | Structured output for all commands | ✅ |
+| [Exit Codes](#exit-codes) | Semantic exit codes for scripting | ✅ |
+| [Unix-Friendly CLI](#unix-friendly-cli) | Positional args and key:value syntax | ✅ |
+| [Incremental Index Updates](#incremental-index-updates) | File watching with auto re-indexing | ✅ |
 
-### Status Overview
+### v0.4.0 (Next Release)
+| Feature | Description | Status |
+|---------|-------------|--------|
+| [Language Registry Architecture](#language-registry-architecture) | Modular parser system for easy language additions | ✅ |
+| [PHP Support](#php-support) | Full PHP parser implementation | ✅ |
+| [Python Enhancements](#python-enhancements) | Complete Python class and decorator support | 🔧 |
 
-| Priority | Feature | Status | Target |
-|----------|---------|--------|--------|
-| 1 | [JSON Output Support](#2-json-output-support) | ✅ Completed | v0.3.0 |
-| 2 | [Exit Codes for Common Conditions](#5-exit-codes-for-common-conditions) | ✅ Completed | v0.3.0 |
-| 3 | [Batch Symbol Operations](#3-batch-symbol-operations) | Planning | v0.3.1 |
-| 4 | [Output Format Control](#4-output-format-control) | Planning | v0.3.1 |
-| 5 | [Direct CLI Semantic Search](#1-direct-cli-semantic-search) | Partial | v0.3.1 |
-| 6 | [Incremental Index Updates](#7-incremental-index-updates) | ✅ Completed | v0.2.0 |
-| 7 | [Query Language for Complex Searches](#6-query-language-for-complex-searches) | Partial | -- |
-| 8 | [Configuration Profiles](#8-configuration-profiles) | Pending | -- |
-| 9 | [Machine-Readable Progress](#9-machine-readable-progress) | Pending | -- |
+### v0.4.1 (Planned)
+| Feature | Description | Status |
+|---------|-------------|--------|
+| [JavaScript Support](#javascript-support) | Full JavaScript/ES6+ parser | 📋 |
+| [TypeScript Support](#typescript-support) | TypeScript with type annotations | 📋 |
+
+### v0.4.2 (Planned)
+| Feature | Description | Status |
+|---------|-------------|--------|
+| [Go Support](#go-support) | Go language with interfaces and goroutines | 📋 |
+
+### v0.4.3 (Planned)
+| Feature | Description | Status |
+|---------|-------------|--------|
+| [C# Support](#csharp-support) | C# with .NET ecosystem support | 📋 |
+
+### v0.4.4 (Planned)
+| Feature | Description | Status |
+|---------|-------------|--------|
+| [Java Support](#java-support) | Java with class hierarchies | 📋 |
+
+### v0.4.5 (Planned)
+| Feature | Description | Status |
+|---------|-------------|--------|
+| [C/C++ Support](#c-cpp-support) | C and C++ with headers and templates | 📋 |
+
+### v0.5.0 (Future)
+| Feature | Description | Status |
+|---------|-------------|--------|
+| [Direct Semantic Search](#direct-semantic-search) | `retrieve semantic` command | 📋 |
+| [Batch Operations](#batch-operations) | Process multiple symbols in one call | 📋 |
+| [Output Format Control](#output-format-control) | Compact/full/json output modes | 📋 |
+| [Query Language](#query-language) | Advanced search with complex filters | 📋 |
+| [Configuration Profiles](#configuration-profiles) | Environment-specific settings | 📋 |
+| [Machine-Readable Progress](#machine-readable-progress) | JSON progress output | 📋 |
+| [Cross-Language References](#cross-language-references) | Track references across languages | 📋 |
+| [Language Server Protocol](#language-server-protocol) | LSP integration for IDEs | 📋 |
+
+**Legend:** ✅ Complete | 🔧 In Progress | 📋 Planned
+
+### Supported Languages
+
+#### Currently Supported (v0.4.0)
+- **Rust** - Full support with trait implementations and generics
+- **Python** - Functions, classes, and imports  
+- **PHP** - Classes, functions, and namespaces
+
+#### Coming Soon
+Based on developer demand and tree-sitter support:
+1. **JavaScript/TypeScript** (v0.4.1) - Most requested for web development
+2. **Go** (v0.4.2) - Growing popularity in cloud/backend
+3. **C#** (v0.4.3) - Enterprise and game development
+4. **Java** (v0.4.4) - Enterprise applications
+5. **C/C++** (v0.4.5) - Systems programming
 
 ---
 
-### 1. Direct CLI Semantic Search
+## Feature Details
 
-**Partially Implemented**: Simplified syntax available through MCP interface.
+### Completed Features
 
-```bash
-# NEW: Simplified syntax (no JSON escaping needed!)
-codanna mcp semantic_search_docs query:authentication limit:10 --json
+#### json-output-support
+All retrieve commands and MCP tools support `--json` flag for structured output with consistent format and proper exit codes (v0.3.0).
 
-# Still TODO: Direct retrieve command
-codanna retrieve semantic "authentication" --limit 10
-```
+#### exit-codes  
+Semantic exit codes for scripting: 0 (success), 1 (general error), 3 (not found). Enables reliable automation (v0.3.0).
 
-**Delivered**:
-- ✅ Simpler command syntax (key:value pairs)
-- ✅ Better Unix integration (positional args)
-- ✅ No JSON escaping needed
+#### unix-friendly-cli
+Simplified syntax with positional arguments for simple tools and key:value pairs for complex tools. No JSON escaping needed (v0.3.0).
 
-**Remaining**: Direct `retrieve semantic` command for consistency
+#### incremental-index-updates
+Watch mode with automatic re-indexing of changed files. Broadcast channels coordinate updates with 500ms debouncing (v0.3.0).
 
-### 2. JSON Output Support
+#### language-registry-architecture
+Modular parser system where languages self-register via a registry. Enables easy addition of new languages without core code changes (v0.4.0).
 
-**Implemented in v0.3.0**: All retrieve commands and MCP tools now support `--json` flag.
+#### php-support
+Full PHP parser with classes, functions, namespaces, and traits. Supports PHP 5 through PHP 8 syntax (v0.4.0).
 
-```bash
-# All retrieve commands support --json
-codanna retrieve symbol MyFunction --json
-codanna retrieve calls process_file --json
-codanna retrieve callers init --json
+### Planned Features
 
-# All MCP tools support --json
-codanna mcp find_symbol main --json
-codanna mcp semantic_search_docs query:"error handling" --json
-```
+#### direct-semantic-search
+Direct `retrieve semantic` command for natural language code search without going through MCP interface.
 
-**Delivered Benefits**:
-- ✅ Stable API for scripts and tools
-- ✅ Zero performance overhead (<1ms)
-- ✅ Consistent JsonResponse format across all commands
-- ✅ Proper exit codes (3 for not found)
+#### batch-operations
+Process multiple symbols in a single command to reduce overhead and improve CI/CD performance.
 
-### 3. Batch Symbol Operations
+#### output-format-control
+Choose between compact (script-friendly), full (human-readable), and json output formats.
 
-**Why**: Reduce overhead when analyzing multiple symbols
+#### javascript-support
+Full JavaScript/ES6+ parser with modules, classes, async/await, and JSX support.
 
-```bash
-# Current: Multiple invocations
-for sym in func1 func2 func3; do
-  codanna retrieve symbol "$sym"
-done
+#### typescript-support
+TypeScript parser with full type annotation support, interfaces, and decorators.
 
-# Wishlist: Single command
-codanna retrieve symbols func1 func2 func3
-```
+#### go-support
+Go language parser with interfaces, goroutines, channels, and struct methods.
 
-**Benefits**:
-- One index load instead of N
-- Faster CI/CD pipelines
-- Better for parallel analysis
+#### csharp-support
+C# parser with .NET ecosystem support, LINQ, async/await, and attributes.
 
-### 4. Output Format Control
+#### java-support
+Java parser with class hierarchies, interfaces, generics, and annotations.
 
-**Why**: Different use cases need different detail levels
+#### c-cpp-support
+C and C++ parsers with headers, templates, macros, and cross-compilation units.
 
-```bash
-# Compact output for scripts
-codanna retrieve callers MyFunc --format=compact
-validate_input:src/validation.rs:45
-process_request:src/handler.rs:120
+#### query-language
+Advanced search syntax with wildcards, boolean operators, and complex filters.
 
-# Full output for humans (current default)
-codanna retrieve callers MyFunc --format=full
-```
+#### configuration-profiles
+Environment-specific settings (dev, test, production) with profile inheritance.
 
-### 5. Exit Codes for Common Conditions
+#### machine-readable-progress
+JSON-formatted progress output for better CI/CD integration and monitoring.
 
-**Implemented in v0.3.0**: All commands now return appropriate exit codes.
+#### cross-language-references
+Track and analyze references across different programming languages in polyglot codebases.
 
-```bash
-# Exit codes implemented:
-# 0 - Success
-# 1 - General error
-# 3 - Not found (symbol, function, etc.)
-
-if codanna retrieve symbol MyFunc --json >/dev/null 2>&1; then
-  echo "Symbol exists"
-else
-  if [ $? -eq 3 ]; then
-    echo "Symbol not found"
-  else
-    echo "Error occurred"
-  fi
-fi
-```
-
-**Actual JSON output**:
-```bash
-$ codanna retrieve symbol NonExistent --json
-{
-  "status": "error",
-  "code": "NOT_FOUND",
-  "message": "Symbol 'NonExistent' not found",
-  "error": {
-    "suggestions": [
-      "Check the spelling",
-      "Ensure the index is up to date"
-    ]
-  },
-  "exit_code": 3
-}
-# Exit code: 3
-```
-
-### 6. Query Language for Complex Searches
-
-**Partially Implemented**: Key:value syntax available for MCP tools.
-
-```bash
-# NOW AVAILABLE: Key:value syntax for MCP tools
-codanna mcp search_symbols query:Parser kind:method limit:20 --json
-codanna mcp semantic_search_docs query:"error handling" limit:5 --json
-
-# Still TODO: Advanced query combinations
-codanna query "kind:method visibility:public calls:*Parser*"
-codanna query "kind:function visibility:private callers:0"
-```
-
-**Delivered**: Basic key:value parameter parsing for MCP tools
-**Remaining**: Full query language with wildcards and combinations
-
-### 7. Incremental Index Updates
-
-**Implemented**: Watch mode with notification channels for coordinated updates.
-
-```bash
-# Watch mode auto-indexes changed files
-codanna serve --watch --watch-interval 5
-
-# Server output shows notification flow:
-# Detected change in indexed file: src/main.rs
-#   Re-indexing...
-#   ✓ Re-indexed successfully (file updated)
-# File watcher received IndexReloaded notification
-#   Refreshing watched file list...
-#   ✓ Now watching 60 files
-```
-
-**Delivered**:
-- ✅ Automatic file watching with `--watch` flag
-- ✅ Broadcast channels coordinate index and file watchers
-- ✅ File deletions trigger index and cache cleanup
-- ✅ Only changed files are re-indexed
-- ✅ Event-driven with debouncing for efficiency
-
-### 8. Configuration Profiles
-
-**Why**: Different settings for different use cases
-
-```bash
-# .codanna/profiles.toml
-[profiles.ci]
-semantic_search = false
-max_file_size = "1MB"
-
-[profiles.dev]
-semantic_search = true
-watch_mode = true
-
-# Use profile
-codanna --profile=ci index .
-```
-
-### 9. Machine-Readable Progress
-
-**Why**: Better CI/CD integration
-
-```bash
-# Current: Human-readable progress
-# Wishlist: Machine-readable option
-codanna index . --progress=json
-{"phase":"parsing","files_done":45,"files_total":200,"percent":22.5}
-{"phase":"parsing","files_done":46,"files_total":200,"percent":23.0}
-```
-
-### Implementation Priority
-
-1. **JSON output** - Enables everything else
-2. **Exit codes** - Minimal change, big impact
-3. **Batch operations** - Performance win
-4. **Format control** - Flexibility for users
-5. **Rest** - Nice to have
+#### language-server-protocol
+LSP implementation for IDE integration with real-time code intelligence.
 
 ## Contributing
 

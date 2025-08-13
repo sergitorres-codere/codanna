@@ -42,6 +42,10 @@ impl LanguageDefinition for PhpLanguage {
         Box::new(PhpBehavior::new())
     }
 
+    fn default_enabled(&self) -> bool {
+        true // PHP is enabled by default (fully implemented)
+    }
+
     fn is_enabled(&self, settings: &Settings) -> bool {
         settings
             .languages
@@ -77,10 +81,10 @@ mod tests {
         let php = PhpLanguage;
         let settings = Settings::default();
 
-        // PHP is disabled by default in Settings
-        assert!(!php.is_enabled(&settings));
+        // PHP is now enabled by default in Settings
+        assert!(php.is_enabled(&settings));
 
-        // But it should be available in the registry
+        // And it should be available in the registry
         let registry = get_registry();
         let registry = registry.lock().unwrap();
         assert!(registry.is_available(LanguageId::new("php")));

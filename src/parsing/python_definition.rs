@@ -40,6 +40,10 @@ impl LanguageDefinition for PythonLanguage {
         Box::new(PythonBehavior::new())
     }
 
+    fn default_enabled(&self) -> bool {
+        true // Python is enabled by default (fully implemented)
+    }
+
     fn is_enabled(&self, settings: &Settings) -> bool {
         settings
             .languages
@@ -73,10 +77,10 @@ mod tests {
         let python = PythonLanguage;
         let settings = Settings::default();
 
-        // Python is disabled by default in Settings
-        assert!(!python.is_enabled(&settings));
+        // Python is now enabled by default in Settings
+        assert!(python.is_enabled(&settings));
 
-        // But it should be available in the registry
+        // And it should be available in the registry
         let registry = get_registry();
         let registry = registry.lock().unwrap();
         assert!(registry.is_available(LanguageId::new("python")));

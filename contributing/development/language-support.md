@@ -1,478 +1,529 @@
-# Language Parser Interface
+# Adding Language Support
 
-The entire relationship extraction system is language-agnostic. The architecture is highly modular, allowing easy addition of new languages while leveraging the sophisticated analysis infrastructure.
-
-## Complete Registration Checklist
-
-**WARNING**: Missing any of these registration points will cause your language to fail in subtle ways. Use this checklist to verify ALL points are covered:
-
-- [ ] Language enum variant added (`src/parsing/language.rs`)
-- [ ] Language methods updated (`from_extension`, `extensions`, `config_key`, `name`)
-- [ ] Parser implementation created (`src/parsing/{language}.rs`)
-- [ ] Parser factory - create_parser (`src/parsing/factory.rs`)
-- [ ] Parser factory - enabled_languages list (`src/parsing/factory.rs`)
-- [ ] File walker registration (`src/indexing/walker.rs`)
-- [ ] CLI benchmark support (`src/main.rs`) 
-- [ ] Configuration defaults (`src/config.rs` - `default_languages`)
-- [ ] Configuration template (`src/config.rs` - `init_config_file`)
+The codebase uses a modular language registry system where languages self-register. This architecture makes adding new languages straightforward without modifying core systems.
 
 ## Current Implementation Status
 
-- **Rust**: ✅ Fully implemented with production-ready features
-- **Python**: 🏗️ Infrastructure ready, parser not yet implemented
-- **JavaScript**: 🏗️ Infrastructure ready, parser not yet implemented  
-- **TypeScript**: 🏗️ Infrastructure ready, parser not yet implemented
+- **Rust**: ✅ Fully implemented with production features
+- **Python**: ✅ Full implementation with classes and functions
+- **PHP**: ✅ Full implementation with namespaces and traits
+- **JavaScript**: 📋 Planned for v0.4.1
+- **TypeScript**: 📋 Planned for v0.4.1
+- **Go**: 📋 Planned for v0.4.2
+- **C#**: 📋 Planned for v0.4.3
+- **Java**: 📋 Planned for v0.4.4
+- **C/C++**: 📋 Planned for v0.4.5
 
-## Current API
+## Architecture Overview
 
-Each language implements the `LanguageParser` trait as defined in `src/parsing/parser.rs`:
+The language system uses a **self-registering registry pattern** where each language:
+1. Defines its own module with parser and behavior implementations
+2. Implements the `LanguageDefinition` trait
+3. Automatically registers itself at startup via `LazyLock`
+
+No manual registration in multiple files required!
+
+## Implementation Guide
+
+### Step 1: Create Language Definition Module
+
+Create a new file `src/parsing/{language}_definition.rs`:
 
 ```rust
-/// Common interface for all language parsers
-pub trait LanguageParser: Send + Sync {
-    /// Parse source code and extract symbols
-    fn parse(&mut self, code: &str, file_id: FileId, symbol_counter: &mut u32) -> Vec<Symbol>;
+use std::sync::Arc;
+use super::{
+    LanguageBehavior, LanguageDefinition, LanguageId, LanguageParser,
+    YourLanguageBehavior, YourLanguageParser,
+};
+use crate::{IndexError, IndexResult, Settings};
 
-    /// Enable downcasting to concrete parser types
-    fn as_any(&self) -> &dyn Any;
+/// Your language definition
+pub struct YourLanguage;
 
-    /// Extract documentation comment for a node
-    fn extract_doc_comment(&self, node: &Node, code: &str) -> Option<String>;
+impl YourLanguage {
+    /// Language identifier constant
+    pub const ID: LanguageId = LanguageId::new("yourlang");
+}
 
-    /// Find function/method calls in the code (legacy method)
-    /// Returns borrowed strings to avoid allocations
-    fn find_calls<'a>(&mut self, code: &'a str) -> Vec<(&'a str, &'a str, Range)>;
-
-    /// Find method calls with rich receiver information (enhanced method)
-    /// Default implementation converts from find_calls()
-    fn find_method_calls(&mut self, code: &str) -> Vec<MethodCall> {
-        // Default implementation converts from legacy find_calls()
+impl LanguageDefinition for YourLanguage {
+    fn id(&self) -> LanguageId {
+        Self::ID
     }
 
-    /// Find trait/interface implementations
-    fn find_implementations<'a>(&mut self, code: &'a str) -> Vec<(&'a str, &'a str, Range)>;
-
-    /// Find type usage (in fields, parameters, returns)
-    fn find_uses<'a>(&mut self, code: &'a str) -> Vec<(&'a str, &'a str, Range)>;
-
-    /// Find method definitions
-    fn find_defines<'a>(&mut self, code: &'a str) -> Vec<(&'a str, &'a str, Range)>;
-
-    /// Find import statements
-    fn find_imports(&mut self, code: &str, file_id: FileId) -> Vec<crate::indexing::Import>;
-
-    /// Get the language this parser handles
-    fn language(&self) -> crate::parsing::Language;
-
-    /// Extract variable bindings with their types (optional)
-    fn find_variable_types<'a>(&mut self, code: &'a str) -> Vec<(&'a str, &'a str, Range)> {
-        Vec::new() // Default empty implementation
+    fn name(&self) -> &'static str {
+        "YourLanguage"
     }
 
-    /// Enable mutable downcasting
-    fn as_any_mut(&mut self) -> &mut dyn Any;
-}
-```
+    fn extensions(&self) -> &'static [&'static str] {
+        &["ext", "ext2"]  // Your file extensions
+    }
 
-## Complete Implementation Steps
+    fn create_parser(&self, _settings: &Settings) -> IndexResult<Box<dyn LanguageParser>> {
+        let parser = YourLanguageParser::new()
+            .map_err(|e| IndexError::General(e.to_string()))?;
+        Ok(Box::new(parser))
+    }
 
-### Step 1: Add Language Enum Variant
-**File**: `src/parsing/language.rs` (lines 10-15)
-```rust
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum Language {
-    Rust,
-    Python,
-    JavaScript,
-    TypeScript,
-    Go,  // ADD YOUR LANGUAGE HERE
-}
-```
+    fn create_behavior(&self) -> Box<dyn LanguageBehavior> {
+        Box::new(YourLanguageBehavior::new())
+    }
 
-### Step 2: Update Language Methods
-**File**: `src/parsing/language.rs`
-Update ALL match statements in:
-- `from_extension()` (lines 19-27) - Map file extensions
-- `extensions()` (lines 37-44) - Return default extensions
-- `config_key()` (lines 47-54) - Configuration key for settings.toml
-- `name()` (lines 57-64) - Display name
+    fn default_enabled(&self) -> bool {
+        false  // Set to true if language should be enabled by default
+    }
 
-### Step 3: Create Parser Implementation
-**File**: `src/parsing/{language}.rs`
-- Define error types with `thiserror`
-- Implement `LanguageParser` trait
-- Follow zero-cost abstractions (see guidelines below)
-
-### Step 4: Register in Parser Factory
-**File**: `src/parsing/factory.rs`
-
-Add to `create_parser` method (lines 46-71):
-```rust
-Language::Go => {
-    let parser = GoParser::new().map_err(|e| IndexError::General(e.to_string()))?;
-    Ok(Box::new(parser))
-}
-```
-
-### Step 5: Update Factory Enabled Languages List
-**File**: `src/parsing/factory.rs` (lines 89-98)
-
-⚠️ **CRITICAL**: Add to hardcoded list in `enabled_languages`:
-```rust
-vec![
-    Language::Rust,
-    Language::Python,
-    Language::JavaScript,
-    Language::TypeScript,
-    Language::Go,  // ADD THIS - WITHOUT IT, PARSER WON'T BE AVAILABLE
-]
-```
-
-### Step 6: Register in File Walker ⚠️ CRITICAL
-**File**: `src/indexing/walker.rs` (lines 85-90)
-
-**WARNING**: Missing this step means your language files won't be discovered during indexing!
-
-```rust
-fn get_enabled_languages(&self) -> Vec<Language> {
-    vec![
-        Language::Rust,
-        Language::Python,
-        Language::JavaScript,
-        Language::TypeScript,
-        Language::Go,  // ADD THIS - WITHOUT IT, FILES WON'T BE INDEXED
-    ]
-    .into_iter()
-    .filter(|&lang| {
-        self.settings
+    fn is_enabled(&self, settings: &Settings) -> bool {
+        settings
             .languages
-            .get(lang.config_key())
+            .get(self.id().as_str())
             .map(|config| config.enabled)
-            .unwrap_or(false)
-    })
-    .collect()
+            .unwrap_or(self.default_enabled())
+    }
+}
+
+/// Register with the global registry
+pub(super) fn register(registry: &mut super::LanguageRegistry) {
+    registry.register(Arc::new(YourLanguage));
 }
 ```
 
-### Step 7: Add CLI Benchmark Support
-**File**: `src/main.rs` (lines 3000-3013)
+### Step 2: Create Language Parser
 
-Add to `run_benchmark_command`:
+Create `src/parsing/{language}_parser.rs` implementing the `LanguageParser` trait:
+
 ```rust
-match language.to_lowercase().as_str() {
-    "rust" => benchmark_rust_parser(custom_file),
-    "python" => benchmark_python_parser(custom_file),
-    "go" => benchmark_go_parser(custom_file),  // ADD THIS
-    "all" => {
-        benchmark_rust_parser(None);
-        println!();
-        benchmark_python_parser(None);
-        benchmark_go_parser(None);  // ADD THIS
+use tree_sitter::{Parser, Node};
+use crate::{Symbol, SymbolKind, FileId, Range};
+use super::{LanguageParser, SymbolCounter};
+
+#[derive(Debug)]
+pub struct YourLanguageParser {
+    parser: Parser,
+}
+
+impl YourLanguageParser {
+    pub fn new() -> Result<Self, YourParseError> {
+        let mut parser = Parser::new();
+        parser.set_language(tree_sitter_yourlang::language())
+            .map_err(|e| YourParseError::ParserInitFailed {
+                reason: e.to_string()
+            })?;
+        Ok(Self { parser })
     }
-    _ => {
-        eprintln!("Unknown language: {language}");
-        eprintln!("Available languages: rust, python, go, all");  // UPDATE THIS
-        std::process::exit(1);
+}
+
+impl LanguageParser for YourLanguageParser {
+    fn parse(&mut self, code: &str, file_id: FileId, counter: &mut SymbolCounter) 
+        -> Vec<Symbol> 
+    {
+        // Parse code and extract symbols
+        let tree = match self.parser.parse(code, None) {
+            Some(tree) => tree,
+            None => return Vec::new(),
+        };
+        
+        let mut symbols = Vec::new();
+        // Walk tree and extract symbols...
+        symbols
+    }
+
+    fn language(&self) -> super::Language {
+        super::Language::YourLanguage  // If using legacy enum
+    }
+
+    // Implement other required methods...
+}
+```
+
+### Step 3: Create Language Behavior
+
+Create `src/parsing/{language}_behavior.rs` implementing the `LanguageBehavior` trait:
+
+```rust
+use super::LanguageBehavior;
+use crate::{Symbol, Visibility};
+use tree_sitter::Language;
+
+#[derive(Debug, Clone)]
+pub struct YourLanguageBehavior {
+    language: Language,  // Tree-sitter language for ABI-15 validation
+}
+
+impl YourLanguageBehavior {
+    pub fn new() -> Self {
+        Self {
+            language: tree_sitter_yourlang::language(),
+        }
+    }
+}
+
+impl LanguageBehavior for YourLanguageBehavior {
+    fn module_separator(&self) -> &'static str {
+        "."  // Common choices: "::" (Rust/C++), "." (Python/Java), "\\" (PHP)
+    }
+
+    fn format_module_path(&self, base_path: &str, symbol_name: &str) -> String {
+        // Combine base path with symbol name using language conventions
+        format!("{}{}{}", base_path, self.module_separator(), symbol_name)
+    }
+
+    fn parse_visibility(&self, signature: &str) -> Visibility {
+        // Parse visibility from function/class signatures
+        // Examples for different languages:
+        
+        // For explicit keyword languages (Java, C#, PHP):
+        if signature.contains("public") {
+            Visibility::Public
+        } else if signature.contains("protected") {
+            Visibility::Protected  
+        } else if signature.contains("private") {
+            Visibility::Private
+        } else {
+            Visibility::Module  // Default visibility
+        }
+        
+        // For Python (naming conventions):
+        // if symbol_name.starts_with("__") { Visibility::Private }
+        // else if symbol_name.starts_with("_") { Visibility::Module }
+        // else { Visibility::Public }
+        
+        // For Go (capitalization):
+        // if symbol_name.chars().next().map_or(false, |c| c.is_uppercase()) {
+        //     Visibility::Public
+        // } else {
+        //     Visibility::Private
+        // }
+    }
+
+    fn supports_traits(&self) -> bool {
+        false  // true for Rust, C#, Java (interfaces), PHP (traits)
+    }
+
+    fn supports_inherent_methods(&self) -> bool {
+        false  // true for Rust, C++ (methods on structs/classes)
+    }
+
+    fn get_language(&self) -> Language {
+        self.language.clone()
+    }
+
+    // Optional: Override configure_symbol for custom behavior
+    fn configure_symbol(&self, symbol: &mut Symbol, module_path: Option<&str>) {
+        // Default implementation handles module path and visibility
+        // Override if you need custom processing
+        
+        // Apply module path formatting
+        if let Some(path) = module_path {
+            let full_path = self.format_module_path(path, &symbol.name);
+            symbol.module_path = Some(full_path.into());
+        }
+
+        // Apply visibility parsing
+        if let Some(ref sig) = symbol.signature {
+            symbol.visibility = self.parse_visibility(sig);
+        }
+        
+        // Add language-specific processing here if needed
     }
 }
 ```
 
-### Step 8: Update Configuration
-**File**: `src/config.rs`
+## Understanding LanguageBehavior
 
-Add to `default_languages` function (lines 283-296):
+The `LanguageBehavior` trait encapsulates all language-specific conventions and rules that were previously hardcoded in the indexer. This is a key part of making the system truly language-agnostic.
+
+### Core Responsibilities
+
+1. **Module Path Formatting**
+   - How to combine module/namespace paths with symbol names
+   - Language-specific separators (`::`; `.`, `\`, `/`)
+   - Package vs module vs namespace conventions
+
+2. **Visibility Parsing**
+   - Extract visibility from signatures or naming conventions
+   - Map to universal visibility levels (Public, Protected, Module, Private)
+   - Handle language-specific visibility rules
+
+3. **Language Capabilities**
+   - Does the language support traits/interfaces?
+   - Does it have inherent methods (methods directly on types)?
+   - What kinds of inheritance does it support?
+
+4. **Tree-sitter Integration**
+   - Provide the language grammar for validation
+   - Validate node kinds using ABI-15
+   - Enable grammar-aware processing
+
+### Language-Specific Examples
+
+#### Rust Behavior
 ```rust
-langs.insert(
-    "go".to_string(),
-    LanguageConfig {
-        enabled: false,
-        extensions: vec!["go".to_string()],
-        parser_options: HashMap::new(),
-    },
-);
+fn module_separator(&self) -> &'static str { "::" }
+fn supports_traits(&self) -> bool { true }
+fn supports_inherent_methods(&self) -> bool { true }
+fn parse_visibility(&self, sig: &str) -> Visibility {
+    if sig.starts_with("pub ") { Visibility::Public }
+    else if sig.starts_with("pub(crate)") { Visibility::Crate }
+    else { Visibility::Private }
+}
 ```
 
-### Step 9: Update Configuration Template
-**File**: `src/config.rs` (line 496)
+#### Python Behavior
+```rust
+fn module_separator(&self) -> &'static str { "." }
+fn parse_visibility(&self, _sig: &str) -> Visibility {
+    // Python uses naming conventions, not keywords
+    // This would need the symbol name, not signature
+    Visibility::Public  // Default for Python
+}
+```
 
-Update the comment in `init_config_file`:
+#### PHP Behavior
+```rust
+fn module_separator(&self) -> &'static str { "\\" }
+fn supports_traits(&self) -> bool { true }  // PHP has traits
+fn parse_visibility(&self, sig: &str) -> Visibility {
+    // PHP has explicit visibility keywords
+    if sig.contains("public") { Visibility::Public }
+    else if sig.contains("protected") { Visibility::Protected }
+    else if sig.contains("private") { Visibility::Private }
+    else { Visibility::Public }  // Default in PHP
+}
+```
+
+### Step 4: Register in Registry Module
+
+Update `src/parsing/registry.rs` to include your language:
+
+```rust
+// In the register_languages() function:
+fn register_languages(registry: &mut LanguageRegistry) {
+    rust_definition::register(registry);
+    python_definition::register(registry);
+    php_definition::register(registry);
+    yourlang_definition::register(registry);  // ADD THIS
+}
+```
+
+### Step 5: Update Module Exports
+
+Update `src/parsing/mod.rs`:
+
+```rust
+// Add modules
+mod yourlang_definition;
+mod yourlang_parser;
+mod yourlang_behavior;
+
+// Export types
+pub use yourlang_parser::YourLanguageParser;
+pub use yourlang_behavior::YourLanguageBehavior;
+```
+
+### Step 6: Add Tree-sitter Dependency
+
+In `Cargo.toml`:
+
 ```toml
-# Currently supported: Rust, Python, Go  # UPDATE THIS COMMENT
+[dependencies]
+tree-sitter-yourlang = "0.20"  # Use appropriate version
 ```
 
-## Common Pitfalls and Their Symptoms
+## That's It!
 
-| Missing Registration | Symptom | Impact |
-|---------------------|---------|--------|
-| File Walker (walker.rs) | `codanna index` silently skips your language files | CRITICAL - No indexing |
-| Factory enabled_languages | Parser created but never used | CRITICAL - No parsing |
-| CLI Benchmark | `codanna benchmark <lang>` shows "Unknown language" | Confusing for testing |
-| Configuration template | Users don't know language is supported | Poor UX |
+The language will now:
+- ✅ Automatically appear in `codanna init` generated config
+- ✅ Be available for indexing when enabled
+- ✅ Work with all CLI commands
+- ✅ Support all MCP tools
+- ✅ Integrate with semantic search
 
-## Verification Steps
+No need to manually update:
+- ❌ ~~factory.rs~~ (registry handles it)
+- ❌ ~~walker.rs~~ (registry provides extensions)
+- ❌ ~~config.rs~~ (registry provides defaults)
+- ❌ ~~main.rs~~ (benchmark can query registry)
+- ❌ ~~language.rs enum~~ (being phased out)
 
-After implementing your language, verify it works:
+## Verification
+
+After implementing your language:
 
 ```bash
-# 1. Check language is recognized
-codanna init
-grep "your_language" .codanna/settings.toml
+# 1. Build the project
+cargo build --release
 
-# 2. Enable your language
-# Edit .codanna/settings.toml: set enabled = true
+# 2. Initialize config (your language should appear)
+./target/release/codanna init
+grep "yourlang" .codanna/settings.toml
 
-# 3. Test indexing discovers files
-codanna index . --dry-run | grep "your_extension"
+# 3. Enable your language in settings.toml
+# [languages.yourlang]
+# enabled = true
 
-# 4. Test actual indexing
-codanna index test_file.ext --progress
+# 4. Test indexing
+echo "your language code" > test.ext
+./target/release/codanna index test.ext --progress
 
-# 5. Test benchmark
-codanna benchmark your_language
+# 5. Test retrieval
+./target/release/codanna retrieve symbol YourSymbol
 
-# 6. Test retrieval
-codanna retrieve symbol YourSymbol
+# 6. Test benchmark (if implemented)
+./target/release/codanna benchmark yourlang
 ```
 
-## Key Implementation Notes
+## Implementation Requirements
 
-**Zero-Cost Abstractions**: The current API follows the project's development guidelines by:
+### Parser Performance
+- **Target**: >10,000 symbols/second
+- **Measure**: AST parsing only (not Tantivy indexing)
+- **Test**: Use `codanna benchmark <language>`
 
-1. **No Allocations**: Methods like `find_calls()` return borrowed `&str` references from source code
-2. **Lifetime Parameters**: Relationship methods use `<'a>` to avoid string allocations
-3. **Optional Features**: Methods like `find_variable_types()` have default empty implementations
-4. **Enhanced Method Calls**: The `MethodCall` struct provides rich metadata for better analysis
+### Memory Efficiency
+- Use borrowed strings (`&str`) where possible
+- Return slices from source code: `&code[node.byte_range()]`
+- Use `SymbolCounter` for ID generation (not raw `u32`)
 
-**Enhanced Method Call System**: The `find_method_calls()` method returns `MethodCall` structs with:
-- Caller and method names
-- Receiver information (self, instance, or static)
-- Call type metadata (instance vs. static method)
-- Source location ranges
+### Error Handling
+```rust
+use thiserror::Error;
 
-**For new language implementations**: Follow the Rust parser as the reference implementation, ensuring zero-cost abstractions where possible.
+#[derive(Error, Debug)]
+pub enum YourParseError {
+    #[error("Failed to initialize parser: {reason}\nSuggestion: Check tree-sitter-yourlang version")]
+    ParserInitFailed { reason: String },
+    
+    #[error("Invalid syntax at line {line}\nSuggestion: Check language version compatibility")]
+    InvalidSyntax { line: usize },
+}
+```
 
-## Critical Implementation Requirements
+### Required Trait Methods
 
-**MANDATORY**: Every language parser MUST follow these guidelines:
+The `LanguageParser` trait requires:
 
-1. **Error Handling**: Define proper error types (see Python progress doc)
-   ```rust
-   #[derive(Error, Debug)]
-   pub enum GoParseError {
-       #[error("Failed to initialize parser: {reason}\nSuggestion: Check tree-sitter-go version in Cargo.toml")]
-       ParserInitFailed { reason: String },
-   }
-   ```
+```rust
+pub trait LanguageParser: Send + Sync {
+    // Core parsing
+    fn parse(&mut self, code: &str, file_id: FileId, counter: &mut SymbolCounter) -> Vec<Symbol>;
+    
+    // Language identification
+    fn language(&self) -> Language;
+    
+    // Documentation extraction
+    fn extract_doc_comment(&self, node: &Node, code: &str) -> Option<String>;
+    
+    // Relationship extraction
+    fn find_calls(&mut self, code: &str) -> Vec<SimpleCall>;
+    fn find_implementations<'a>(&mut self, code: &'a str) -> Vec<(&'a str, &'a str, Range)>;
+    fn find_imports(&mut self, code: &str, file_id: FileId) -> Vec<Import>;
+    
+    // Optional methods (can return empty)
+    fn find_inherent_methods(&mut self, code: &str) -> Vec<(String, String, Range)> {
+        Vec::new()
+    }
+    
+    fn find_uses<'a>(&mut self, code: &'a str) -> Vec<(&'a str, &'a str, Range)> {
+        Vec::new()
+    }
+    
+    fn find_defines<'a>(&mut self, code: &'a str) -> Vec<(&'a str, &'a str, Range)> {
+        Vec::new()
+    }
+}
+```
 
-2. **Zero-Cost Abstractions**: Return borrowed data from source
-   ```rust
-   fn find_calls<'a>(&mut self, code: &'a str) -> Vec<(&'a str, &'a str, Range)> {
-       // Return slices directly from code using &code[node.byte_range()]
-   }
-   ```
+## Language-Specific Patterns
 
-3. **Type Safety**: Use newtypes for domain concepts
-   ```rust
-   pub struct NodeId(NonZeroU32);  // NOT raw u32
-   ```
+### Python
+- **Docstrings**: First string literal after function/class definition
+- **Module paths**: Use `.` separator
+- **Visibility**: Based on naming conventions (`_private`, `__private`)
 
-4. **Function Design**: Decompose complex operations into focused, composable helper methods
-5. **Performance**: Parser must extract >10,000 symbols/second (AST parsing only, not including Tantivy indexing)
+### PHP
+- **Doc blocks**: `/** */` comments before declarations
+- **Namespaces**: Use `\` separator
+- **Visibility**: Explicit keywords (`public`, `private`, `protected`)
 
-### Note on Current Implementation
+### JavaScript/TypeScript (Future)
+- **JSDoc**: `/** */` comments
+- **Module paths**: Use `.` or `/` for imports
+- **Visibility**: Module exports determine visibility
 
-The Rust parser in `src/parsing/rust.rs` currently uses `String` allocations in some methods due to API stability requirements. New language implementations should follow the zero-cost principles where possible, preparing for future API improvements.
+### Go (Future)
+- **Doc comments**: `//` comments before declarations
+- **Package paths**: Use `/` separator
+- **Visibility**: Capitalization determines export
 
-## Testing Your Parser
+## Testing
 
-Create comprehensive tests in `src/parsing/{language}.rs`:
+Create comprehensive tests in your parser module:
 
 ```rust
 #[cfg(test)]
 mod tests {
     use super::*;
-
+    
     #[test]
     fn test_parse_function() {
-        let mut parser = YourParser::new().unwrap();
-        let code = "your language function syntax";
+        let mut parser = YourLanguageParser::new().unwrap();
+        let code = "function example() { }";
         let file_id = FileId::new(1).unwrap();
-
-        let mut counter = 1u32;
+        let mut counter = SymbolCounter::new();
+        
         let symbols = parser.parse(code, file_id, &mut counter);
-
+        
         assert_eq!(symbols.len(), 1);
-        assert_eq!(symbols[0].name.as_ref(), "function_name");
+        assert_eq!(symbols[0].name.as_ref(), "example");
         assert_eq!(symbols[0].kind, SymbolKind::Function);
-    }
-
-    #[test]
-    fn test_find_calls() {
-        let mut parser = YourParser::new().unwrap();
-        let code = "your language call syntax";
-        
-        let calls = parser.find_calls(code);
-        assert!(!calls.is_empty());
-    }
-
-    #[test]
-    fn test_language_fully_registered() {
-        // This test verifies the language is properly registered
-        // Note: Some registration points can't be tested from unit tests
-        // and require manual verification or integration tests
-        
-        // 1. Language enum and methods (language.rs)
-        assert_eq!(Language::from_extension("go"), Some(Language::Go));
-        assert_eq!(Language::Go.config_key(), "go");
-        assert_eq!(Language::Go.name(), "Go");
-        assert!(Language::Go.extensions().contains(&"go"));
-        
-        // 2. Parser implements trait correctly
-        let mut parser = GoParser::new().unwrap();
-        assert_eq!(parser.language(), Language::Go);
-        
-        // 3. Test actual parsing works
-        let code = "package main\nfunc main() {}";
-        let file_id = FileId::new(1).unwrap();
-        let mut counter = 1u32;
-        let symbols = parser.parse(code, file_id, &mut counter);
-        assert!(!symbols.is_empty(), "Parser should extract symbols");
-        
-        // IMPORTANT: The following MUST be verified manually as they're in
-        // private modules or require full system integration:
-        //
-        // ✓ factory.rs: create_parser() has "Language::Go =>" case
-        // ✓ factory.rs: enabled_languages() includes Language::Go in vec!
-        // ✓ walker.rs: get_enabled_languages() includes Language::Go in vec!
-        // ✓ main.rs: run_benchmark_command() has "go" => case
-        // ✓ config.rs: default_languages() has "go" entry
-        // ✓ config.rs: init_config_file() comment mentions Go
     }
     
     #[test]
-    fn verify_language_registration_checklist() {
-        // This test helps catch common registration mistakes at compile time
-        // If this doesn't compile, you forgot a registration step!
+    fn test_language_registration() {
+        use crate::parsing::get_registry;
         
-        // These should all compile if Language::Go exists
-        let _lang = Language::Go;
-        let _config_key = Language::Go.config_key();
-        let _extensions = Language::Go.extensions();
+        let registry = get_registry();
+        let registry = registry.lock().unwrap();
         
-        // This should compile if parser exists
-        let parser_result = GoParser::new();
-        assert!(parser_result.is_ok(), "GoParser::new() should succeed");
+        // Verify language is registered
+        assert!(registry.is_available(LanguageId::new("yourlang")));
         
-        // Manual verification commands to run:
-        println!("Run these commands to verify full integration:");
-        println!("1. cargo build --release");
-        println!("2. ./target/release/codanna init");
-        println!("3. grep 'go' .codanna/settings.toml");
-        println!("4. ./target/release/codanna benchmark go");
-        println!("5. Create test.go and run: ./target/release/codanna index test.go --dry-run");
+        // Verify extensions are registered
+        assert!(registry.get_by_extension("ext").is_some());
     }
 }
 ```
 
-## Configuration and Settings
+## Benefits of the New Architecture
 
-To enable a language, add it to `.codanna/settings.toml`:
+1. **Self-contained**: Each language is a complete module
+2. **No scattered changes**: All language code in one place
+3. **Automatic registration**: Languages register themselves at startup
+4. **Dynamic configuration**: Settings generated from registry
+5. **Easy testing**: Each language module can be tested independently
+6. **Type safe**: `LanguageId` newtype prevents string errors
+7. **Extensible**: Easy to add new capabilities via trait methods
 
-```toml
-[languages.go]
-enabled = true
-extensions = ["go"]  # Optional: override default extensions
+## Migration from Old System
 
-[languages.python]
-enabled = true
-extensions = ["py", "pyi"]
+If updating an existing language from the old manual registration system:
 
-[languages.javascript]
-enabled = false  # Disabled by default until parser is implemented
-```
+1. Create a `{language}_definition.rs` file with `LanguageDefinition` impl
+2. Move parser logic to implement new trait structure
+3. Create `{language}_behavior.rs` with language-specific rules
+4. Remove manual registrations from:
+   - `factory.rs` (create_parser, enabled_languages)
+   - `walker.rs` (get_enabled_languages)
+   - `config.rs` (default_languages, init_config_file)
+   - `main.rs` (benchmark command)
+5. Update imports in `mod.rs`
+6. Test that language still works
 
-The system only creates parsers for enabled languages, preventing overhead from unused language support.
+## Support
 
-## Dependencies
+For examples of complete implementations, see:
+- `src/parsing/rust_definition.rs` - Most complete implementation
+- `src/parsing/python_definition.rs` - Dynamic language example
+- `src/parsing/php_definition.rs` - Namespace-based language example
 
-The following tree-sitter dependencies are already included in `Cargo.toml`:
-- `tree-sitter-python`
-- `tree-sitter-javascript`
-- `tree-sitter-typescript`
-- `tree-sitter-rust`
-- `tree-sitter-go`
-- `tree-sitter-java`
-
-For new languages, add the appropriate tree-sitter dependency:
-```bash
-cargo add tree-sitter-{language}
-```
-
-This will automatically add the latest compatible version to your `Cargo.toml`.
-
-## Language-Specific Patterns
-
-### Python Specifics
-
-1. **Docstrings**: First string literal in function/class body
-2. **Multiple Inheritance**: `class Dog(Animal, Trainable):`
-3. **Import Variations**: 
-   - `import foo`
-   - `from foo import bar`
-   - `from foo import bar as baz`
-   - `from foo import *`
-4. **Method Calls**: `self.method()`, `obj.method()`, `super().method()`
-
-### TypeScript Specifics (Future)
-
-1. **JSDoc**: `/** */` comments
-2. **Multiple Inheritance**: `class Dog extends Animal implements Trainable`
-3. **Import Variations**: 
-   - `import foo from 'foo'`
-   - `import { bar } from 'foo'`
-   - `import * as foo from 'foo'`
-4. **Optional Chaining**: `obj?.method?.()`
-
-### Go Specifics (Future)
-
-1. **Doc Comments**: `//` comments before declarations
-2. **Implicit Interfaces**: No explicit implements
-3. **Import Variations**: 
-   - `import "foo"`
-   - `import . "foo"`
-   - `import bar "foo"`
-4. **Method Expressions**: `Type.Method`
-
-## Key Integration Points
-
-The language parsers integrate with:
-
-1. **ResolutionContext**: For scope-based symbol resolution
-2. **TraitResolver**: For inheritance/implementation tracking  
-3. **ImportResolver**: For cross-file symbol resolution
-4. **DocumentIndex**: For storage and retrieval with semantic search
-5. **MethodCall System**: For rich method call metadata tracking
-6. **MCP Server**: For AI assistant integration
-
-All of these systems are language-agnostic and work identically regardless of the source language.
-
-## Current Architecture Benefits
-
-1. **Performance**: Zero-cost abstractions with borrowed strings
-2. **Modularity**: Easy to add new languages without changing core systems
-3. **Type Safety**: Strong typing with `SymbolId`, `FileId`, and proper error handling
-4. **Extensibility**: Optional methods allow gradual feature addition
-5. **AI Integration**: Full MCP support for code intelligence queries
-
-## Implementation Examples
-
-For complete, guideline-compliant implementation examples, see:
-- **Python Reference**: `/docs/examples/python-parser-reference.md`
-- **Progress Tracking**: `/docs/features/python-language-support-progress.md`
-
-The reference implementation demonstrates:
-- Proper error handling with `thiserror`
-- Zero-cost abstractions with lifetime parameters
-- Function decomposition (30-line limit)
-- Type safety with newtypes
-- Performance optimizations
+The registry system handles all the complexity of language discovery, configuration, and integration, allowing you to focus on implementing the parser logic itself.

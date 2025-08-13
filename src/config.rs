@@ -92,7 +92,7 @@ pub struct LanguageConfig {
     pub extensions: Vec<String>,
 
     /// Additional parser options
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub parser_options: HashMap<String, serde_json::Value>,
 }
 
@@ -194,7 +194,7 @@ impl Default for Settings {
             workspace_root: None,
             debug: false,
             indexing: IndexingConfig::default(),
-            languages: default_languages(),
+            languages: generate_language_defaults(), // Now uses registry
             mcp: McpConfig::default(),
             semantic_search: SemanticSearchConfig::default(),
             file_watch: FileWatchConfig::default(),
@@ -230,7 +230,7 @@ impl Default for McpConfig {
 impl Default for SemanticSearchConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
+            enabled: true, // Enabled by default for better code intelligence
             model: default_embedding_model(),
             threshold: default_similarity_threshold(),
         }
@@ -256,10 +256,43 @@ impl Default for ServerConfig {
     }
 }
 
-fn default_languages() -> HashMap<String, LanguageConfig> {
+/// Generate language defaults from the registry
+/// This queries the language registry to get all registered languages
+/// and their default configurations
+fn generate_language_defaults() -> HashMap<String, LanguageConfig> {
+    // Try to get languages from the registry
+    if let Ok(registry) = crate::parsing::get_registry().lock() {
+        let mut configs = HashMap::new();
+
+        // Iterate through all registered languages
+        for def in registry.iter_all() {
+            configs.insert(
+                def.id().as_str().to_string(),
+                LanguageConfig {
+                    enabled: def.default_enabled(),
+                    extensions: def.extensions().iter().map(|s| s.to_string()).collect(),
+                    parser_options: HashMap::new(),
+                },
+            );
+        }
+
+        // Return registry-generated configs if we got any
+        if !configs.is_empty() {
+            return configs;
+        }
+    }
+
+    // Minimal fallback for catastrophic failure
+    // Only include Rust as it's the most essential language
+    fallback_minimal_languages()
+}
+
+/// Minimal fallback language configuration
+/// Used only when registry is completely unavailable
+fn fallback_minimal_languages() -> HashMap<String, LanguageConfig> {
     let mut langs = HashMap::new();
 
-    // Rust configuration
+    // Include only Rust as the minimal working configuration
     langs.insert(
         "rust".to_string(),
         LanguageConfig {
@@ -269,54 +302,23 @@ fn default_languages() -> HashMap<String, LanguageConfig> {
         },
     );
 
-    // Python configuration
-    langs.insert(
-        "python".to_string(),
-        LanguageConfig {
-            enabled: false,
-            extensions: vec!["py".to_string(), "pyi".to_string()],
-            parser_options: HashMap::new(),
-        },
-    );
-
-    // TypeScript/JavaScript configuration
-    langs.insert(
-        "typescript".to_string(),
-        LanguageConfig {
-            enabled: false,
-            extensions: vec![
-                "ts".to_string(),
-                "tsx".to_string(),
-                "js".to_string(),
-                "jsx".to_string(),
-            ],
-            parser_options: HashMap::new(),
-        },
-    );
-
-    // PHP configuration
-    langs.insert(
-        "php".to_string(),
-        LanguageConfig {
-            enabled: false,
-            extensions: vec![
-                "php".to_string(),
-                "php3".to_string(),
-                "php4".to_string(),
-                "php5".to_string(),
-                "php7".to_string(),
-                "php8".to_string(),
-                "phps".to_string(),
-                "phtml".to_string(),
-            ],
-            parser_options: HashMap::new(),
-        },
-    );
-
     langs
 }
 
 impl Settings {
+    /// Create settings specifically for init_config_file
+    /// This populates all dynamic fields based on the current environment
+    pub fn for_init() -> Result<Self, Box<dyn std::error::Error>> {
+        // Create settings with project-specific values in one initialization
+        let settings = Self {
+            workspace_root: Some(std::env::current_dir()?),
+            // All other fields use defaults (including registry languages)
+            ..Self::default()
+        };
+
+        Ok(settings)
+    }
+
     /// Load configuration from all sources
     pub fn load() -> Result<Self, Box<figment::Error>> {
         // Try to find the workspace root by looking for .codanna directory
@@ -447,103 +449,16 @@ impl Settings {
             std::fs::create_dir_all(parent)?;
         }
 
-        // Create a well-documented settings.toml template
-        let current_dir = std::env::current_dir().unwrap_or_default();
-        let template = format!(
-            r#"# Codanna Configuration File
-# https://github.com/bartolli/codanna
+        // Create settings with project-specific values
+        let settings = Settings::for_init()?;
 
-# Version of the configuration schema
-version = 1
+        // Convert to TOML
+        let toml_string = toml::to_string_pretty(&settings)?;
 
-# Path to the index directory (relative to workspace root)
-index_path = ".codanna/index"
+        // Enhance with comments and documentation
+        let final_toml = Self::add_config_comments(toml_string);
 
-# Workspace root directory (automatically detected)
-workspace_root = "{}"
-
-# Global debug mode
-debug = false
-
-[indexing]
-# Number of parallel threads for indexing (defaults to CPU count)
-# parallel_threads = {}
-
-# Additional patterns to ignore during indexing
-ignore_patterns = []
-
-[mcp]
-# Maximum context size in bytes for MCP server
-max_context_size = 100000
-
-# Enable debug logging for MCP server
-debug = false
-
-[semantic_search]
-# Enable semantic search capabilities
-enabled = false
-
-# Model to use for embeddings
-model = "AllMiniLML6V2"
-
-# Similarity threshold for search results (0.0 to 1.0)
-threshold = 0.6
-
-[file_watch]
-# Enable automatic file watching for indexed files
-# When enabled, the MCP server will automatically re-index files when they change
-# Default: true (enabled for better user experience)
-enabled = true
-
-# Debounce interval in milliseconds
-# How long to wait after a file change before re-indexing
-debounce_ms = 500
-
-[server]
-# Server mode: "stdio" (default) or "http"
-# stdio: Lightweight, spawns per request (best for production)
-# http: Persistent server, real-time file watching (best for development)
-mode = "stdio"
-
-# HTTP server bind address (only used when mode = "http" or --http flag)
-bind = "127.0.0.1:8080"
-
-# Watch interval for stdio mode in seconds (how often to check for file changes)
-watch_interval = 5
-
-# Language-specific settings
-# Currently supported: Rust, Python
-# Coming soon: Go, Java, JavaScript, TypeScript
-
-[languages.rust]
-enabled = true
-extensions = ["rs"]
-
-[languages.python]
-enabled = true
-extensions = ["py", "pyi"]
-
-[languages.go]
-enabled = false  # Coming soon
-extensions = ["go"]
-
-[languages.java]
-enabled = false  # Coming soon
-extensions = ["java"]
-
-[languages.javascript]
-enabled = false  # Coming soon
-extensions = ["js", "jsx", "mjs"]
-
-[languages.typescript]
-enabled = false  # Coming soon
-extensions = ["ts", "tsx"]
-"#,
-            current_dir.display(),
-            num_cpus::get()
-        );
-
-        std::fs::write(&config_path, template)?;
+        std::fs::write(&config_path, final_toml)?;
 
         if force {
             println!("Overwrote configuration at: {}", config_path.display());
@@ -558,6 +473,110 @@ extensions = ["ts", "tsx"]
         Self::create_default_ignore_file(force)?;
 
         Ok(config_path)
+    }
+
+    /// Add helpful comments to the generated TOML configuration
+    fn add_config_comments(toml: String) -> String {
+        let mut result = String::from(
+            "# Codanna Configuration File\n\
+             # https://github.com/bartolli/codanna\n\n",
+        );
+
+        let mut in_languages_section = false;
+        let mut prev_line_was_section = false;
+
+        for line in toml.lines() {
+            // Skip empty lines after section headers to avoid double spacing
+            if line.is_empty() && prev_line_was_section {
+                prev_line_was_section = false;
+                continue;
+            }
+            prev_line_was_section = false;
+
+            // Add section and field comments
+            if line == "version = 1" {
+                result.push_str("# Version of the configuration schema\n");
+            } else if line.starts_with("index_path = ") {
+                result.push_str("\n# Path to the index directory (relative to workspace root)\n");
+            } else if line.starts_with("workspace_root = ") {
+                result.push_str("\n# Workspace root directory (automatically detected)\n");
+            } else if line.starts_with("debug = ") && !in_languages_section {
+                result.push_str("\n# Global debug mode\n");
+            } else if line == "[indexing]" {
+                result.push_str("\n[indexing]\n");
+                prev_line_was_section = true;
+                continue;
+            } else if line.starts_with("parallel_threads = ") {
+                result.push_str(
+                    "# Number of parallel threads for indexing (defaults to CPU count)\n",
+                );
+            } else if line.starts_with("ignore_patterns = ") {
+                result.push_str("\n# Additional patterns to ignore during indexing\n");
+            } else if line == "[mcp]" {
+                result.push_str("\n[mcp]\n");
+                prev_line_was_section = true;
+                continue;
+            } else if line.starts_with("max_context_size = ") {
+                result.push_str("# Maximum context size in bytes for MCP server\n");
+            } else if line.starts_with("debug = ")
+                && !line.contains("false")
+                && in_languages_section
+            {
+                // Skip MCP debug comment if in languages section
+            } else if line.starts_with("debug = ") && line.contains("false") {
+                result.push_str("\n# Enable debug logging for MCP server\n");
+            } else if line == "[semantic_search]" {
+                result.push_str("\n[semantic_search]\n");
+                result.push_str("# Semantic search for natural language code queries\n");
+                prev_line_was_section = true;
+                continue;
+            } else if line.starts_with("enabled = ") && !in_languages_section {
+                // enabled field in semantic_search - comment already added above
+            } else if line.starts_with("model = ") {
+                result.push_str("\n# Model to use for embeddings\n");
+            } else if line.starts_with("threshold = ") {
+                result.push_str("\n# Similarity threshold for search results (0.0 to 1.0)\n");
+            } else if line == "[file_watch]" {
+                result.push_str("\n[file_watch]\n");
+                result.push_str("# Enable automatic file watching for indexed files\n");
+                result.push_str("# When enabled, the MCP server will automatically re-index files when they change\n");
+                result.push_str("# Default: true (enabled for better user experience)\n");
+                prev_line_was_section = true;
+                continue;
+            } else if line.starts_with("enabled = ") && in_languages_section {
+                // Skip comment for language enabled field
+            } else if line.starts_with("debounce_ms = ") {
+                result.push_str("\n# Debounce interval in milliseconds\n");
+                result.push_str("# How long to wait after a file change before re-indexing\n");
+            } else if line == "[server]" {
+                result.push_str("\n[server]\n");
+                result.push_str("# Server mode: \"stdio\" (default) or \"http\"\n");
+                result.push_str("# stdio: Lightweight, spawns per request (best for production)\n");
+                result.push_str(
+                    "# http: Persistent server, real-time file watching (best for development)\n",
+                );
+                prev_line_was_section = true;
+                continue;
+            } else if line.starts_with("mode = ") {
+                // mode field - comment already added above
+            } else if line.starts_with("bind = ") {
+                result.push_str("\n# HTTP server bind address (only used when mode = \"http\" or --http flag)\n");
+            } else if line.starts_with("watch_interval = ") {
+                result.push_str("\n# Watch interval for stdio mode in seconds (how often to check for file changes)\n");
+            } else if line.starts_with("[languages.") {
+                if !in_languages_section {
+                    result.push_str("\n# Language-specific settings\n");
+                    result.push_str("# Currently supported: Rust, Python, PHP\n");
+                    in_languages_section = true;
+                }
+                result.push('\n');
+            }
+
+            result.push_str(line);
+            result.push('\n');
+        }
+
+        result
     }
 
     /// Create a default .codannaignore file with helpful patterns

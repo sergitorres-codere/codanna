@@ -41,6 +41,10 @@ impl LanguageDefinition for RustLanguage {
         Box::new(RustBehavior::new())
     }
 
+    fn default_enabled(&self) -> bool {
+        true // Rust is enabled by default as the primary language
+    }
+
     fn is_enabled(&self, settings: &Settings) -> bool {
         settings
             .languages

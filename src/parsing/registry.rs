@@ -142,6 +142,12 @@ pub trait LanguageDefinition: Send + Sync {
     /// Behaviors are lightweight and don't need configuration
     fn create_behavior(&self) -> Box<dyn LanguageBehavior>;
 
+    /// Default enabled state for configuration generation
+    /// This is used when generating initial configuration files
+    fn default_enabled(&self) -> bool {
+        false // Most languages disabled by default
+    }
+
     /// Check if this language is enabled in settings
     /// Default implementation checks `settings.languages\[id\].enabled`
     fn is_enabled(&self, settings: &Settings) -> bool {

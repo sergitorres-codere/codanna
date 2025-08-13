@@ -110,8 +110,10 @@ mod tests {
 
     fn create_test_settings() -> Arc<Settings> {
         let mut settings = Settings::default();
-        // Enable only Rust for testing
-        settings.languages.get_mut("rust").unwrap().enabled = true;
+        // Disable Python and PHP for testing (only Rust enabled)
+        settings.languages.get_mut("python").unwrap().enabled = false;
+        settings.languages.get_mut("php").unwrap().enabled = false;
+        // Rust remains enabled by default
         Arc::new(settings)
     }
 
@@ -131,7 +133,7 @@ mod tests {
 
         let files: Vec<_> = walker.walk(root).collect();
 
-        // Should find only Rust files
+        // Should find only Rust files (Python and PHP disabled in test settings)
         assert_eq!(files.len(), 2);
         assert!(files.iter().any(|p| p.ends_with("main.rs")));
         assert!(files.iter().any(|p| p.ends_with("lib.rs")));
