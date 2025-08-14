@@ -3682,7 +3682,7 @@ pub struct Another {
 
     #[test]
     fn test_configure_symbol_baseline_python() {
-        use crate::parsing::python_behavior::PythonBehavior;
+        use crate::parsing::PythonBehavior;
         use tempfile::TempDir;
 
         // Create temp directory for test

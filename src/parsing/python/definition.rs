@@ -5,9 +5,10 @@
 
 use std::sync::Arc;
 
-use super::{
-    LanguageBehavior, LanguageDefinition, LanguageId, LanguageParser, PythonBehavior, PythonParser,
+use crate::parsing::{
+    LanguageBehavior, LanguageDefinition, LanguageId, LanguageParser,
 };
+use super::{PythonBehavior, PythonParser};
 use crate::{IndexError, IndexResult, Settings};
 
 /// Python language definition
@@ -54,7 +55,7 @@ impl LanguageDefinition for PythonLanguage {
 }
 
 /// Register Python language with the global registry
-pub(super) fn register(registry: &mut super::LanguageRegistry) {
+pub(crate) fn register(registry: &mut crate::parsing::LanguageRegistry) {
     registry.register(Arc::new(PythonLanguage));
 }
 
