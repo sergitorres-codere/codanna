@@ -351,7 +351,7 @@ static REGISTRY: LazyLock<std::sync::Mutex<LanguageRegistry>> = LazyLock::new(||
 fn initialize_registry(registry: &mut LanguageRegistry) {
     // Register all available languages
     // Each language module provides a register function
-    super::rust_definition::register(registry);
+    super::rust::register(registry);
     super::python::register(registry);
     super::php::register(registry);
 

@@ -1,23 +1,27 @@
 # Adding Language Support
 
-Languages self-register via `LazyLock`. No manual registration needed.
+Languages self-register via the registry system. Each language lives in its own subdirectory for clean organization.
 
 ## Architecture
 
 Each language needs:
 
-1. `{language}_definition.rs` - implements `LanguageDefinition`
-2. `{language}_parser.rs` - implements `LanguageParser`
-3. `{language}_behavior.rs` - implements `LanguageBehavior`
+1. `definition.rs` - implements `LanguageDefinition`
+2. `parser.rs` - implements `LanguageParser`
+3. `behavior.rs` - implements `LanguageBehavior`
+4. `mod.rs` - module re-exports
 
 ## File Structure
 
 ```
 src/parsing/
-├── {language}_definition.rs  # LanguageDefinition trait
-├── {language}_parser.rs      # LanguageParser trait
-├── {language}_behavior.rs    # LanguageBehavior trait
-└── registry.rs               # Add registration call
+├── {language}/
+│   ├── mod.rs        # Module re-exports
+│   ├── parser.rs     # LanguageParser trait
+│   ├── behavior.rs   # LanguageBehavior trait
+│   └── definition.rs # LanguageDefinition trait
+├── registry.rs       # Add registration call
+└── [shared infrastructure files]
 ```
 
 ## Key Trait Signatures
@@ -88,9 +92,17 @@ This tool prevents hours of debugging incorrect node names. Always explore first
 
 ## Implementation Checklist
 
-1. Add to `src/parsing/registry.rs`: `yourlang_definition::register(registry)`
-2. Update `src/parsing/mod.rs`: Add module declarations
-3. Add to `Cargo.toml`: `tree-sitter-yourlang = "0.20"`
+1. Create directory: `src/parsing/{language}/`
+2. Implement the four required files:
+   - `parser.rs` - Main parsing logic
+   - `behavior.rs` - Language-specific behaviors
+   - `definition.rs` - Registry definition with `register()` function
+   - `mod.rs` - Module re-exports
+3. Add to `src/parsing/registry.rs`: `super::{language}::register(registry);`
+4. Update `src/parsing/mod.rs`: 
+   - Add `pub mod {language};`
+   - Add `pub use {language}::{LanguageParser, LanguageBehavior};`
+5. Add to `Cargo.toml`: `tree-sitter-{language} = "0.x"`
 
 ## Quick Verification
 
@@ -109,6 +121,23 @@ cargo build --release
 
 ## Example Implementations
 
-- `src/parsing/rust_definition.rs` - Traits and inherent methods
-- `src/parsing/python_definition.rs` - Naming convention visibility
-- `src/parsing/php_definition.rs` - Namespace handling
+- `src/parsing/rust/` - Full Rust implementation with traits and inherent methods
+- `src/parsing/python/` - Python with naming convention visibility
+- `src/parsing/php/` - PHP with namespace handling
+
+## mod.rs Template
+
+```rust
+//! {Language} language parser implementation
+
+pub mod behavior;
+pub mod definition;
+pub mod parser;
+
+pub use behavior::{Language}Behavior;
+pub use parser::{Language}Parser;
+pub use definition::{Language}Language;
+
+// Re-export for registry registration
+pub(crate) use definition::register;
+```

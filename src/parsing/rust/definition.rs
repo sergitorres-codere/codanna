@@ -6,9 +6,8 @@
 
 use std::sync::Arc;
 
-use super::{
-    LanguageBehavior, LanguageDefinition, LanguageId, LanguageParser, RustBehavior, RustParser,
-};
+use super::{RustBehavior, RustParser};
+use crate::parsing::{LanguageBehavior, LanguageDefinition, LanguageId, LanguageParser};
 use crate::{IndexResult, Settings};
 
 /// Rust language definition
@@ -58,7 +57,7 @@ impl LanguageDefinition for RustLanguage {
 ///
 /// This function is called from initialize_registry() to add
 /// Rust support to the system.
-pub(super) fn register(registry: &mut super::LanguageRegistry) {
+pub(crate) fn register(registry: &mut crate::parsing::LanguageRegistry) {
     registry.register(Arc::new(RustLanguage));
 }
 

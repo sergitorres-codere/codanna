@@ -344,8 +344,7 @@ mod tests {
 
     #[test]
     fn test_resolve_import_path_via_behavior() {
-        use crate::parsing::LanguageBehavior;
-        use crate::parsing::rust_behavior::RustBehavior;
+        use crate::parsing::{LanguageBehavior, RustBehavior};
         use crate::storage::DocumentIndex;
         use crate::{Range, Symbol, SymbolId, SymbolKind};
         use tempfile::TempDir;

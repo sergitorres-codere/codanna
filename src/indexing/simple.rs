@@ -3640,7 +3640,7 @@ pub struct Another {
 
     #[test]
     fn test_configure_symbol_baseline_rust() {
-        use crate::parsing::rust_behavior::RustBehavior;
+        use crate::parsing::RustBehavior;
         use tempfile::TempDir;
 
         // Create temp directory for test

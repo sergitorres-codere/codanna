@@ -5,10 +5,8 @@
 
 use std::sync::Arc;
 
-use crate::parsing::{
-    LanguageBehavior, LanguageDefinition, LanguageId, LanguageParser,
-};
 use super::{PythonBehavior, PythonParser};
+use crate::parsing::{LanguageBehavior, LanguageDefinition, LanguageId, LanguageParser};
 use crate::{IndexError, IndexResult, Settings};
 
 /// Python language definition
