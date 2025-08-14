@@ -12,7 +12,7 @@ See our [Contributing Guide](./contributing/README.md) for:
 
 ```bash
 # Fork and clone
-git clone https://github.com/YOUR_USERNAME/codanna.git
+git clone https://github.com/bartolli/codanna.git
 cd codanna
 
 # Build
