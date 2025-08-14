@@ -1,7 +1,7 @@
 //! PHP-specific language behavior implementation
 
 use crate::Visibility;
-use crate::parsing::language_behavior::LanguageBehavior;
+use crate::parsing::LanguageBehavior;
 use std::path::Path;
 use tree_sitter::Language;
 

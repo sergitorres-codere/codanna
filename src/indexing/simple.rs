@@ -3720,7 +3720,7 @@ pub struct Another {
 
     #[test]
     fn test_configure_symbol_php_baseline() {
-        use crate::parsing::php_behavior::PhpBehavior;
+        use crate::parsing::PhpBehavior;
         use tempfile::TempDir;
 
         // Create temp directory for test
@@ -3758,9 +3758,7 @@ pub struct Another {
 
     #[test]
     fn test_configure_symbol_different_languages() {
-        use crate::parsing::{
-            php_behavior::PhpBehavior, python_behavior::PythonBehavior, rust_behavior::RustBehavior,
-        };
+        use crate::parsing::{PhpBehavior, PythonBehavior, RustBehavior};
 
         use tempfile::TempDir;
 

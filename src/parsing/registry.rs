@@ -353,7 +353,7 @@ fn initialize_registry(registry: &mut LanguageRegistry) {
     // Each language module provides a register function
     super::rust_definition::register(registry);
     super::python_definition::register(registry);
-    super::php_definition::register(registry);
+    super::php::register(registry);
 
     // Future languages will be added here:
     // super::javascript_definition::register(registry);

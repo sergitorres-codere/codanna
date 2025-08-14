@@ -4,11 +4,8 @@
 //! Validates language enablement and provides discovery of supported languages.
 
 use super::{
-    Language, LanguageBehavior, LanguageId, LanguageParser, PhpParser, PythonParser, RustParser,
-    get_registry,
-};
-use crate::parsing::{
-    php_behavior::PhpBehavior, python_behavior::PythonBehavior, rust_behavior::RustBehavior,
+    Language, LanguageBehavior, LanguageId, LanguageParser, PhpParser, PhpBehavior,
+    PythonParser, PythonBehavior, RustParser, RustBehavior, get_registry,
 };
 use crate::{IndexError, IndexResult, Settings};
 use std::sync::Arc;

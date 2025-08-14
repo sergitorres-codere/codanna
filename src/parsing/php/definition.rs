@@ -5,9 +5,10 @@
 
 use std::sync::Arc;
 
-use super::{
-    LanguageBehavior, LanguageDefinition, LanguageId, LanguageParser, PhpBehavior, PhpParser,
+use crate::parsing::{
+    LanguageBehavior, LanguageDefinition, LanguageId, LanguageParser,
 };
+use super::{PhpBehavior, PhpParser};
 use crate::{IndexError, IndexResult, Settings};
 
 /// PHP language definition
@@ -56,7 +57,7 @@ impl LanguageDefinition for PhpLanguage {
 }
 
 /// Register PHP language with the global registry
-pub(super) fn register(registry: &mut super::LanguageRegistry) {
+pub(crate) fn register(registry: &mut crate::parsing::LanguageRegistry) {
     registry.register(Arc::new(PhpLanguage));
 }
 
