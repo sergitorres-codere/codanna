@@ -2365,6 +2365,9 @@ async fn main() {
                 context: codanna::symbol::context::SymbolContext,
             }
 
+            // Get guidance config before moving indexer
+            let guidance_config = indexer.settings().guidance.clone();
+
             let semantic_search_docs_data = if json && tool == "semantic_search_docs" {
                 if !indexer.has_semantic_search() {
                     None // Semantic search not enabled
@@ -2724,7 +2727,20 @@ async fn main() {
                         // Use pre-collected data for JSON output
                         if let Some(index_info) = index_info_data {
                             use codanna::io::format::JsonResponse;
-                            let response = JsonResponse::success(index_info);
+                            use codanna::io::guidance_engine::generate_guidance_from_config;
+                            let mut response = JsonResponse::success(index_info);
+
+                            // Add system guidance (using single_result template since this returns stats)
+                            if let Some(guidance) = generate_guidance_from_config(
+                                &guidance_config,
+                                "get_index_info",
+                                None,
+                                1,
+                            ) {
+                                // Use 1 to trigger single_result template
+                                response = response.with_system_message(&guidance);
+                            }
+
                             println!("{}", serde_json::to_string_pretty(&response).unwrap());
                         }
                     } else if json && tool == "find_symbol" {
@@ -2741,7 +2757,24 @@ async fn main() {
                                 println!("{}", serde_json::to_string_pretty(&response).unwrap());
                                 std::process::exit(3);
                             } else {
-                                let response = JsonResponse::success(symbol_contexts);
+                                use codanna::io::guidance_engine::generate_guidance_from_config;
+                                let mut response = JsonResponse::success(symbol_contexts);
+
+                                // Add system guidance
+                                let result_count =
+                                    response.data.as_ref().map(|d| d.len()).unwrap_or(0);
+                                if let Some(guidance) = generate_guidance_from_config(
+                                    &guidance_config,
+                                    "find_symbol",
+                                    arguments
+                                        .as_ref()
+                                        .and_then(|m| m.get("name"))
+                                        .and_then(|v| v.as_str()),
+                                    result_count,
+                                ) {
+                                    response = response.with_system_message(&guidance);
+                                }
+
                                 println!("{}", serde_json::to_string_pretty(&response).unwrap());
                             }
                         }
@@ -2749,7 +2782,23 @@ async fn main() {
                         // Use pre-collected data for JSON output
                         if let Some(calls) = get_calls_data {
                             use codanna::io::format::JsonResponse;
-                            let response = JsonResponse::success(calls);
+                            use codanna::io::guidance_engine::generate_guidance_from_config;
+                            let mut response = JsonResponse::success(calls);
+
+                            // Add system guidance
+                            let result_count = response.data.as_ref().map(|d| d.len()).unwrap_or(0);
+                            if let Some(guidance) = generate_guidance_from_config(
+                                &guidance_config,
+                                "get_calls",
+                                arguments
+                                    .as_ref()
+                                    .and_then(|m| m.get("function_name"))
+                                    .and_then(|v| v.as_str()),
+                                result_count,
+                            ) {
+                                response = response.with_system_message(&guidance);
+                            }
+
                             println!("{}", serde_json::to_string_pretty(&response).unwrap());
                         } else {
                             // Function not found
@@ -2767,7 +2816,23 @@ async fn main() {
                         // Use pre-collected data for JSON output
                         if let Some(callers) = find_callers_data {
                             use codanna::io::format::JsonResponse;
-                            let response = JsonResponse::success(callers);
+                            use codanna::io::guidance_engine::generate_guidance_from_config;
+                            let mut response = JsonResponse::success(callers);
+
+                            // Add system guidance
+                            let result_count = response.data.as_ref().map(|d| d.len()).unwrap_or(0);
+                            if let Some(guidance) = generate_guidance_from_config(
+                                &guidance_config,
+                                "find_callers",
+                                arguments
+                                    .as_ref()
+                                    .and_then(|m| m.get("function_name"))
+                                    .and_then(|v| v.as_str()),
+                                result_count,
+                            ) {
+                                response = response.with_system_message(&guidance);
+                            }
+
                             println!("{}", serde_json::to_string_pretty(&response).unwrap());
                         } else {
                             // Function not found
@@ -2792,19 +2857,58 @@ async fn main() {
                                     .and_then(|m| m.get("symbol_name"))
                                     .and_then(|v| v.as_str())
                                     .unwrap_or("unknown");
-                                println!("{{");
-                                println!("  \"status\": \"success\",");
-                                println!("  \"data\": {{");
-                                println!("    \"symbol\": \"{name}\",");
-                                println!("    \"impacted_count\": 0,");
-                                println!("    \"impacted_symbols\": [],");
-                                println!(
-                                    "    \"message\": \"No symbols would be impacted by changes to this symbol\""
-                                );
-                                println!("  }}");
-                                println!("}}");
+                                use codanna::io::guidance_engine::generate_guidance_from_config;
+
+                                // Create a proper struct for the empty case
+                                #[derive(serde::Serialize)]
+                                struct EmptyImpactResult {
+                                    symbol: String,
+                                    impacted_count: usize,
+                                    impacted_symbols: Vec<String>,
+                                    message: String,
+                                }
+
+                                let impact_result = EmptyImpactResult {
+                                    symbol: name.to_string(),
+                                    impacted_count: 0,
+                                    impacted_symbols: vec![],
+                                    message:
+                                        "No symbols would be impacted by changes to this symbol"
+                                            .to_string(),
+                                };
+
+                                let mut response = JsonResponse::success(impact_result);
+
+                                // Add guidance for no results case
+                                if let Some(guidance) = generate_guidance_from_config(
+                                    &guidance_config,
+                                    "analyze_impact",
+                                    Some(name),
+                                    0,
+                                ) {
+                                    response = response.with_system_message(&guidance);
+                                }
+
+                                println!("{}", serde_json::to_string_pretty(&response).unwrap());
                             } else {
-                                let response = JsonResponse::success(impacted);
+                                use codanna::io::guidance_engine::generate_guidance_from_config;
+                                let mut response = JsonResponse::success(impacted);
+
+                                // Add system guidance
+                                let result_count =
+                                    response.data.as_ref().map(|d| d.len()).unwrap_or(0);
+                                if let Some(guidance) = generate_guidance_from_config(
+                                    &guidance_config,
+                                    "analyze_impact",
+                                    arguments
+                                        .as_ref()
+                                        .and_then(|m| m.get("symbol_name"))
+                                        .and_then(|v| v.as_str()),
+                                    result_count,
+                                ) {
+                                    response = response.with_system_message(&guidance);
+                                }
+
                                 println!("{}", serde_json::to_string_pretty(&response).unwrap());
                             }
                         } else {
@@ -2823,23 +2927,62 @@ async fn main() {
                         // Use pre-collected data for JSON output
                         if let Some(results) = search_symbols_data {
                             use codanna::io::format::JsonResponse;
+                            use codanna::io::guidance_engine::generate_guidance_from_config;
                             if results.is_empty() {
+                                // Create proper struct for empty search results
+                                #[derive(serde::Serialize)]
+                                struct EmptySearchResult {
+                                    query: String,
+                                    result_count: usize,
+                                    results: Vec<String>,
+                                    message: String,
+                                }
+
                                 let query = arguments
                                     .as_ref()
                                     .and_then(|m| m.get("query"))
                                     .and_then(|v| v.as_str())
                                     .unwrap_or("unknown");
-                                println!("{{");
-                                println!("  \"status\": \"success\",");
-                                println!("  \"data\": {{");
-                                println!("    \"query\": \"{query}\",");
-                                println!("    \"result_count\": 0,");
-                                println!("    \"results\": [],");
-                                println!("    \"message\": \"No results found for query\"");
-                                println!("  }}");
-                                println!("}}");
+
+                                let search_result = EmptySearchResult {
+                                    query: query.to_string(),
+                                    result_count: 0,
+                                    results: vec![],
+                                    message: "No results found for query".to_string(),
+                                };
+
+                                let mut response = JsonResponse::success(search_result);
+
+                                // Add guidance for no results
+                                if let Some(guidance) = generate_guidance_from_config(
+                                    &guidance_config,
+                                    "search_symbols",
+                                    Some(query),
+                                    0,
+                                ) {
+                                    response = response.with_system_message(&guidance);
+                                }
+
+                                println!("{}", serde_json::to_string_pretty(&response).unwrap());
                             } else {
-                                let response = JsonResponse::success(results);
+                                use codanna::io::guidance_engine::generate_guidance_from_config;
+                                let mut response = JsonResponse::success(results);
+
+                                // Add system guidance
+                                let result_count =
+                                    response.data.as_ref().map(|d| d.len()).unwrap_or(0);
+                                if let Some(guidance) = generate_guidance_from_config(
+                                    &guidance_config,
+                                    "search_symbols",
+                                    arguments
+                                        .as_ref()
+                                        .and_then(|m| m.get("query"))
+                                        .and_then(|v| v.as_str()),
+                                    result_count,
+                                ) {
+                                    response = response.with_system_message(&guidance);
+                                }
+
                                 println!("{}", serde_json::to_string_pretty(&response).unwrap());
                             }
                         } else {
@@ -2857,25 +3000,62 @@ async fn main() {
                         // Use pre-collected data for JSON output
                         if let Some(results) = semantic_search_docs_data {
                             use codanna::io::format::JsonResponse;
+                            use codanna::io::guidance_engine::generate_guidance_from_config;
                             if results.is_empty() {
+                                // Create proper struct for empty semantic search
+                                #[derive(serde::Serialize)]
+                                struct EmptySemanticResult {
+                                    query: String,
+                                    result_count: usize,
+                                    results: Vec<String>,
+                                    message: String,
+                                }
+
                                 let query = arguments
                                     .as_ref()
                                     .and_then(|m| m.get("query"))
                                     .and_then(|v| v.as_str())
                                     .unwrap_or("unknown");
-                                println!("{{");
-                                println!("  \"status\": \"success\",");
-                                println!("  \"data\": {{");
-                                println!("    \"query\": \"{query}\",");
-                                println!("    \"result_count\": 0,");
-                                println!("    \"results\": [],");
-                                println!(
-                                    "    \"message\": \"No semantically similar documentation found\""
-                                );
-                                println!("  }}");
-                                println!("}}");
+
+                                let semantic_result = EmptySemanticResult {
+                                    query: query.to_string(),
+                                    result_count: 0,
+                                    results: vec![],
+                                    message: "No semantically similar documentation found"
+                                        .to_string(),
+                                };
+
+                                let mut response = JsonResponse::success(semantic_result);
+
+                                // Add guidance for no results
+                                if let Some(guidance) = generate_guidance_from_config(
+                                    &guidance_config,
+                                    "semantic_search_docs",
+                                    Some(query),
+                                    0,
+                                ) {
+                                    response = response.with_system_message(&guidance);
+                                }
+
+                                println!("{}", serde_json::to_string_pretty(&response).unwrap());
                             } else {
-                                let response = JsonResponse::success(results);
+                                let mut response = JsonResponse::success(results);
+
+                                // Add system guidance for AI assistants
+                                let result_count =
+                                    response.data.as_ref().map(|d| d.len()).unwrap_or(0);
+                                if let Some(guidance) = generate_guidance_from_config(
+                                    &guidance_config,
+                                    "semantic_search_docs",
+                                    arguments
+                                        .as_ref()
+                                        .and_then(|m| m.get("query"))
+                                        .and_then(|v| v.as_str()),
+                                    result_count,
+                                ) {
+                                    response = response.with_system_message(&guidance);
+                                }
+
                                 println!("{}", serde_json::to_string_pretty(&response).unwrap());
                             }
                         } else if !has_semantic_search {
@@ -2905,25 +3085,63 @@ async fn main() {
                         // Use pre-collected data for JSON output
                         if let Some(results) = semantic_search_with_context_data {
                             use codanna::io::format::JsonResponse;
+                            use codanna::io::guidance_engine::generate_guidance_from_config;
                             if results.is_empty() {
+                                // Create proper struct for empty semantic search with context
+                                #[derive(serde::Serialize)]
+                                struct EmptyContextResult {
+                                    query: String,
+                                    result_count: usize,
+                                    results: Vec<String>,
+                                    message: String,
+                                }
+
                                 let query = arguments
                                     .as_ref()
                                     .and_then(|m| m.get("query"))
                                     .and_then(|v| v.as_str())
                                     .unwrap_or("unknown");
-                                println!("{{");
-                                println!("  \"status\": \"success\",");
-                                println!("  \"data\": {{");
-                                println!("    \"query\": \"{query}\",");
-                                println!("    \"result_count\": 0,");
-                                println!("    \"results\": [],");
-                                println!(
-                                    "    \"message\": \"No semantically similar documentation found\""
-                                );
-                                println!("  }}");
-                                println!("}}");
+
+                                let context_result = EmptyContextResult {
+                                    query: query.to_string(),
+                                    result_count: 0,
+                                    results: vec![],
+                                    message: "No semantically similar documentation found"
+                                        .to_string(),
+                                };
+
+                                let mut response = JsonResponse::success(context_result);
+
+                                // Add guidance for no results
+                                if let Some(guidance) = generate_guidance_from_config(
+                                    &guidance_config,
+                                    "semantic_search_with_context",
+                                    Some(query),
+                                    0,
+                                ) {
+                                    response = response.with_system_message(&guidance);
+                                }
+
+                                println!("{}", serde_json::to_string_pretty(&response).unwrap());
                             } else {
-                                let response = JsonResponse::success(results);
+                                use codanna::io::guidance_engine::generate_guidance_from_config;
+                                let mut response = JsonResponse::success(results);
+
+                                // Add system guidance
+                                let result_count =
+                                    response.data.as_ref().map(|d| d.len()).unwrap_or(0);
+                                if let Some(guidance) = generate_guidance_from_config(
+                                    &guidance_config,
+                                    "semantic_search_with_context",
+                                    arguments
+                                        .as_ref()
+                                        .and_then(|m| m.get("query"))
+                                        .and_then(|v| v.as_str()),
+                                    result_count,
+                                ) {
+                                    response = response.with_system_message(&guidance);
+                                }
+
                                 println!("{}", serde_json::to_string_pretty(&response).unwrap());
                             }
                         } else if !has_semantic_search {

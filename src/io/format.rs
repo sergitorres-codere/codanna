@@ -49,6 +49,10 @@ where
     /// Human-readable message
     pub message: String,
 
+    /// System guidance for AI assistants (suggests next action)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_message: Option<String>,
+
     /// Actual data payload (only for success)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<T>,
@@ -98,6 +102,7 @@ where
             status: "success".to_string(),
             code: "OK".to_string(),
             message: "Operation completed successfully".to_string(),
+            system_message: None,
             data: Some(data),
             error: None,
             exit_code: ExitCode::Success as u8,
@@ -110,6 +115,12 @@ where
         self.meta = Some(meta);
         self
     }
+
+    /// Add system guidance message for AI assistants.
+    pub fn with_system_message(mut self, message: &str) -> Self {
+        self.system_message = Some(message.to_string());
+        self
+    }
 }
 
 impl JsonResponse<serde_json::Value> {
@@ -119,6 +130,7 @@ impl JsonResponse<serde_json::Value> {
             status: "error".to_string(),
             code: "NOT_FOUND".to_string(),
             message: format!("{entity} '{name}' not found"),
+            system_message: None,
             data: None,
             error: Some(ErrorDetails {
                 suggestions: vec![
@@ -138,6 +150,7 @@ impl JsonResponse<serde_json::Value> {
             status: "error".to_string(),
             code: format!("{code:?}").to_uppercase(),
             message: message.to_string(),
+            system_message: None,
             data: None,
             error: Some(ErrorDetails {
                 suggestions: suggestions.iter().map(|s| s.to_string()).collect(),
@@ -154,6 +167,7 @@ impl JsonResponse<serde_json::Value> {
             status: "error".to_string(),
             code: error.status_code(),
             message: error.to_string(),
+            system_message: None,
             data: None,
             error: Some(ErrorDetails {
                 suggestions: error

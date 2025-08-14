@@ -7,6 +7,8 @@
 
 pub mod exit_code;
 pub mod format;
+pub mod guidance;
+pub mod guidance_engine;
 pub mod input;
 pub mod output;
 #[cfg(test)]

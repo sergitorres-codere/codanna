@@ -1,0 +1,141 @@
+# Example Codanna Settings with AI Guidance Configuration
+# Copy this to .codanna/settings.toml and customize as needed
+
+# Basic configuration
+version = 1
+index_path = ".codanna/index"
+debug = false
+
+[indexing]
+parallel_threads = 8
+ignore_patterns = ["target/**", "node_modules/**", ".git/**"]
+
+[semantic_search]
+enabled = true
+model = "AllMiniLML6V2"
+threshold = 0.6
+
+[file_watch]
+enabled = true
+debounce_ms = 500
+
+[server]
+mode = "stdio"
+bind = "127.0.0.1:8080"
+watch_interval = 5
+
+[mcp]
+max_context_size = 100000
+debug = false
+
+# ============================================================================
+# AI GUIDANCE CONFIGURATION
+# Customize how AI assistants receive hints for multi-hop exploration
+# ============================================================================
+
+[guidance]
+enabled = true
+
+# Global variables available in all templates
+[guidance.variables]
+project = "codanna"
+team = "engineering"
+
+# -----------------------------------------------------------------------------
+# SEMANTIC_SEARCH_DOCS - Natural language code search
+# -----------------------------------------------------------------------------
+[guidance.templates.semantic_search_docs]
+no_results = "No semantic matches found. Try: 1) Broader terms, 2) Check if indexed, 3) Use 'search_symbols' for exact matches."
+single_result = "Perfect match found! Next steps: 'find_symbol' for details, 'get_calls' for dependencies, 'find_callers' for usage."
+multiple_results = "Found {result_count} semantic matches. Analyze top results with 'find_symbol' or narrow search terms."
+
+# Custom ranges for different result counts
+[[guidance.templates.semantic_search_docs.custom]]
+min = 10
+max = 20
+template = "Found {result_count} matches - good coverage. Focus on top 5 most relevant."
+
+[[guidance.templates.semantic_search_docs.custom]]
+min = 21
+template = "Found {result_count} matches - very broad. Refine search or filter by module/type."
+
+# -----------------------------------------------------------------------------
+# FIND_SYMBOL - Exact symbol lookup
+# -----------------------------------------------------------------------------
+[guidance.templates.find_symbol]
+no_results = "Symbol '{query}' not found. Try: 'search_symbols' for fuzzy match or 'semantic_search_docs' for concept search."
+single_result = "Symbol located! Explore with: 'get_calls' (dependencies), 'find_callers' (usage), 'analyze_impact' (change scope)."
+multiple_results = "Found {result_count} symbols named '{query}'. Each might be in different modules - review all."
+
+# -----------------------------------------------------------------------------
+# GET_CALLS - What does this function call?
+# -----------------------------------------------------------------------------
+[guidance.templates.get_calls]
+no_results = "No outgoing calls. This is a leaf function, pure computation, or data structure."
+single_result = "Calls 1 function. Use 'find_symbol' on it to understand the dependency."
+multiple_results = "Calls {result_count} functions. Map dependencies with 'find_symbol' on each or use 'analyze_impact'."
+
+[[guidance.templates.get_calls.custom]]
+min = 10
+template = "Complex function with {result_count} calls. Consider refactoring or focus on critical paths."
+
+# -----------------------------------------------------------------------------
+# FIND_CALLERS - What calls this function?
+# -----------------------------------------------------------------------------
+[guidance.templates.find_callers]
+no_results = "No callers found. Possibly: entry point, dead code, or dynamically invoked."
+single_result = "Used in 1 place. Check with 'find_symbol' to understand the context."
+multiple_results = "Called from {result_count} locations. Use 'analyze_impact' for full dependency graph."
+
+[[guidance.templates.find_callers.custom]]
+min = 10
+template = "Heavily used ({result_count} callers). Critical function - changes have wide impact."
+
+# -----------------------------------------------------------------------------
+# ANALYZE_IMPACT - Change impact radius
+# -----------------------------------------------------------------------------
+[guidance.templates.analyze_impact]
+no_results = "No impact detected. Symbol is isolated with no dependencies."
+single_result = "Minimal impact - 1 affected symbol. Safe to modify."
+multiple_results = "Impact radius: {result_count} symbols. Review critical paths before changes."
+
+[[guidance.templates.analyze_impact.custom]]
+min = 2
+max = 5
+template = "Low impact ({result_count} symbols). Changes are contained."
+
+[[guidance.templates.analyze_impact.custom]]
+min = 6
+max = 15
+template = "Moderate impact ({result_count} symbols). Test thoroughly after changes."
+
+[[guidance.templates.analyze_impact.custom]]
+min = 16
+template = "High impact ({result_count} symbols)! Consider breaking changes into smaller parts."
+
+# -----------------------------------------------------------------------------
+# SEARCH_SYMBOLS - Full-text symbol search
+# -----------------------------------------------------------------------------
+[guidance.templates.search_symbols]
+no_results = "No symbols match '{query}'. Try: semantic search, wildcards, or check spelling."
+single_result = "Exact match! Use 'find_symbol' for complete details."
+multiple_results = "Found {result_count} matching symbols. Filter by 'kind' parameter or explore each."
+
+[[guidance.templates.search_symbols.custom]]
+min = 20
+template = "Many matches ({result_count}). Add filters: kind:function, module:core, etc."
+
+# -----------------------------------------------------------------------------
+# SEMANTIC_SEARCH_WITH_CONTEXT - Enhanced semantic search
+# -----------------------------------------------------------------------------
+[guidance.templates.semantic_search_with_context]
+no_results = "No contextual matches. Rephrase query or ensure code has documentation."
+single_result = "Found with full context! Review relationships and dependencies shown."
+multiple_results = "Rich context for {result_count} matches. Each includes callers, implementations, and impact."
+
+# -----------------------------------------------------------------------------
+# GET_INDEX_INFO - Index statistics
+# -----------------------------------------------------------------------------
+[guidance.templates.get_index_info]
+# This tool typically returns stats, not a list, so we use single_result
+single_result = "Index contains {symbol_count} symbols across {file_count} files. Use search tools to explore."
