@@ -1318,11 +1318,13 @@ async fn main() {
                 RetrieveQuery::Implementations { trait_name, json } => {
                     use codanna::symbol::context::ContextIncludes;
 
-                    // Find all symbols with this name and look for the trait
+                    // Find all symbols with this name and look for the trait or interface
                     let symbols = indexer.find_symbols_by_name(&trait_name);
-                    let trait_symbol = symbols.iter().find(|s| s.kind == SymbolKind::Trait);
+                    let trait_or_interface = symbols
+                        .iter()
+                        .find(|s| s.kind == SymbolKind::Trait || s.kind == SymbolKind::Interface);
 
-                    match trait_symbol {
+                    match trait_or_interface {
                         Some(symbol) => {
                             let ctx = indexer.get_symbol_context(
                                 symbol.id,
@@ -1348,7 +1350,7 @@ async fn main() {
                                             trait_name
                                         );
 
-                                        // Show trait methods first
+                                        // Show trait/interface methods first
                                         if let Some(defines) = &ctx.relationships.defines {
                                             let methods: Vec<_> = defines
                                                 .iter()
@@ -1356,7 +1358,17 @@ async fn main() {
                                                 .map(|s| s.as_name())
                                                 .collect();
                                             if !methods.is_empty() {
-                                                println!("Trait methods: {}", methods.join(", "));
+                                                let kind_name =
+                                                    if symbol.kind == SymbolKind::Interface {
+                                                        "Interface"
+                                                    } else {
+                                                        "Trait"
+                                                    };
+                                                println!(
+                                                    "{} methods: {}",
+                                                    kind_name,
+                                                    methods.join(", ")
+                                                );
                                                 println!();
                                             }
                                         }
@@ -1413,7 +1425,12 @@ async fn main() {
                                         serde_json::to_string_pretty(&response).unwrap()
                                     );
                                 } else {
-                                    println!("No types implement {trait_name}");
+                                    let kind_name = if symbol.kind == SymbolKind::Interface {
+                                        "interface"
+                                    } else {
+                                        "trait"
+                                    };
+                                    println!("No types implement {kind_name} {trait_name}");
                                 }
                             } else {
                                 // Fallback to original behavior if context fails
@@ -1442,11 +1459,12 @@ async fn main() {
                         None => {
                             if json {
                                 use codanna::io::format::JsonResponse;
-                                let response = JsonResponse::not_found("Trait", &trait_name);
+                                let response =
+                                    JsonResponse::not_found("Trait/Interface", &trait_name);
                                 println!("{}", serde_json::to_string_pretty(&response).unwrap());
                                 std::process::exit(3);
                             } else {
-                                println!("Trait not found: {trait_name}");
+                                println!("Trait or interface not found: {trait_name}");
                             }
                         }
                     }

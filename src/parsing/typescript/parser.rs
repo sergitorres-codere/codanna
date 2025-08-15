@@ -75,7 +75,7 @@ impl TypeScriptParser {
                     symbols.push(symbol);
                 }
             }
-            "class_declaration" => {
+            "class_declaration" | "abstract_class_declaration" => {
                 if let Some(symbol) = self.process_class(node, code, file_id, counter, module_path)
                 {
                     symbols.push(symbol);
@@ -173,8 +173,11 @@ impl TypeScriptParser {
         counter: &mut SymbolCounter,
         module_path: &str,
     ) -> Option<Symbol> {
-        let name_node = node.child_by_field_name("name")?;
-        let name = &code[name_node.byte_range()];
+        // For abstract classes, the name isn't a field, it's a type_identifier child
+        let name = node
+            .children(&mut node.walk())
+            .find(|n| n.kind() == "type_identifier")
+            .map(|n| &code[n.byte_range()])?;
 
         let signature = self.extract_class_signature(node, code);
         let doc_comment = self.extract_doc_comment(&node, code);
@@ -537,6 +540,176 @@ impl TypeScriptParser {
             Visibility::Public // Default for class members
         }
     }
+
+    /// Find implementations (extends and implements) in TypeScript
+    fn find_implementations_in_node<'a>(
+        &self,
+        node: Node,
+        code: &'a str,
+        implementations: &mut Vec<(&'a str, &'a str, Range)>,
+        extends_only: bool,
+    ) {
+        match node.kind() {
+            "class_declaration" | "abstract_class_declaration" => {
+                // Get class name first
+                let class_name = node
+                    .children(&mut node.walk())
+                    .find(|n| n.kind() == "type_identifier")
+                    .map(|n| &code[n.byte_range()]);
+
+                if let Some(class_name) = class_name {
+                    // Look for class_heritage child node (not a field!)
+                    let mut cursor = node.walk();
+                    for child in node.children(&mut cursor) {
+                        if child.kind() == "class_heritage" {
+                            self.process_heritage_clauses(
+                                child,
+                                code,
+                                class_name,
+                                implementations,
+                                extends_only,
+                            );
+                        }
+                    }
+                }
+            }
+            "interface_declaration" => {
+                // Only process interface extends if we're looking for extends relationships
+                if extends_only {
+                    if let Some(interface_name_node) = node.child_by_field_name("name") {
+                        let interface_name = &code[interface_name_node.byte_range()];
+
+                        // Check for extends clause (interface extension)
+                        if let Some(extends_clause) = node.child_by_field_name("extends") {
+                            self.process_extends_clause(
+                                extends_clause,
+                                code,
+                                interface_name,
+                                implementations,
+                            );
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        // Recurse into children
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            self.find_implementations_in_node(child, code, implementations, extends_only);
+        }
+    }
+
+    /// Process heritage clauses (extends and implements)
+    fn process_heritage_clauses<'a>(
+        &self,
+        heritage_node: Node,
+        code: &'a str,
+        class_name: &'a str,
+        implementations: &mut Vec<(&'a str, &'a str, Range)>,
+        extends_only: bool,
+    ) {
+        let mut cursor = heritage_node.walk();
+        for child in heritage_node.children(&mut cursor) {
+            match child.kind() {
+                "extends_clause" => {
+                    // Process extends clause for both extends_only and regular find_implementations
+                    // Skip "extends" keyword, get the type
+                    let mut extends_cursor = child.walk();
+                    for extends_child in child.children(&mut extends_cursor) {
+                        if extends_child.kind() == "type_identifier"
+                            || extends_child.kind() == "identifier"
+                            || extends_child.kind() == "nested_type_identifier"
+                            || extends_child.kind() == "generic_type"
+                        {
+                            if let Some(base_name) = self.extract_type_name(extends_child, code) {
+                                let range = Range::new(
+                                    extends_child.start_position().row as u32,
+                                    extends_child.start_position().column as u16,
+                                    extends_child.end_position().row as u32,
+                                    extends_child.end_position().column as u16,
+                                );
+                                implementations.push((class_name, base_name, range));
+                            }
+                        }
+                    }
+                }
+                "implements_clause" => {
+                    // Only process implements clause when NOT looking for extends only
+                    if !extends_only {
+                        // Skip "implements" keyword, get all the interfaces
+                        let mut impl_cursor = child.walk();
+                        for impl_child in child.children(&mut impl_cursor) {
+                            if impl_child.kind() == "type_identifier"
+                                || impl_child.kind() == "identifier"
+                                || impl_child.kind() == "nested_type_identifier"
+                                || impl_child.kind() == "generic_type"
+                            {
+                                if let Some(interface_name) =
+                                    self.extract_type_name(impl_child, code)
+                                {
+                                    let range = Range::new(
+                                        impl_child.start_position().row as u32,
+                                        impl_child.start_position().column as u16,
+                                        impl_child.end_position().row as u32,
+                                        impl_child.end_position().column as u16,
+                                    );
+                                    implementations.push((class_name, interface_name, range));
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Process extends clause for interfaces
+    fn process_extends_clause<'a>(
+        &self,
+        extends_node: Node,
+        code: &'a str,
+        interface_name: &'a str,
+        implementations: &mut Vec<(&'a str, &'a str, Range)>,
+    ) {
+        let mut cursor = extends_node.walk();
+        for child in extends_node.children(&mut cursor) {
+            if child.kind() == "type_identifier" || child.kind() == "nested_type_identifier" {
+                if let Some(base_interface) = self.extract_type_name(child, code) {
+                    let range = Range::new(
+                        child.start_position().row as u32,
+                        child.start_position().column as u16,
+                        child.end_position().row as u32,
+                        child.end_position().column as u16,
+                    );
+                    implementations.push((interface_name, base_interface, range));
+                }
+            }
+        }
+    }
+
+    /// Extract type name from a type node
+    #[allow(clippy::only_used_in_recursion)]
+    fn extract_type_name<'a>(&self, node: Node, code: &'a str) -> Option<&'a str> {
+        match node.kind() {
+            "type_identifier" | "identifier" => Some(&code[node.byte_range()]),
+            "nested_type_identifier" => {
+                // For qualified names like Namespace.Type, get the full name
+                Some(&code[node.byte_range()])
+            }
+            "generic_type" => {
+                // For generic types like Array<T>, get just the base type
+                if let Some(name_node) = node.child_by_field_name("name") {
+                    self.extract_type_name(name_node, code)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
 }
 
 impl LanguageParser for TypeScriptParser {
@@ -606,9 +779,24 @@ impl LanguageParser for TypeScriptParser {
         Vec::new()
     }
 
-    fn find_implementations<'a>(&mut self, _code: &'a str) -> Vec<(&'a str, &'a str, Range)> {
-        // TODO: Implement interface implementation extraction
-        Vec::new()
+    fn find_implementations<'a>(&mut self, code: &'a str) -> Vec<(&'a str, &'a str, Range)> {
+        let mut implementations = Vec::new();
+
+        if let Some(tree) = self.parser.parse(code, None) {
+            self.find_implementations_in_node(tree.root_node(), code, &mut implementations, false);
+        }
+
+        implementations
+    }
+
+    fn find_extends<'a>(&mut self, code: &'a str) -> Vec<(&'a str, &'a str, Range)> {
+        let mut extends = Vec::new();
+
+        if let Some(tree) = self.parser.parse(code, None) {
+            self.find_implementations_in_node(tree.root_node(), code, &mut extends, true);
+        }
+
+        extends
     }
 
     fn find_imports(&mut self, _code: &str, _file_id: FileId) -> Vec<Import> {

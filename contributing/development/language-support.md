@@ -54,55 +54,72 @@ fn supports_traits(&self) -> bool
 fn supports_inherent_methods(&self) -> bool
 ```
 
-## ABI-15 Node Exploration Tool
+## Step 1: ABI-15 Node Discovery (Required)
 
-Before implementing a parser, use `tests/abi15_exploration.rs` to discover the correct node type names for your language. Tree-sitter node names often don't match language keywords.
+Create a comprehensive ABI-15 exploration test before implementing any parser functionality. Tree-sitter node names frequently differ from language keywords (e.g., `abstract_class_declaration` not `abstract class`), making node discovery essential for correct implementation.
+
+### Creating the Node Discovery Test
+
+1. Add a comprehensive test to `tests/abi15_exploration.rs` that covers all language constructs
+2. Document findings in `docs/enhancements/{language}/NODE_MAPPING.md`
+3. Reference the node mapping document during implementation
 
 ### Running the Explorer
 
 ```bash
-# Add your language test to tests/abi15_exploration.rs
-cargo test explore_yourlang_abi15 -- --nocapture
+# Run your comprehensive language test
+cargo test explore_{language}_abi15_comprehensive -- --nocapture > docs/enhancements/{language}/node_discovery.txt
 ```
 
-### What It Reveals
+### What to Discover
 
-The explorer shows:
+The explorer reveals:
 
-- Actual node type names (e.g., `enum_item` not `enum` in Rust)
-- Available field names for extracting data
+- Exact node type names for all language constructs
+- Field names for data extraction
 - Node IDs for validation
+- Parent-child relationships
 - ABI version compatibility
 
-### Example Discovery
+### Example Discovery Output
 
 ```rust
 #[test]
-fn explore_rust_abi15_features() {
-    let language: Language = tree_sitter_rust::LANGUAGE.into();
-
-    // This revealed that Rust uses:
-    // - "enum_item" not "enum"
-    // - "type_item" not "type_alias"
-    // - "const_item" not "const"
+fn explore_typescript_abi15_comprehensive() {
+    // Discovered that TypeScript uses:
+    // - "class_declaration" for regular classes
+    // - "abstract_class_declaration" for abstract classes (not "class_declaration" with modifier)
+    // - "interface_declaration" for interfaces
+    // - "type_alias_declaration" for type aliases
 }
 ```
 
-This tool prevents hours of debugging incorrect node names. Always explore first, then implement.
+### Node Categories to Test
+
+Every language test should explore:
+- Class/struct declarations (including abstract, sealed, etc.)
+- Interface/trait declarations
+- Function/method declarations
+- Variable/constant declarations
+- Type definitions
+- Import/export statements
+- Module/namespace declarations
+- Language-specific constructs (decorators, attributes, etc.)
 
 ## Implementation Checklist
 
-1. Create directory: `src/parsing/{language}/`
-2. Implement the four required files:
+1. Run ABI-15 node discovery test and document findings
+2. Create directory: `src/parsing/{language}/`
+3. Implement the four required files:
    - `parser.rs` - Main parsing logic
    - `behavior.rs` - Language-specific behaviors
    - `definition.rs` - Registry definition with `register()` function
    - `mod.rs` - Module re-exports
-3. Add to `src/parsing/registry.rs`: `super::{language}::register(registry);`
-4. Update `src/parsing/mod.rs`: 
+4. Add to `src/parsing/registry.rs`: `super::{language}::register(registry);`
+5. Update `src/parsing/mod.rs`: 
    - Add `pub mod {language};`
    - Add `pub use {language}::{LanguageParser, LanguageBehavior};`
-5. Add to `Cargo.toml`: `tree-sitter-{language} = "0.x"`
+6. Add to `Cargo.toml`: `tree-sitter-{language} = "0.x"`
 
 ## Quick Verification
 

@@ -9,12 +9,10 @@ use tree_sitter::Language;
 pub struct TypeScriptBehavior;
 
 impl LanguageBehavior for TypeScriptBehavior {
-    fn format_module_path(&self, base_path: &str, symbol_name: &str) -> String {
-        if base_path.is_empty() {
-            symbol_name.to_string()
-        } else {
-            format!("{base_path}.{symbol_name}")
-        }
+    fn format_module_path(&self, base_path: &str, _symbol_name: &str) -> String {
+        // TypeScript uses file paths as module paths, not including the symbol name
+        // All symbols in the same file share the same module path for visibility
+        base_path.to_string()
     }
 
     fn get_language(&self) -> Language {
@@ -24,10 +22,18 @@ impl LanguageBehavior for TypeScriptBehavior {
         "."
     }
 
-    fn module_path_from_file(&self, file_path: &Path, _project_root: &Path) -> Option<String> {
-        // Convert file path to module path
+    fn module_path_from_file(&self, file_path: &Path, project_root: &Path) -> Option<String> {
+        // Convert file path to module path relative to project root
         // e.g., src/utils/helpers.ts -> src.utils.helpers
-        let path = file_path.to_str()?;
+
+        // Get relative path from project root
+        let relative_path = file_path
+            .strip_prefix(project_root)
+            .ok()
+            .or_else(|| file_path.strip_prefix("./").ok())
+            .unwrap_or(file_path);
+
+        let path = relative_path.to_str()?;
 
         // Remove common directory prefixes and file extensions
         let module_path = path

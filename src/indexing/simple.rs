@@ -1006,6 +1006,24 @@ impl SimpleIndexer {
             )?;
         }
 
+        // 2.3. Inheritance relationships (extends)
+        let extends = parser.find_extends(content);
+        for (derived_type, base_type, _range) in extends {
+            debug_print!(
+                self,
+                "Registering inheritance: {} extends {}",
+                derived_type,
+                base_type
+            );
+            self.add_relationships_by_name(
+                derived_type,
+                base_type,
+                file_id,
+                RelationKind::Extends,
+                None,
+            )?;
+        }
+
         // 2.5. Inherent methods (for complex method resolution)
         // TODO: Stage 4 will fix the trait signature to return Vec<(String, String, Range)>
         // For now, we'll use the trait method directly and handle the borrowing issue
@@ -1458,7 +1476,7 @@ impl SimpleIndexer {
         // Load requested relationships using existing methods
         if include.contains(crate::symbol::context::ContextIncludes::IMPLEMENTATIONS) {
             match symbol.kind {
-                SymbolKind::Trait => {
+                SymbolKind::Trait | SymbolKind::Interface => {
                     relationships.implemented_by = Some(self.get_implementations(symbol_id));
                 }
                 _ => {
@@ -2336,6 +2354,9 @@ impl SimpleIndexer {
                 crate::SymbolKind::Method |  // Methods are also callable
                 crate::SymbolKind::Struct |
                 crate::SymbolKind::Trait |
+                crate::SymbolKind::Interface |  // TypeScript/Java interfaces
+                crate::SymbolKind::Class |      // OOP classes
+                crate::SymbolKind::TypeAlias |  // Type aliases
                 crate::SymbolKind::Enum |
                 crate::SymbolKind::Constant => {
                     context.add_module_symbol(symbol.name.to_string(), symbol.id);

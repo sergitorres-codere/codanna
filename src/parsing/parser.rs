@@ -57,6 +57,15 @@ pub trait LanguageParser: Send + Sync {
     /// Zero-cost: Returns string slices into the source code
     fn find_implementations<'a>(&mut self, code: &'a str) -> Vec<(&'a str, &'a str, Range)>;
 
+    /// Find inheritance relationships (extends for classes/interfaces)
+    ///
+    /// Returns tuples of (derived_type, base_type, range)
+    /// Zero-cost: Returns string slices into the source code
+    fn find_extends<'a>(&mut self, _code: &'a str) -> Vec<(&'a str, &'a str, Range)> {
+        // Default implementation returns empty for languages without inheritance
+        Vec::new()
+    }
+
     /// Find type usage (in fields, parameters, returns)
     ///
     /// Returns tuples of (context_name, used_type, range)
