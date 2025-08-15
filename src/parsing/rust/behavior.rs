@@ -3,14 +3,16 @@
 use super::resolution::{RustResolutionContext, RustTraitResolver};
 use crate::FileId;
 use crate::Visibility;
+use crate::parsing::behavior_state::{BehaviorState, StatefulBehavior};
 use crate::parsing::{InheritanceResolver, LanguageBehavior, ResolutionScope};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tree_sitter::Language;
 
 /// Rust language behavior implementation
 #[derive(Clone)]
 pub struct RustBehavior {
     language: Language,
+    state: BehaviorState,
 }
 
 impl RustBehavior {
@@ -18,7 +20,14 @@ impl RustBehavior {
     pub fn new() -> Self {
         Self {
             language: tree_sitter_rust::LANGUAGE.into(),
+            state: BehaviorState::new(),
         }
+    }
+}
+
+impl StatefulBehavior for RustBehavior {
+    fn state(&self) -> &BehaviorState {
+        &self.state
     }
 }
 
@@ -147,6 +156,20 @@ impl LanguageBehavior for RustBehavior {
             "references" => RelationKind::References,
             _ => RelationKind::References,
         }
+    }
+
+    // Override import tracking methods to use state
+
+    fn register_file(&self, path: PathBuf, file_id: FileId, module_path: String) {
+        self.register_file_with_state(path, file_id, module_path);
+    }
+
+    fn add_import(&self, import: crate::indexing::Import) {
+        self.add_import_with_state(import);
+    }
+
+    fn get_imports_for_file(&self, file_id: FileId) -> Vec<crate::indexing::Import> {
+        self.get_imports_from_state(file_id)
     }
 }
 

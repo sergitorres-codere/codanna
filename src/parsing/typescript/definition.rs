@@ -30,7 +30,7 @@ impl LanguageDefinition for TypeScriptLanguage {
     }
 
     fn create_behavior(&self) -> Box<dyn LanguageBehavior> {
-        Box::new(TypeScriptBehavior)
+        Box::new(TypeScriptBehavior::new())
     }
 
     fn default_enabled(&self) -> bool {

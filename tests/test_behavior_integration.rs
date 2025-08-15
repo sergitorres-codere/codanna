@@ -15,7 +15,7 @@ use codanna::{FileId, SymbolId};
 fn test_typescript_resolution_behavior() {
     println!("\n=== Testing TypeScript Resolution Behavior ===");
 
-    let behavior = TypeScriptBehavior;
+    let behavior = TypeScriptBehavior::new();
     let file_id = FileId::new(1).unwrap();
     let mut ctx = behavior.create_resolution_context(file_id);
 
@@ -87,7 +87,7 @@ fn test_typescript_resolution_behavior() {
 fn test_typescript_inheritance_behavior() {
     println!("\n=== Testing TypeScript Inheritance Behavior ===");
 
-    let behavior = TypeScriptBehavior;
+    let behavior = TypeScriptBehavior::new();
     let mut resolver = behavior.create_inheritance_resolver();
 
     // Set up TypeScript class/interface hierarchy
@@ -341,7 +341,7 @@ fn test_php_namespace_resolution() {
 fn test_cross_language_behavior_consistency() {
     println!("\n=== Testing Cross-Language Behavior Consistency ===");
 
-    let typescript = TypeScriptBehavior;
+    let typescript = TypeScriptBehavior::new();
     let python = PythonBehavior::new();
     let rust = RustBehavior::new();
     let php = PhpBehavior::new();
@@ -391,7 +391,7 @@ fn test_new_behavior_methods_exist() {
     println!("\n=== Verifying New Behavior Methods ===");
 
     let behaviors: Vec<(&str, Box<dyn LanguageBehavior>)> = vec![
-        ("TypeScript", Box::new(TypeScriptBehavior)),
+        ("TypeScript", Box::new(TypeScriptBehavior::new())),
         ("Python", Box::new(PythonBehavior::new())),
         ("Rust", Box::new(RustBehavior::new())),
         ("PHP", Box::new(PhpBehavior::new())),

@@ -2,15 +2,40 @@
 
 use crate::Visibility;
 use crate::parsing::LanguageBehavior;
+use crate::parsing::behavior_state::{BehaviorState, StatefulBehavior};
 use crate::parsing::resolution::{InheritanceResolver, ResolutionScope};
 use crate::types::FileId;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tree_sitter::Language;
 
 use super::resolution::{TypeScriptInheritanceResolver, TypeScriptResolutionContext};
 
 /// TypeScript language behavior implementation
-pub struct TypeScriptBehavior;
+#[derive(Clone)]
+pub struct TypeScriptBehavior {
+    state: BehaviorState,
+}
+
+impl TypeScriptBehavior {
+    /// Create a new TypeScript behavior instance
+    pub fn new() -> Self {
+        Self {
+            state: BehaviorState::new(),
+        }
+    }
+}
+
+impl Default for TypeScriptBehavior {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl StatefulBehavior for TypeScriptBehavior {
+    fn state(&self) -> &BehaviorState {
+        &self.state
+    }
+}
 
 impl LanguageBehavior for TypeScriptBehavior {
     fn format_module_path(&self, base_path: &str, _symbol_name: &str) -> String {
@@ -107,5 +132,19 @@ impl LanguageBehavior for TypeScriptBehavior {
             "defines" => RelationKind::Defines,
             _ => RelationKind::References,
         }
+    }
+
+    // Override import tracking methods to use state
+
+    fn register_file(&self, path: PathBuf, file_id: FileId, module_path: String) {
+        self.register_file_with_state(path, file_id, module_path);
+    }
+
+    fn add_import(&self, import: crate::indexing::Import) {
+        self.add_import_with_state(import);
+    }
+
+    fn get_imports_for_file(&self, file_id: FileId) -> Vec<crate::indexing::Import> {
+        self.get_imports_from_state(file_id)
     }
 }
