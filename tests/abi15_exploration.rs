@@ -118,6 +118,85 @@ mod abi15_tests {
     }
 
     #[test]
+    fn explore_typescript_abi15_features() {
+        let language: Language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
+
+        println!("\n=== TypeScript Language ABI-15 Metadata ===");
+        println!("  ABI Version: {}", language.abi_version());
+        println!("  Field count: {}", language.field_count());
+        println!("  Node kind count: {}", language.node_kind_count());
+
+        // Explore TypeScript-specific node types for symbol extraction
+        println!("\n  Key Node Types for Symbol Extraction:");
+        for node_kind in &[
+            // Function-related
+            "function_declaration",
+            "function_expression",
+            "arrow_function",
+            "generator_function_declaration",
+            "method_definition",
+            "function_signature",
+            // Class-related
+            "class_declaration",
+            "class_expression",
+            "constructor",
+            "property_declaration",
+            "method_signature",
+            "public_field_definition",
+            "private_field_definition",
+            // Interface & Type
+            "interface_declaration",
+            "type_alias_declaration",
+            "enum_declaration",
+            "type_parameter",
+            "type_annotation",
+            // Variables
+            "variable_declaration",
+            "lexical_declaration",
+            "const_declaration",
+            "let_declaration",
+            "variable_declarator",
+            // Module/Namespace
+            "module_declaration",
+            "namespace_declaration",
+            "export_statement",
+            "import_statement",
+            "ambient_declaration",
+            // Decorators
+            "decorator",
+            "decorator_expression",
+            // JSX/TSX
+            "jsx_element",
+            "jsx_self_closing_element",
+            "jsx_opening_element",
+            "jsx_attribute",
+        ] {
+            let id = language.id_for_node_kind(node_kind, true);
+            if id != 0 {
+                println!("    {node_kind} -> ID: {id}");
+            }
+        }
+
+        // Check field names for TypeScript-specific constructs
+        println!("\n  Available Fields: {}", language.field_count());
+        for i in 0..10.min(language.field_count()) {
+            if let Some(name) = language.field_name_for_id(i as u16) {
+                println!("    Field {i}: {name}");
+            }
+        }
+
+        // Test TypeScript vs JavaScript differences
+        let js_language: Language = tree_sitter_javascript::LANGUAGE.into();
+        println!("\n  TypeScript vs JavaScript Comparison:");
+        println!("    TypeScript nodes: {}", language.node_kind_count());
+        println!("    JavaScript nodes: {}", js_language.node_kind_count());
+        println!(
+            "    Difference: {} additional nodes",
+            language.node_kind_count() as i32 - js_language.node_kind_count() as i32
+        );
+    }
+
+    #[test]
     fn explore_language_behavior_candidates() {
         println!("\n=== Potential LanguageBehavior Enhancements ===");
 

@@ -7,6 +7,7 @@ pub mod php;
 pub mod python;
 pub mod registry;
 pub mod rust;
+pub mod typescript;
 
 pub use factory::{ParserFactory, ParserWithBehavior};
 pub use language::Language;
@@ -17,3 +18,4 @@ pub use php::{PhpBehavior, PhpParser};
 pub use python::{PythonBehavior, PythonParser};
 pub use registry::{LanguageDefinition, LanguageId, LanguageRegistry, RegistryError, get_registry};
 pub use rust::{RustBehavior, RustParser};
+pub use typescript::{TypeScriptBehavior, TypeScriptParser};

@@ -1,3 +1,34 @@
+## CLI Usage: Modern Syntax
+
+Codanna supports both MCP tools and CLI commands. The CLI has been updated with Unix-friendly syntax:
+
+### Simple Commands (positional arguments):
+```bash
+# Text output (DEFAULT - prefer this to save context)
+codanna mcp find_symbol main
+codanna mcp get_calls process_file
+codanna mcp find_callers init
+
+# JSON output (only when structured data needed)
+codanna mcp find_symbol main --json
+```
+
+### Complex Commands (key:value pairs):
+```bash
+# Text output (DEFAULT - prefer this)
+codanna mcp search_symbols query:parse limit:10
+codanna mcp semantic_search_docs query:"error handling"
+
+# JSON output (only for parsing/piping)
+codanna mcp search_symbols query:parse --json | jq '.data[].name'
+```
+
+### Important: Prefer TEXT Output
+- TEXT output is concise and human-readable
+- JSON fills context window quickly (3-5x more tokens)
+- Only use `--json` when you need to parse results programmatically
+- The agent should default to TEXT for exploration and analysis
+
 ## INSTRUCTIONS: Using Codanna-Navigator Agent Effectively
 
 ### Multi-Hop Pattern for Deep Analysis

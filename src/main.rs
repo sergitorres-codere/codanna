@@ -8,7 +8,7 @@ use clap::{
     builder::styling::{AnsiColor, Effects, Styles},
 };
 use codanna::FileId;
-use codanna::parsing::{LanguageParser, PhpParser, PythonParser, RustParser};
+use codanna::parsing::{LanguageParser, PhpParser, PythonParser, RustParser, TypeScriptParser};
 use codanna::types::SymbolCounter;
 use codanna::{IndexPersistence, RelationKind, Settings, SimpleIndexer, Symbol, SymbolKind};
 use serde::Serialize;
@@ -3227,16 +3227,19 @@ fn run_benchmark_command(language: &str, custom_file: Option<PathBuf>) {
         "rust" => benchmark_rust_parser(custom_file),
         "python" => benchmark_python_parser(custom_file),
         "php" => benchmark_php_parser(custom_file),
+        "typescript" | "ts" => benchmark_typescript_parser(custom_file),
         "all" => {
             benchmark_rust_parser(None);
             println!();
             benchmark_python_parser(None);
             println!();
             benchmark_php_parser(None);
+            println!();
+            benchmark_typescript_parser(None);
         }
         _ => {
             eprintln!("Unknown language: {language}");
-            eprintln!("Available languages: rust, python, php, all");
+            eprintln!("Available languages: rust, python, php, typescript, all");
             std::process::exit(1);
         }
     }
@@ -3308,6 +3311,22 @@ fn benchmark_php_parser(custom_file: Option<PathBuf>) {
 
     let mut parser = PhpParser::new().expect("Failed to create PHP parser");
     benchmark_parser("PHP", &mut parser, &code, file_path);
+}
+
+fn benchmark_typescript_parser(custom_file: Option<PathBuf>) {
+    let (code, file_path) = if let Some(path) = custom_file {
+        let content = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+            eprintln!("Failed to read {}: {e}", path.display());
+            std::process::exit(1);
+        });
+        (content, Some(path))
+    } else {
+        // Generate benchmark code
+        (generate_typescript_benchmark_code(), None)
+    };
+
+    let mut parser = TypeScriptParser::new().expect("Failed to create TypeScript parser");
+    benchmark_parser("TypeScript", &mut parser, &code, file_path);
 }
 
 fn benchmark_parser(
@@ -3511,6 +3530,139 @@ class Class_{i} {{
     }
 
     code.push_str("?>");
+    code
+}
+
+fn generate_typescript_benchmark_code() -> String {
+    let mut code = String::from("// TypeScript benchmark file\n\n");
+
+    // Generate 500 functions with various TypeScript features
+    for i in 0..500 {
+        code.push_str(&format!(
+            r#"/**
+ * Function {i} documentation
+ * @param param1 The first parameter
+ * @param param2 The second parameter
+ * @returns A boolean result
+ */
+export function function_{i}(param1: number, param2: string = 'default'): boolean {{
+    const result = param1 > 0 && param2.length > 0;
+    return result;
+}}
+
+"#
+        ));
+    }
+
+    // Generate 50 interfaces
+    for i in 0..50 {
+        code.push_str(&format!(
+            r#"/**
+ * Interface {i} for data structure
+ */
+export interface Interface_{i} {{
+    id: number;
+    name: string;
+    optional?: boolean;
+    readonly immutable: string;
+    method(param: string): void;
+}}
+
+"#
+        ));
+    }
+
+    // Generate 50 classes with methods
+    for i in 0..50 {
+        code.push_str(&format!(
+            r#"/**
+ * Class {i} implementation
+ */
+export class Class_{i} implements Interface_{i} {{
+    public id: number;
+    public name: string;
+    public optional?: boolean;
+    public readonly immutable: string;
+    private _internal: number;
+    protected _protected: string;
+
+    constructor(id: number, name: string) {{
+        this.id = id;
+        this.name = name;
+        this.immutable = 'fixed';
+        this._internal = 0;
+        this._protected = 'protected';
+    }}
+
+    public method(param: string): void {{
+        console.log(param);
+    }}
+
+    private privateMethod(): number {{
+        return this._internal;
+    }}
+
+    protected protectedMethod(): string {{
+        return this._protected;
+    }}
+
+    static staticMethod(): void {{
+        console.log('static');
+    }}
+}}
+
+"#
+        ));
+    }
+
+    // Generate 50 type aliases
+    for i in 0..50 {
+        code.push_str(&format!(
+            r#"/**
+ * Type alias {i}
+ */
+export type TypeAlias_{i} = string | number | boolean;
+
+type ComplexType_{i} = {{
+    field1: TypeAlias_{i};
+    field2: Interface_{i};
+    field3: (param: string) => void;
+}};
+
+"#
+        ));
+    }
+
+    // Generate 50 enums
+    for i in 0..50 {
+        code.push_str(&format!(
+            r#"/**
+ * Enum {i} definition
+ */
+export enum Enum_{i} {{
+    First = 0,
+    Second = 1,
+    Third = 'three',
+    Fourth = 'four'
+}}
+
+"#
+        ));
+    }
+
+    // Add some arrow functions and const declarations
+    for i in 0..50 {
+        code.push_str(&format!(
+            r#"export const arrowFunction_{i} = (x: number, y: number): number => x + y;
+
+export const constant_{i}: string = 'constant value';
+
+let variable_{i}: number = {i};
+
+"#
+        ));
+    }
+
     code
 }
 

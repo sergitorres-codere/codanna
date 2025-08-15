@@ -354,10 +354,10 @@ fn initialize_registry(registry: &mut LanguageRegistry) {
     super::rust::register(registry);
     super::python::register(registry);
     super::php::register(registry);
+    super::typescript::register(registry);
 
     // Future languages will be added here:
     // super::javascript_definition::register(registry);
-    // super::typescript_definition::register(registry);
 }
 
 /// Get the global registry
