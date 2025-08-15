@@ -6,7 +6,7 @@
 //! When migrating or updating the parser, ensure compatibility with ABI-14 features.
 
 use crate::indexing::Import;
-use crate::parsing::{LanguageParser, MethodCall};
+use crate::parsing::{LanguageParser, MethodCall, ParserContext, ScopeType};
 use crate::types::SymbolCounter;
 use crate::{FileId, Range, Symbol, SymbolKind, Visibility};
 use std::any::Any;
@@ -15,11 +15,13 @@ use tree_sitter::{Language, Node, Parser};
 /// TypeScript language parser
 pub struct TypeScriptParser {
     parser: Parser,
+    context: ParserContext,
 }
 
 impl TypeScriptParser {
     /// Helper to create a symbol with all optional fields
     fn create_symbol(
+        &self,
         id: crate::types::SymbolId,
         name: String,
         kind: SymbolKind,
@@ -43,6 +45,9 @@ impl TypeScriptParser {
         }
         symbol = symbol.with_visibility(visibility);
 
+        // Set scope context based on parser's current scope
+        symbol.scope_context = Some(self.context.current_scope_context());
+
         symbol
     }
 
@@ -54,12 +59,15 @@ impl TypeScriptParser {
             .set_language(&language)
             .map_err(|e| format!("Failed to set TypeScript language: {e}"))?;
 
-        Ok(Self { parser })
+        Ok(Self {
+            parser,
+            context: ParserContext::new(),
+        })
     }
 
     /// Extract symbols from a TypeScript node
     fn extract_symbols_from_node(
-        &self,
+        &mut self,
         node: Node,
         code: &str,
         file_id: FileId,
@@ -74,13 +82,33 @@ impl TypeScriptParser {
                 {
                     symbols.push(symbol);
                 }
+                // Note: In TypeScript, function declarations are hoisted
+                // But we process nested symbols in the function's scope
+                self.context.enter_scope(ScopeType::hoisting_function());
+                // Process children for nested functions/classes
+                for child in node.children(&mut node.walk()) {
+                    if child.kind() != "identifier" && child.kind() != "formal_parameters" {
+                        self.extract_symbols_from_node(
+                            child,
+                            code,
+                            file_id,
+                            counter,
+                            symbols,
+                            module_path,
+                        );
+                    }
+                }
+                self.context.exit_scope();
             }
             "class_declaration" | "abstract_class_declaration" => {
                 if let Some(symbol) = self.process_class(node, code, file_id, counter, module_path)
                 {
                     symbols.push(symbol);
+                    // Enter class scope for processing members
+                    self.context.enter_scope(ScopeType::Class);
                     // Extract class members
                     self.extract_class_members(node, code, file_id, counter, symbols, module_path);
+                    self.context.exit_scope();
                 }
             }
             "interface_declaration" => {
@@ -120,19 +148,26 @@ impl TypeScriptParser {
                     symbols.push(symbol);
                 }
             }
-            _ => {}
-        }
-
-        // Recursively process children
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            self.extract_symbols_from_node(child, code, file_id, counter, symbols, module_path);
+            _ => {
+                // For unhandled node types, recursively process children
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    self.extract_symbols_from_node(
+                        child,
+                        code,
+                        file_id,
+                        counter,
+                        symbols,
+                        module_path,
+                    );
+                }
+            }
         }
     }
 
     /// Process a function declaration
     fn process_function(
-        &self,
+        &mut self,
         node: Node,
         code: &str,
         file_id: FileId,
@@ -146,7 +181,7 @@ impl TypeScriptParser {
         let doc_comment = self.extract_doc_comment(&node, code);
         let visibility = self.determine_visibility(node, code);
 
-        Some(Self::create_symbol(
+        Some(self.create_symbol(
             counter.next_id(),
             name.to_string(),
             SymbolKind::Function,
@@ -166,7 +201,7 @@ impl TypeScriptParser {
 
     /// Process a class declaration
     fn process_class(
-        &self,
+        &mut self,
         node: Node,
         code: &str,
         file_id: FileId,
@@ -183,7 +218,7 @@ impl TypeScriptParser {
         let doc_comment = self.extract_doc_comment(&node, code);
         let visibility = self.determine_visibility(node, code);
 
-        Some(Self::create_symbol(
+        Some(self.create_symbol(
             counter.next_id(),
             name.to_string(),
             SymbolKind::Class,
@@ -203,7 +238,7 @@ impl TypeScriptParser {
 
     /// Extract class members (methods, properties)
     fn extract_class_members(
-        &self,
+        &mut self,
         class_node: Node,
         code: &str,
         file_id: FileId,
@@ -221,6 +256,19 @@ impl TypeScriptParser {
                         {
                             symbols.push(symbol);
                         }
+                        // Also process the method body for nested classes/functions
+                        if let Some(body) = child.child_by_field_name("body") {
+                            for body_child in body.children(&mut body.walk()) {
+                                self.extract_symbols_from_node(
+                                    body_child,
+                                    code,
+                                    file_id,
+                                    counter,
+                                    symbols,
+                                    module_path,
+                                );
+                            }
+                        }
                     }
                     "public_field_definition" | "property_declaration" => {
                         if let Some(symbol) =
@@ -237,7 +285,7 @@ impl TypeScriptParser {
 
     /// Process an interface declaration
     fn process_interface(
-        &self,
+        &mut self,
         node: Node,
         code: &str,
         file_id: FileId,
@@ -251,7 +299,7 @@ impl TypeScriptParser {
         let doc_comment = self.extract_doc_comment(&node, code);
         let visibility = self.determine_visibility(node, code);
 
-        Some(Self::create_symbol(
+        Some(self.create_symbol(
             counter.next_id(),
             name.to_string(),
             SymbolKind::Interface,
@@ -271,7 +319,7 @@ impl TypeScriptParser {
 
     /// Process a type alias declaration
     fn process_type_alias(
-        &self,
+        &mut self,
         node: Node,
         code: &str,
         file_id: FileId,
@@ -285,7 +333,7 @@ impl TypeScriptParser {
         let doc_comment = self.extract_doc_comment(&node, code);
         let visibility = self.determine_visibility(node, code);
 
-        Some(Self::create_symbol(
+        Some(self.create_symbol(
             counter.next_id(),
             name.to_string(),
             SymbolKind::TypeAlias,
@@ -305,7 +353,7 @@ impl TypeScriptParser {
 
     /// Process an enum declaration
     fn process_enum(
-        &self,
+        &mut self,
         node: Node,
         code: &str,
         file_id: FileId,
@@ -319,7 +367,7 @@ impl TypeScriptParser {
         let doc_comment = self.extract_doc_comment(&node, code);
         let visibility = self.determine_visibility(node, code);
 
-        Some(Self::create_symbol(
+        Some(self.create_symbol(
             counter.next_id(),
             name.to_string(),
             SymbolKind::Enum,
@@ -339,7 +387,7 @@ impl TypeScriptParser {
 
     /// Process variable declarations
     fn process_variable_declaration(
-        &self,
+        &mut self,
         node: Node,
         code: &str,
         file_id: FileId,
@@ -361,7 +409,7 @@ impl TypeScriptParser {
 
                         let visibility = self.determine_visibility(node, code);
 
-                        symbols.push(Self::create_symbol(
+                        symbols.push(self.create_symbol(
                             counter.next_id(),
                             name.to_string(),
                             kind,
@@ -385,7 +433,7 @@ impl TypeScriptParser {
 
     /// Process arrow functions
     fn process_arrow_function(
-        &self,
+        &mut self,
         _node: Node,
         _code: &str,
         _file_id: FileId,
@@ -399,7 +447,7 @@ impl TypeScriptParser {
 
     /// Process a method definition
     fn process_method(
-        &self,
+        &mut self,
         node: Node,
         code: &str,
         file_id: FileId,
@@ -413,7 +461,7 @@ impl TypeScriptParser {
         let doc_comment = self.extract_doc_comment(&node, code);
         let visibility = self.determine_method_visibility(node, code);
 
-        Some(Self::create_symbol(
+        Some(self.create_symbol(
             counter.next_id(),
             name.to_string(),
             SymbolKind::Method,
@@ -433,7 +481,7 @@ impl TypeScriptParser {
 
     /// Process a property/field definition
     fn process_property(
-        &self,
+        &mut self,
         node: Node,
         code: &str,
         file_id: FileId,
@@ -445,7 +493,7 @@ impl TypeScriptParser {
 
         let visibility = self.determine_method_visibility(node, code);
 
-        Some(Self::create_symbol(
+        Some(self.create_symbol(
             counter.next_id(),
             name.to_string(),
             SymbolKind::Field,
@@ -719,6 +767,8 @@ impl LanguageParser for TypeScriptParser {
         file_id: FileId,
         symbol_counter: &mut SymbolCounter,
     ) -> Vec<Symbol> {
+        // Reset context for each file
+        self.context = ParserContext::new();
         let mut symbols = Vec::new();
 
         match self.parser.parse(code, None) {

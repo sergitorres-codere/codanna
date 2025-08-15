@@ -10,7 +10,7 @@
 //! version, verify compatibility with node type names used in this implementation.
 
 use crate::indexing::Import;
-use crate::parsing::{Language, LanguageParser, MethodCall};
+use crate::parsing::{Language, LanguageParser, MethodCall, ParserContext, ScopeType};
 use crate::types::SymbolCounter;
 use crate::{FileId, Range, Symbol, SymbolKind};
 use std::any::Any;
@@ -44,6 +44,7 @@ pub enum PhpParseError {
 /// PHP language parser
 pub struct PhpParser {
     parser: Parser,
+    context: ParserContext,
 }
 
 impl std::fmt::Debug for PhpParser {
@@ -64,7 +65,10 @@ impl PhpParser {
                 reason: format!("tree-sitter error: {e}"),
             })?;
 
-        Ok(Self { parser })
+        Ok(Self {
+            parser,
+            context: ParserContext::new(),
+        })
     }
 
     #[cfg(test)]
@@ -125,7 +129,7 @@ impl PhpParser {
 
     /// Extract symbols from AST node recursively
     fn extract_symbols_from_node(
-        &self,
+        &mut self,
         node: Node,
         code: &str,
         file_id: FileId,
@@ -137,8 +141,12 @@ impl PhpParser {
                 if let Some(symbol) = self.process_function(node, code, file_id, counter) {
                     symbols.push(symbol);
                 }
+                // Enter function scope for nested items
+                self.context
+                    .enter_scope(ScopeType::Function { hoisting: false });
                 // Process children to find nested functions
                 self.process_children(node, code, file_id, symbols, counter);
+                self.context.exit_scope();
             }
             "method_declaration" => {
                 if let Some(symbol) = self.process_method(node, code, file_id, counter) {
@@ -151,22 +159,31 @@ impl PhpParser {
                 if let Some(symbol) = self.process_class(node, code, file_id, counter) {
                     symbols.push(symbol);
                 }
+                // Enter class scope for methods and properties
+                self.context.enter_scope(ScopeType::Class);
                 // Continue processing children to find methods inside the class
                 self.process_children(node, code, file_id, symbols, counter);
+                self.context.exit_scope();
             }
             "interface_declaration" => {
                 if let Some(symbol) = self.process_interface(node, code, file_id, counter) {
                     symbols.push(symbol);
                 }
+                // Enter interface scope (like class)
+                self.context.enter_scope(ScopeType::Class);
                 // Process children for interface methods
                 self.process_children(node, code, file_id, symbols, counter);
+                self.context.exit_scope();
             }
             "trait_declaration" => {
                 if let Some(symbol) = self.process_trait(node, code, file_id, counter) {
                     symbols.push(symbol);
                 }
+                // Enter trait scope (like class)
+                self.context.enter_scope(ScopeType::Class);
                 // Process children for trait methods
                 self.process_children(node, code, file_id, symbols, counter);
+                self.context.exit_scope();
             }
             "property_declaration" => {
                 if let Some(symbol) = self.process_property(node, code, file_id, counter) {
@@ -195,6 +212,9 @@ impl PhpParser {
                                 file_id,
                                 self.node_to_range(node),
                             );
+
+                            // Set scope context
+                            symbol.scope_context = Some(self.context.current_scope_context());
 
                             // Try to get the value (third child after name and =)
                             if let Some(value_node) = node.child(2) {
@@ -255,7 +275,7 @@ impl PhpParser {
 
     /// Process a function definition node
     fn process_function(
-        &self,
+        &mut self,
         node: Node,
         code: &str,
         file_id: FileId,
@@ -273,13 +293,15 @@ impl PhpParser {
             file_id,
             self.node_to_range(node),
         );
+        // Set scope context
+        symbol.scope_context = Some(self.context.current_scope_context());
         symbol.doc_comment = self.extract_doc_comment(&node, code).map(Into::into);
         Some(symbol)
     }
 
     /// Process a method declaration node
     fn process_method(
-        &self,
+        &mut self,
         node: Node,
         code: &str,
         file_id: FileId,
@@ -297,13 +319,15 @@ impl PhpParser {
             file_id,
             self.node_to_range(node),
         );
+        // Set scope context
+        symbol.scope_context = Some(self.context.current_scope_context());
         symbol.doc_comment = self.extract_doc_comment(&node, code).map(Into::into);
         Some(symbol)
     }
 
     /// Process a class declaration node
     fn process_class(
-        &self,
+        &mut self,
         node: Node,
         code: &str,
         file_id: FileId,
@@ -322,13 +346,15 @@ impl PhpParser {
             file_id,
             self.node_to_range(node),
         );
+        // Set scope context
+        symbol.scope_context = Some(self.context.current_scope_context());
         symbol.doc_comment = self.extract_doc_comment(&node, code).map(Into::into);
         Some(symbol)
     }
 
     /// Process an interface declaration node
     fn process_interface(
-        &self,
+        &mut self,
         node: Node,
         code: &str,
         file_id: FileId,
@@ -347,13 +373,15 @@ impl PhpParser {
             file_id,
             self.node_to_range(node),
         );
+        // Set scope context
+        symbol.scope_context = Some(self.context.current_scope_context());
         symbol.doc_comment = self.extract_doc_comment(&node, code).map(Into::into);
         Some(symbol)
     }
 
     /// Process a trait declaration node
     fn process_trait(
-        &self,
+        &mut self,
         node: Node,
         code: &str,
         file_id: FileId,
@@ -371,13 +399,15 @@ impl PhpParser {
             file_id,
             self.node_to_range(node),
         );
+        // Set scope context
+        symbol.scope_context = Some(self.context.current_scope_context());
         symbol.doc_comment = self.extract_doc_comment(&node, code).map(Into::into);
         Some(symbol)
     }
 
     /// Process a property declaration node
     fn process_property(
-        &self,
+        &mut self,
         node: Node,
         code: &str,
         file_id: FileId,
@@ -401,6 +431,8 @@ impl PhpParser {
                         file_id,
                         self.node_to_range(node),
                     );
+                    // Set scope context
+                    symbol.scope_context = Some(self.context.current_scope_context());
                     symbol.doc_comment = self.extract_doc_comment(&node, code).map(Into::into);
                     return Some(symbol);
                 }
@@ -443,7 +475,7 @@ impl PhpParser {
 
     /// Process children nodes recursively
     fn process_children(
-        &self,
+        &mut self,
         node: Node,
         code: &str,
         file_id: FileId,
@@ -485,7 +517,7 @@ impl PhpParser {
 
     /// Process a define() function call to extract a constant
     fn process_define(
-        &self,
+        &mut self,
         node: Node,
         code: &str,
         file_id: FileId,
@@ -529,6 +561,9 @@ impl PhpParser {
             self.node_to_range(node),
         );
 
+        // Set scope context
+        symbol.scope_context = Some(self.context.current_scope_context());
+
         // Add signature with value if available
         if !value_str.is_empty() {
             symbol.signature = Some(format!("define('{name_str}', {value_str})").into());
@@ -540,7 +575,7 @@ impl PhpParser {
 
     /// Process a global variable assignment
     fn process_global_assignment(
-        &self,
+        &mut self,
         node: Node,
         code: &str,
         file_id: FileId,
@@ -563,6 +598,9 @@ impl PhpParser {
                 file_id,
                 self.node_to_range(node),
             );
+
+            // Set scope context
+            symbol.scope_context = Some(self.context.current_scope_context());
 
             // Try to extract the value as a simple signature
             if let Some(right) = node.child_by_field_name("right") {
@@ -590,6 +628,9 @@ impl LanguageParser for PhpParser {
         file_id: FileId,
         symbol_counter: &mut SymbolCounter,
     ) -> Vec<Symbol> {
+        // Reset context for each file
+        self.context = ParserContext::new();
+
         let tree = match self.parser.parse(code, None) {
             Some(tree) => tree,
             None => return Vec::new(),

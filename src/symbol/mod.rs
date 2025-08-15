@@ -17,6 +17,30 @@ pub enum Visibility {
     Private,
 }
 
+/// Scope context for symbol definition
+///
+/// This enum represents where a symbol is defined in the code structure,
+/// enabling proper resolution without heuristics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum ScopeContext {
+    /// Local to function/method/block
+    Local {
+        /// For JS/TS: is this hoisted to function scope?
+        hoisted: bool,
+    },
+    /// Parameter of function/method
+    Parameter,
+    /// Class/struct/trait member
+    ClassMember,
+    /// Module/file level definition
+    #[default]
+    Module,
+    /// Package/namespace level export
+    Package,
+    /// Global/builtin symbol
+    Global,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Symbol {
     pub id: SymbolId,
@@ -31,6 +55,11 @@ pub struct Symbol {
     pub module_path: Option<Box<str>>,
     /// Visibility of the symbol
     pub visibility: Visibility,
+    /// Scope context where this symbol is defined
+    ///
+    /// This field enables proper resolution without heuristics.
+    /// It's Optional during migration - will become required in future.
+    pub scope_context: Option<ScopeContext>,
 }
 
 #[repr(C, align(32))]
@@ -66,7 +95,22 @@ impl Symbol {
             doc_comment: None,
             module_path: None,
             visibility: Visibility::Private,
+            scope_context: None, // Default to None for backward compatibility
         }
+    }
+
+    /// Create a new symbol with scope context
+    pub fn new_with_scope(
+        id: SymbolId,
+        name: impl Into<CompactString>,
+        kind: SymbolKind,
+        file_id: FileId,
+        range: Range,
+        scope: ScopeContext,
+    ) -> Self {
+        let mut symbol = Self::new(id, name, kind, file_id, range);
+        symbol.scope_context = Some(scope);
+        symbol
     }
 
     pub fn with_signature(mut self, signature: impl Into<Box<str>>) -> Self {
@@ -86,6 +130,11 @@ impl Symbol {
 
     pub fn with_visibility(mut self, visibility: Visibility) -> Self {
         self.visibility = visibility;
+        self
+    }
+
+    pub fn with_scope(mut self, scope: ScopeContext) -> Self {
+        self.scope_context = Some(scope);
         self
     }
 
@@ -263,6 +312,7 @@ impl CompactSymbol {
             doc_comment: None,
             module_path: None,
             visibility: Visibility::Private,
+            scope_context: None, // CompactSymbol doesn't store scope info yet
         })
     }
 }

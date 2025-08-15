@@ -32,7 +32,7 @@
 
 use crate::indexing::Import;
 use crate::parsing::method_call::MethodCall;
-use crate::parsing::{Language, LanguageParser};
+use crate::parsing::{Language, LanguageParser, ParserContext, ScopeType};
 use crate::types::SymbolCounter;
 use crate::{FileId, Range, Symbol, SymbolKind};
 use tree_sitter::{Node, Parser};
@@ -49,6 +49,7 @@ macro_rules! debug_print {
 pub struct RustParser {
     parser: Parser,
     debug: bool,
+    context: ParserContext,
 }
 
 impl std::fmt::Debug for RustParser {
@@ -70,7 +71,11 @@ impl RustParser {
             .set_language(&tree_sitter_rust::LANGUAGE.into())
             .map_err(|e| format!("Failed to set Rust language: {e}"))?;
 
-        Ok(Self { parser, debug })
+        Ok(Self {
+            parser,
+            debug,
+            context: ParserContext::new(),
+        })
     }
 
     /// Extract import statements from the code
@@ -255,6 +260,9 @@ impl RustParser {
         file_id: FileId,
         symbol_counter: &mut SymbolCounter,
     ) -> Vec<Symbol> {
+        // Reset context for each file
+        self.context = ParserContext::new();
+
         let tree = match self.parser.parse(code, None) {
             Some(tree) => tree,
             None => return Vec::new(),
@@ -270,7 +278,7 @@ impl RustParser {
     }
 
     fn extract_symbols_from_node(
-        &self,
+        &mut self,
         node: Node,
         code: &str,
         file_id: FileId,
@@ -310,6 +318,19 @@ impl RustParser {
                         symbols.push(symbol);
                     }
                 }
+
+                // Enter function scope for nested items
+                // Rust doesn't have hoisting like JS/TS
+                self.context
+                    .enter_scope(ScopeType::Function { hoisting: false });
+                // Process children for nested functions/types
+                for child in node.children(&mut node.walk()) {
+                    if child.kind() != "identifier" && child.kind() != "parameters" {
+                        self.extract_symbols_from_node(child, code, file_id, symbols, counter);
+                    }
+                }
+                self.context.exit_scope();
+                return; // Don't process children again
             }
             "struct_item" => {
                 if let Some(name_node) = node.child_by_field_name("name") {
@@ -397,6 +418,8 @@ impl RustParser {
                         symbols.push(sym);
                     }
 
+                    // Enter trait scope for method signatures
+                    self.context.enter_scope(ScopeType::Class); // Traits are like classes
                     // Also extract method signatures from the trait
                     if let Some(body) = node.child_by_field_name("body") {
                         for child in body.children(&mut body.walk()) {
@@ -417,12 +440,20 @@ impl RustParser {
                             }
                         }
                     }
+                    self.context.exit_scope();
                 }
                 // Don't recurse further - we've handled the trait methods
                 return;
             }
             "impl_item" => {
-                // Just recurse into impl blocks, functions will be handled with Method kind
+                // Enter impl block scope for methods
+                self.context.enter_scope(ScopeType::Class); // Use Class scope for impl blocks
+                // Process children
+                for child in node.children(&mut node.walk()) {
+                    self.extract_symbols_from_node(child, code, file_id, symbols, counter);
+                }
+                self.context.exit_scope();
+                return; // Don't process children again
             }
             _ => {}
         }
@@ -1176,7 +1207,7 @@ impl RustParser {
     }
 
     fn create_symbol(
-        &self,
+        &mut self,
         counter: &mut SymbolCounter,
         name_node: Node,
         kind: SymbolKind,
@@ -1199,6 +1230,9 @@ impl RustParser {
         let doc_comment = self.extract_doc_comments(&doc_node, code);
 
         let mut symbol = Symbol::new(symbol_id, name, kind, file_id, range);
+
+        // Set scope context based on parser's current scope
+        symbol.scope_context = Some(self.context.current_scope_context());
 
         // Check for visibility modifiers
         if let Some(parent) = name_node.parent() {

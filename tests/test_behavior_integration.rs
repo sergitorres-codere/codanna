@@ -40,7 +40,7 @@ fn test_typescript_resolution_behavior() {
     );
 
     // Enter a function scope (TypeScript hoisting should apply)
-    ctx.enter_scope(ScopeType::Function);
+    ctx.enter_scope(ScopeType::function());
     ctx.add_symbol(
         "functionParam".to_string(),
         SymbolId::new(4).unwrap(),
@@ -59,11 +59,8 @@ fn test_typescript_resolution_behavior() {
     // Exit function scope
     ctx.exit_scope();
 
-    // Function param should no longer be accessible
-    assert_eq!(
-        ctx.resolve("functionParam"),
-        Some(SymbolId::new(4).unwrap())
-    ); // Still there in generic impl
+    // Function param should no longer be accessible in TypeScript
+    assert_eq!(ctx.resolve("functionParam"), None); // TypeScript clears local scope when exiting function
 
     println!("✓ TypeScript scoping works");
 
@@ -196,7 +193,7 @@ fn test_python_legb_resolution() {
     );
 
     // Enter outer function (Enclosing scope)
-    ctx.enter_scope(ScopeType::Function);
+    ctx.enter_scope(ScopeType::function());
     ctx.add_symbol(
         "outer_var".to_string(),
         SymbolId::new(2).unwrap(),
@@ -204,7 +201,7 @@ fn test_python_legb_resolution() {
     );
 
     // Enter inner function (Local scope)
-    ctx.enter_scope(ScopeType::Function);
+    ctx.enter_scope(ScopeType::function());
     ctx.add_symbol(
         "local_var".to_string(),
         SymbolId::new(3).unwrap(),
@@ -269,18 +266,18 @@ fn test_python_mro_inheritance() {
 }
 
 /// Test Rust trait resolution behavior
-#[test] 
+#[test]
 fn test_rust_trait_resolution() {
     println!("\n=== Testing Rust Trait Resolution ===");
 
     let behavior = RustBehavior::new();
-    
+
     // Test Rust-specific behavior flags first
     assert!(behavior.supports_traits());
     assert!(behavior.supports_inherent_methods());
     assert_eq!(behavior.module_separator(), "::");
     println!("✓ Rust-specific behavior flags correct");
-    
+
     // For Rust trait resolution, we need to use the concrete type
     // because Rust requires explicit distinction between traits and types
     // This is tested separately in test_rust_trait_resolution.rs
@@ -444,9 +441,9 @@ fn test_new_behavior_methods_exist() {
         // Just verify it returns something valid - actual mapping is language-specific
         assert!(matches!(
             kind,
-            codanna::relationship::RelationKind::Extends 
-            | codanna::relationship::RelationKind::References
-            | codanna::relationship::RelationKind::Implements
+            codanna::relationship::RelationKind::Extends
+                | codanna::relationship::RelationKind::References
+                | codanna::relationship::RelationKind::Implements
         ));
 
         println!("  ✓ All methods callable for {lang}");

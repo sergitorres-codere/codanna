@@ -2,8 +2,12 @@
 
 use crate::Visibility;
 use crate::parsing::LanguageBehavior;
+use crate::parsing::resolution::{InheritanceResolver, ResolutionScope};
+use crate::types::FileId;
 use std::path::Path;
 use tree_sitter::Language;
+
+use super::resolution::{TypeScriptInheritanceResolver, TypeScriptResolutionContext};
 
 /// TypeScript language behavior implementation
 pub struct TypeScriptBehavior;
@@ -74,5 +78,34 @@ impl LanguageBehavior for TypeScriptBehavior {
 
     fn supports_inherent_methods(&self) -> bool {
         true // TypeScript has class methods
+    }
+
+    // TypeScript-specific resolution overrides
+
+    fn create_resolution_context(&self, file_id: FileId) -> Box<dyn ResolutionScope> {
+        Box::new(TypeScriptResolutionContext::new(file_id))
+    }
+
+    fn create_inheritance_resolver(&self) -> Box<dyn InheritanceResolver> {
+        Box::new(TypeScriptInheritanceResolver::new())
+    }
+
+    fn inheritance_relation_name(&self) -> &'static str {
+        // TypeScript uses both "extends" and "implements"
+        // Default to "extends" as it's more general
+        "extends"
+    }
+
+    fn map_relationship(&self, language_specific: &str) -> crate::relationship::RelationKind {
+        use crate::relationship::RelationKind;
+
+        match language_specific {
+            "extends" => RelationKind::Extends,
+            "implements" => RelationKind::Implements,
+            "uses" => RelationKind::Uses,
+            "calls" => RelationKind::Calls,
+            "defines" => RelationKind::Defines,
+            _ => RelationKind::References,
+        }
     }
 }

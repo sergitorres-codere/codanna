@@ -18,23 +18,23 @@ use std::collections::HashMap;
 /// 4. Crate symbols (pub items from crate root)
 pub struct RustResolutionContext {
     #[allow(dead_code)]
-    file_id: FileId,  // Will be used in Sprint 4 for file-specific resolution
-    
+    file_id: FileId, // Will be used in Sprint 4 for file-specific resolution
+
     /// Local variables and parameters in current scope
     local_scope: HashMap<String, SymbolId>,
-    
+
     /// Symbols imported via use statements
     imported_symbols: HashMap<String, SymbolId>,
-    
+
     /// Symbols defined at module level in current file
     module_symbols: HashMap<String, SymbolId>,
-    
+
     /// Public symbols visible from the crate
     crate_symbols: HashMap<String, SymbolId>,
-    
+
     /// Track nested scopes (functions, blocks, etc.)
     scope_stack: Vec<ScopeType>,
-    
+
     /// Import tracking (path -> alias)
     imports: Vec<(String, Option<String>)>,
 }
@@ -51,7 +51,7 @@ impl RustResolutionContext {
             imports: Vec::new(),
         }
     }
-    
+
     /// Add an import (use statement)
     pub fn add_import(&mut self, path: String, alias: Option<String>) {
         self.imports.push((path, alias));
@@ -77,49 +77,49 @@ impl ResolutionScope for RustResolutionContext {
             }
         }
     }
-    
+
     fn resolve(&self, name: &str) -> Option<SymbolId> {
         // Rust resolution order: local → imported → module → crate
-        
+
         // 1. Check local scope
         if let Some(&id) = self.local_scope.get(name) {
             return Some(id);
         }
-        
+
         // 2. Check imported symbols
         if let Some(&id) = self.imported_symbols.get(name) {
             return Some(id);
         }
-        
+
         // 3. Check module-level symbols
         if let Some(&id) = self.module_symbols.get(name) {
             return Some(id);
         }
-        
+
         // 4. Check crate-level symbols
         if let Some(&id) = self.crate_symbols.get(name) {
             return Some(id);
         }
-        
+
         // 5. Check if it's a path (contains ::)
         if name.contains("::") {
             // This would need DocumentIndex access to resolve
             // For now, return None (will be handled by behavior)
             return None;
         }
-        
+
         None
     }
-    
+
     fn clear_local_scope(&mut self) {
         self.local_scope.clear();
     }
-    
+
     fn enter_scope(&mut self, scope_type: ScopeType) {
         self.scope_stack.push(scope_type);
         // Rust doesn't hoist, so entering a scope doesn't affect resolution
     }
-    
+
     fn exit_scope(&mut self) {
         self.scope_stack.pop();
         // Clear locals when exiting function scope
@@ -130,10 +130,10 @@ impl ResolutionScope for RustResolutionContext {
             self.clear_local_scope();
         }
     }
-    
+
     fn symbols_in_scope(&self) -> Vec<(String, SymbolId, ScopeLevel)> {
         let mut symbols = Vec::new();
-        
+
         // Add all symbols with their appropriate scope levels
         for (name, &id) in &self.local_scope {
             symbols.push((name.clone(), id, ScopeLevel::Local));
@@ -147,7 +147,7 @@ impl ResolutionScope for RustResolutionContext {
         for (name, &id) in &self.crate_symbols {
             symbols.push((name.clone(), id, ScopeLevel::Global));
         }
-        
+
         symbols
     }
 }
@@ -162,18 +162,24 @@ pub struct RustTraitResolver {
     /// Maps type names to traits they implement
     /// Key: "TypeName", Value: Vec<("TraitName", file_id)>
     type_to_traits: HashMap<String, Vec<(String, FileId)>>,
-    
+
     /// Maps trait names to their methods
     /// Key: "TraitName", Value: Vec<"method_name">
     trait_methods: HashMap<String, Vec<String>>,
-    
+
     /// Maps (type, method) pairs to the trait that defines the method
     /// Key: ("TypeName", "method_name"), Value: "TraitName"
     type_method_to_trait: HashMap<(String, String), String>,
-    
+
     /// Tracks inherent methods on types (methods in impl blocks without traits)
     /// Key: "TypeName", Value: Vec<"method_name">
     inherent_methods: HashMap<String, Vec<String>>,
+}
+
+impl Default for RustTraitResolver {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl RustTraitResolver {
@@ -185,7 +191,7 @@ impl RustTraitResolver {
             inherent_methods: HashMap::new(),
         }
     }
-    
+
     /// Check if a method is an inherent method on a type
     fn is_inherent_method(&self, type_name: &str, method_name: &str) -> bool {
         self.inherent_methods
@@ -207,15 +213,15 @@ impl InheritanceResolver for RustTraitResolver {
         }
         // Rust doesn't have class inheritance (extends), only trait implementations
     }
-    
+
     fn resolve_method(&self, type_name: &str, method_name: &str) -> Option<String> {
         // Rust resolution order: inherent methods > trait methods
-        
+
         // 1. Check if it's an inherent method (Rust prefers these)
         if self.is_inherent_method(type_name, method_name) {
             return Some(type_name.to_string());
         }
-        
+
         // 2. Check direct trait method mapping
         if let Some(trait_name) = self
             .type_method_to_trait
@@ -223,7 +229,7 @@ impl InheritanceResolver for RustTraitResolver {
         {
             return Some(trait_name.clone());
         }
-        
+
         // 3. Check if type implements any traits that have this method
         if let Some(traits) = self.type_to_traits.get(type_name) {
             for (trait_name, _) in traits {
@@ -234,13 +240,13 @@ impl InheritanceResolver for RustTraitResolver {
                 }
             }
         }
-        
+
         None
     }
-    
+
     fn get_inheritance_chain(&self, type_name: &str) -> Vec<String> {
         let mut chain = vec![type_name.to_string()];
-        
+
         // Add all implemented traits
         if let Some(traits) = self.type_to_traits.get(type_name) {
             for (trait_name, _) in traits {
@@ -249,10 +255,10 @@ impl InheritanceResolver for RustTraitResolver {
                 }
             }
         }
-        
+
         chain
     }
-    
+
     fn is_subtype(&self, child: &str, parent: &str) -> bool {
         // In Rust, check if type implements trait
         if let Some(traits) = self.type_to_traits.get(child) {
@@ -261,7 +267,7 @@ impl InheritanceResolver for RustTraitResolver {
             false
         }
     }
-    
+
     fn add_type_methods(&mut self, type_name: String, methods: Vec<String>) {
         // In Rust, this generic method should only be used for inherent methods
         // Traits should use the explicit add_trait_methods() method
@@ -271,15 +277,15 @@ impl InheritanceResolver for RustTraitResolver {
             .or_default()
             .extend(methods);
     }
-    
+
     fn get_all_methods(&self, type_name: &str) -> Vec<String> {
         let mut all_methods = Vec::new();
-        
+
         // Add inherent methods
         if let Some(methods) = self.inherent_methods.get(type_name) {
             all_methods.extend(methods.clone());
         }
-        
+
         // Add trait methods
         if let Some(traits) = self.type_to_traits.get(type_name) {
             for (trait_name, _) in traits {
@@ -292,7 +298,7 @@ impl InheritanceResolver for RustTraitResolver {
                 }
             }
         }
-        
+
         all_methods
     }
 }
@@ -306,12 +312,12 @@ impl RustTraitResolver {
             .or_default()
             .push((trait_name, file_id));
     }
-    
+
     /// Register methods that a trait defines (from original TraitResolver)
     pub fn add_trait_methods(&mut self, trait_name: String, methods: Vec<String>) {
         self.trait_methods.insert(trait_name, methods);
     }
-    
+
     /// Register inherent methods for a type (from original TraitResolver)
     pub fn add_inherent_methods(&mut self, type_name: String, methods: Vec<String>) {
         self.inherent_methods
@@ -319,7 +325,7 @@ impl RustTraitResolver {
             .or_default()
             .extend(methods);
     }
-    
+
     /// Given a type and method name, find which trait it comes from (from original TraitResolver)
     /// Returns None if it's an inherent method or not found
     pub fn resolve_method_trait(&self, type_name: &str, method_name: &str) -> Option<&str> {
@@ -327,7 +333,7 @@ impl RustTraitResolver {
         if self.is_inherent_method(type_name, method_name) {
             return None;
         }
-        
+
         // First check direct mapping
         if let Some(trait_name) = self
             .type_method_to_trait
@@ -335,11 +341,11 @@ impl RustTraitResolver {
         {
             return Some(trait_name);
         }
-        
+
         // Then check if type implements any traits that have this method
         if let Some(traits) = self.type_to_traits.get(type_name) {
             let mut matching_traits = Vec::new();
-            
+
             for (trait_name, _) in traits {
                 if let Some(methods) = self.trait_methods.get(trait_name) {
                     if methods.contains(&method_name.to_string()) {
@@ -347,20 +353,19 @@ impl RustTraitResolver {
                     }
                 }
             }
-            
+
             // If multiple traits define the same method, return the first one
             // In real Rust this would be an error requiring disambiguation
             if !matching_traits.is_empty() {
                 if matching_traits.len() > 1 {
                     eprintln!(
-                        "WARNING: Ambiguous method '{}' on type '{}' - found in traits: {:?}",
-                        method_name, type_name, matching_traits
+                        "WARNING: Ambiguous method '{method_name}' on type '{type_name}' - found in traits: {matching_traits:?}"
                     );
                 }
                 return Some(matching_traits[0]);
             }
         }
-        
+
         None
     }
 }

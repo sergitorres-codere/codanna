@@ -86,6 +86,8 @@ pub struct SimpleIndexer {
     pending_embeddings: Vec<(SymbolId, String)>,
     /// Optional semantic search for documentation
     semantic_search: Option<Arc<Mutex<SimpleSemanticSearch>>>,
+    /// Language ID for each file to enable language-specific resolution
+    file_languages: std::collections::HashMap<FileId, LanguageId>,
 }
 
 impl Default for SimpleIndexer {
@@ -136,6 +138,7 @@ impl SimpleIndexer {
             embedding_generator: None,
             pending_embeddings: Vec::new(),
             semantic_search: None,
+            file_languages: std::collections::HashMap::new(),
         };
 
         // Reconstruct TraitResolver state from stored relationships
@@ -187,6 +190,7 @@ impl SimpleIndexer {
             embedding_generator: None,
             pending_embeddings: Vec::new(),
             semantic_search: None,
+            file_languages: std::collections::HashMap::new(),
         };
 
         // Only reconstruct trait resolver if needed (for trait-related commands)
@@ -648,7 +652,10 @@ impl SimpleIndexer {
         let behavior = parser_with_behavior.behavior;
         let module_path = self.calculate_module_path(path, &*behavior);
 
-        // Register the file with ImportResolver
+        // Store language ID for this file to enable language-specific resolution
+        self.file_languages.insert(file_id, language_id);
+
+        // Register the file with language behavior
         if let Some(ref mod_path) = module_path {
             debug_print!(
                 self,
@@ -656,6 +663,9 @@ impl SimpleIndexer {
                 path,
                 mod_path
             );
+            // Use behavior's register_file method instead of ImportResolver
+            behavior.register_file(path.to_path_buf(), file_id, mod_path.clone());
+            // Still register with ImportResolver for now (will remove later)
             self.import_resolver.register_file(
                 path.to_path_buf(),
                 file_id,
@@ -709,6 +719,20 @@ impl SimpleIndexer {
         // Use the registry-based method
         self.parser_factory
             .create_parser_with_behavior_from_registry(language_id)
+    }
+
+    /// Get language behavior for a file
+    fn get_behavior_for_file(
+        &self,
+        file_id: FileId,
+    ) -> IndexResult<Box<dyn crate::parsing::LanguageBehavior>> {
+        let language_id = self.file_languages.get(&file_id).ok_or_else(|| {
+            IndexError::General(format!("No language found for file {}", file_id.value()))
+        })?;
+
+        Ok(self
+            .parser_factory
+            .create_behavior_from_registry(*language_id))
     }
 
     /// Calculate module path relative to workspace root
@@ -804,6 +828,9 @@ impl SimpleIndexer {
             }
         }
         for import in imports {
+            // Use behavior's add_import method instead of ImportResolver
+            behavior.add_import(import.clone());
+            // Still add to ImportResolver for now (will remove later)
             self.import_resolver.add_import(import);
         }
 
@@ -977,7 +1004,7 @@ impl SimpleIndexer {
                 &method_call.caller,
                 &method_call.method_name,
                 file_id,
-                RelationKind::Calls,
+                behavior.map_relationship("calls"),
                 metadata,
             )?;
         }
@@ -991,7 +1018,9 @@ impl SimpleIndexer {
                 type_name,
                 trait_name
             );
-            // Register with trait resolver
+            // Use behavior's add_trait_impl method instead of TraitResolver
+            behavior.add_trait_impl(type_name.to_string(), trait_name.to_string(), file_id);
+            // Still register with trait resolver for now (will remove later)
             self.trait_resolver.add_trait_impl(
                 type_name.to_string(),
                 trait_name.to_string(),
@@ -1001,7 +1030,7 @@ impl SimpleIndexer {
                 type_name,
                 trait_name,
                 file_id,
-                RelationKind::Implements,
+                behavior.map_relationship("implements"),
                 None,
             )?;
         }
@@ -1019,7 +1048,7 @@ impl SimpleIndexer {
                 derived_type,
                 base_type,
                 file_id,
-                RelationKind::Extends,
+                behavior.map_relationship("extends"),
                 None,
             )?;
         }
@@ -1046,8 +1075,11 @@ impl SimpleIndexer {
                         .push(method_name.to_string());
                 }
 
-                // Register with trait resolver
+                // Register with behavior and trait resolver
                 for (type_name, methods) in methods_by_type {
+                    // Use behavior's add_inherent_methods
+                    behavior.add_inherent_methods(type_name.clone(), methods.clone());
+                    // Still register with trait resolver for now (will remove later)
                     self.trait_resolver.add_inherent_methods(type_name, methods);
                 }
             }
@@ -1060,7 +1092,7 @@ impl SimpleIndexer {
                 context_name,
                 used_type,
                 file_id,
-                RelationKind::Uses,
+                behavior.map_relationship("uses"),
                 None,
             )?;
         }
@@ -1093,7 +1125,7 @@ impl SimpleIndexer {
                             method_name,
                             definer_name
                         );
-                        // Update trait resolver with method info
+                        // Update behavior with method info
                         let existing_methods = self
                             .trait_resolver
                             .get_trait_methods(definer_name)
@@ -1101,7 +1133,10 @@ impl SimpleIndexer {
                         let mut methods = existing_methods;
                         let method_name_str = method_name.to_string();
                         if !methods.contains(&method_name_str) {
-                            methods.push(method_name_str);
+                            methods.push(method_name_str.clone());
+                            // Use behavior's add_trait_methods
+                            behavior.add_trait_methods(definer_name.to_string(), methods.clone());
+                            // Still update trait resolver for now (will remove later)
                             self.trait_resolver
                                 .add_trait_methods(definer_name.to_string(), methods);
                         }
@@ -1112,7 +1147,7 @@ impl SimpleIndexer {
                 definer_name,
                 method_name,
                 file_id,
-                RelationKind::Defines,
+                behavior.map_relationship("defines"),
                 None,
             )?;
         }
@@ -2115,11 +2150,39 @@ impl SimpleIndexer {
 
         debug_print!(self, "Found type for {}: {}", receiver, type_name);
 
-        // Check if method comes from a trait
-        match self
-            .trait_resolver
-            .resolve_method_trait(type_name, method_name)
-        {
+        // Get behavior for this file to check trait methods
+        let behavior = match self.get_behavior_for_file(file_id) {
+            Ok(b) => b,
+            Err(_) => {
+                // Fallback to old resolver if no behavior available
+                match self
+                    .trait_resolver
+                    .resolve_method_trait(type_name, method_name)
+                {
+                    Some(trait_name) => {
+                        let trait_method = format!("{trait_name}::{method_name}");
+                        return context
+                            .resolve(&trait_method)
+                            .or_else(|| context.resolve(method_name));
+                    }
+                    None => {
+                        if self
+                            .trait_resolver
+                            .is_inherent_method(type_name, method_name)
+                        {
+                            let type_method = format!("{type_name}::{method_name}");
+                            return context
+                                .resolve(&type_method)
+                                .or_else(|| context.resolve(method_name));
+                        }
+                        return None;
+                    }
+                }
+            }
+        };
+
+        // Check if method comes from a trait using behavior
+        match behavior.resolve_method_trait(type_name, method_name) {
             Some(trait_name) => {
                 debug_print!(
                     self,
@@ -2135,6 +2198,8 @@ impl SimpleIndexer {
                 result
             }
             None => {
+                // For now, still check with trait_resolver for inherent methods
+                // (behaviors don't have is_inherent_method yet)
                 if self
                     .trait_resolver
                     .is_inherent_method(type_name, method_name)
@@ -2815,6 +2880,7 @@ mod tests {
             doc_comment: None,
             signature: None,
             module_path: Some("test".into()),
+            scope_context: None,
         };
 
         let struct_symbol = Symbol {
@@ -2827,6 +2893,7 @@ mod tests {
             doc_comment: None,
             signature: None,
             module_path: Some("test".into()),
+            scope_context: None,
         };
 
         // Store symbols
@@ -3686,6 +3753,7 @@ pub struct Another {
             range: crate::Range::new(0, 10, 0, 20),
             visibility: Visibility::Private,
             doc_comment: None,
+            scope_context: None,
         };
 
         let module_path = Some("crate::module".to_string());
@@ -3727,6 +3795,7 @@ pub struct Another {
             range: crate::Range::new(0, 10, 0, 20),
             visibility: Visibility::Public,
             doc_comment: None,
+            scope_context: None,
         };
 
         let module_path = Some("test_module".to_string());
@@ -3765,6 +3834,7 @@ pub struct Another {
             range: crate::Range::new(0, 10, 0, 20),
             visibility: Visibility::Public,
             doc_comment: None,
+            scope_context: None,
         };
 
         let module_path = Some("App\\Utils".to_string());
@@ -3810,6 +3880,7 @@ pub struct Another {
             range: crate::Range::new(0, 10, 0, 20),
             visibility: Visibility::Private,
             doc_comment: None,
+            scope_context: None,
         };
 
         let mut python_symbol = Symbol {
@@ -3822,6 +3893,7 @@ pub struct Another {
             range: crate::Range::new(0, 10, 0, 20),
             visibility: Visibility::Private,
             doc_comment: None,
+            scope_context: None,
         };
 
         let mut php_symbol = Symbol {
@@ -3834,6 +3906,7 @@ pub struct Another {
             range: crate::Range::new(0, 10, 0, 20),
             visibility: Visibility::Private,
             doc_comment: None,
+            scope_context: None,
         };
 
         // Configure each symbol with its behavior

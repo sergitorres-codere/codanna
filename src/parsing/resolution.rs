@@ -3,6 +3,7 @@
 //! This module provides the trait abstractions that allow each language to implement
 //! its own resolution logic while keeping the indexer language-agnostic.
 
+use super::context::ScopeType;
 use crate::{FileId, SymbolId};
 use std::collections::HashMap;
 
@@ -16,17 +17,6 @@ pub enum ScopeLevel {
     /// Package/namespace scope (package-level visibility)
     Package,
     /// Global/project scope (public exports)
-    Global,
-}
-
-/// Types of scopes for different language constructs
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ScopeType {
-    Function,
-    Class,
-    Module,
-    Namespace,
-    Block,
     Global,
 }
 
@@ -155,7 +145,7 @@ impl ResolutionScope for GenericResolutionContext {
     fn exit_scope(&mut self) {
         self.scope_stack.pop();
         // Clear local scope when exiting a function
-        if matches!(self.scope_stack.last(), Some(ScopeType::Function)) {
+        if matches!(self.scope_stack.last(), Some(ScopeType::Function { .. })) {
             self.clear_local_scope();
         }
     }

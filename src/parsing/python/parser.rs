@@ -12,7 +12,7 @@
 //! verify compatibility with node type names used in this implementation.
 
 use crate::indexing::Import;
-use crate::parsing::{Language, LanguageParser, MethodCall};
+use crate::parsing::{Language, LanguageParser, MethodCall, ParserContext, ScopeType};
 use crate::types::SymbolCounter;
 use crate::{FileId, Range, Symbol, SymbolKind};
 use std::any::Any;
@@ -77,38 +77,48 @@ impl PythonParser {
         file_id: FileId,
         symbols: &mut Vec<Symbol>,
         counter: &mut SymbolCounter,
+        context: &mut ParserContext,
     ) {
         match node.kind() {
             "function_definition" => {
-                if let Some(symbol) = self.process_function(node, code, file_id, counter) {
+                if let Some(symbol) = self.process_function(node, code, file_id, counter, context) {
                     symbols.push(symbol);
                 }
+                // Enter function scope for processing children
+                context.enter_scope(ScopeType::function());
                 // Process children to find nested functions
-                self.process_children(node, code, file_id, symbols, counter);
+                self.process_children(node, code, file_id, symbols, counter, context);
+                // Exit function scope
+                context.exit_scope();
             }
             "class_definition" => {
-                if let Some(symbol) = self.process_class(node, code, file_id, counter) {
+                if let Some(symbol) = self.process_class(node, code, file_id, counter, context) {
                     symbols.push(symbol);
                 }
+                // Enter class scope for processing children
+                context.enter_scope(ScopeType::Class);
                 // Continue processing children to find methods inside the class
-                self.process_children(node, code, file_id, symbols, counter);
+                self.process_children(node, code, file_id, symbols, counter, context);
+                // Exit class scope
+                context.exit_scope();
             }
             "expression_statement" => {
                 // Check for assignments at module level
                 if let Some(child) = node.child(0) {
-                    if child.kind() == "assignment" && self.is_module_level(node) {
-                        if let Some(symbol) = self.process_assignment(child, code, file_id, counter)
+                    if child.kind() == "assignment" && context.is_module_level() {
+                        if let Some(symbol) =
+                            self.process_assignment(child, code, file_id, counter, context)
                         {
                             symbols.push(symbol);
                         }
                     }
                 }
                 // Continue processing children
-                self.process_children(node, code, file_id, symbols, counter);
+                self.process_children(node, code, file_id, symbols, counter, context);
             }
             _ => {
                 // Recursively process children
-                self.process_children(node, code, file_id, symbols, counter);
+                self.process_children(node, code, file_id, symbols, counter, context);
             }
         }
     }
@@ -120,6 +130,7 @@ impl PythonParser {
         code: &str,
         file_id: FileId,
         counter: &mut SymbolCounter,
+        context: &ParserContext,
     ) -> Option<Symbol> {
         let name = self.extract_function_name(node, code)?;
         let range = self.node_to_range(node);
@@ -143,6 +154,8 @@ impl PythonParser {
         let mut symbol = Symbol::new(symbol_id, name, kind, file_id, range);
         symbol.doc_comment = doc_comment;
         symbol.signature = signature.map(|s| s.into_boxed_str());
+        // Set the scope context based on where the function is defined
+        symbol.scope_context = Some(context.current_scope_context());
         Some(symbol)
     }
 
@@ -153,6 +166,7 @@ impl PythonParser {
         code: &str,
         file_id: FileId,
         counter: &mut SymbolCounter,
+        context: &ParserContext,
     ) -> Option<Symbol> {
         let name = self.extract_class_name(node, code)?;
         let range = self.node_to_range(node);
@@ -165,6 +179,8 @@ impl PythonParser {
 
         let mut symbol = Symbol::new(symbol_id, name, SymbolKind::Class, file_id, range);
         symbol.doc_comment = doc_comment;
+        // Classes are typically module-level in Python
+        symbol.scope_context = Some(context.current_scope_context());
         Some(symbol)
     }
 
@@ -176,23 +192,11 @@ impl PythonParser {
         file_id: FileId,
         symbols: &mut Vec<Symbol>,
         counter: &mut SymbolCounter,
+        context: &mut ParserContext,
     ) {
         for child in node.children(&mut node.walk()) {
-            self.extract_symbols_from_node(child, code, file_id, symbols, counter);
+            self.extract_symbols_from_node(child, code, file_id, symbols, counter, context);
         }
-    }
-
-    /// Check if a node is at module level (not inside a function or class)
-    fn is_module_level(&self, node: Node) -> bool {
-        let mut parent = node.parent();
-        while let Some(p) = parent {
-            match p.kind() {
-                "function_definition" | "class_definition" => return false,
-                "module" => return true,
-                _ => parent = p.parent(),
-            }
-        }
-        true
     }
 
     /// Process an assignment node (module-level variables and constants)
@@ -202,6 +206,7 @@ impl PythonParser {
         code: &str,
         file_id: FileId,
         counter: &mut SymbolCounter,
+        context: &ParserContext,
     ) -> Option<Symbol> {
         // Get the left side of the assignment (the variable name)
         let left = node.child_by_field_name("left")?;
@@ -224,6 +229,8 @@ impl PythonParser {
             };
 
             let mut symbol = Symbol::new(symbol_id, name, kind, file_id, range);
+            // Set scope context - assignments are at the current scope level
+            symbol.scope_context = Some(context.current_scope_context());
 
             // Try to extract the value as a simple signature
             if let Some(right) = node.child_by_field_name("right") {
@@ -1031,8 +1038,17 @@ impl LanguageParser for PythonParser {
 
         let root_node = tree.root_node();
         let mut symbols = Vec::new();
+        // Create a parser context starting at module scope
+        let mut context = ParserContext::new();
 
-        self.extract_symbols_from_node(root_node, code, file_id, &mut symbols, symbol_counter);
+        self.extract_symbols_from_node(
+            root_node,
+            code,
+            file_id,
+            &mut symbols,
+            symbol_counter,
+            &mut context,
+        );
 
         symbols
     }

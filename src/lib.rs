@@ -23,7 +23,7 @@ pub use indexing::{SimpleIndexer, calculate_hash};
 pub use parsing::RustParser;
 pub use relationship::{RelationKind, Relationship, RelationshipEdge};
 pub use storage::IndexPersistence;
-pub use symbol::{CompactSymbol, StringTable, Symbol, Visibility};
+pub use symbol::{CompactSymbol, ScopeContext, StringTable, Symbol, Visibility};
 pub use types::{
     CompactString, FileId, IndexingResult, Range, SymbolId, SymbolKind, compact_string,
 };

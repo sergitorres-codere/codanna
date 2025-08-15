@@ -1,3 +1,4 @@
+pub mod context;
 pub mod factory;
 pub mod language;
 pub mod language_behavior;
@@ -10,6 +11,7 @@ pub mod resolution;
 pub mod rust;
 pub mod typescript;
 
+pub use context::{ParserContext, ScopeType};
 pub use factory::{ParserFactory, ParserWithBehavior};
 pub use language::Language;
 pub use language_behavior::{LanguageBehavior, LanguageMetadata};
@@ -20,7 +22,7 @@ pub use python::{PythonBehavior, PythonParser};
 pub use registry::{LanguageDefinition, LanguageId, LanguageRegistry, RegistryError, get_registry};
 pub use resolution::{
     GenericInheritanceResolver, GenericResolutionContext, InheritanceResolver, ResolutionScope,
-    ScopeLevel, ScopeType,
+    ScopeLevel,
 };
 pub use rust::{RustBehavior, RustParser};
 pub use typescript::{TypeScriptBehavior, TypeScriptParser};

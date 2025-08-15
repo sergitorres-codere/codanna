@@ -1253,6 +1253,7 @@ impl DocumentIndex {
             doc_comment: doc_comment.map(|s| s.into()),
             module_path: module_path.map(|s| s.into()),
             visibility,
+            scope_context: None, // TODO: Deserialize from storage when available
         })
     }
 
