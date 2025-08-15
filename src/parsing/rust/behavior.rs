@@ -1,7 +1,9 @@
 //! Rust-specific language behavior implementation
 
 use crate::Visibility;
-use crate::parsing::LanguageBehavior;
+use crate::parsing::{LanguageBehavior, ResolutionScope, InheritanceResolver};
+use crate::FileId;
+use super::resolution::{RustResolutionContext, RustTraitResolver};
 use std::path::Path;
 use tree_sitter::Language;
 
@@ -90,6 +92,61 @@ impl LanguageBehavior for RustBehavior {
         };
 
         Some(module_path)
+    }
+    
+    // Override resolution methods to use Rust-specific implementations
+    
+    fn create_resolution_context(&self, file_id: FileId) -> Box<dyn ResolutionScope> {
+        Box::new(RustResolutionContext::new(file_id))
+    }
+    
+    fn create_inheritance_resolver(&self) -> Box<dyn InheritanceResolver> {
+        Box::new(RustTraitResolver::new())
+    }
+    
+    fn add_trait_impl(&self, _type_name: String, _trait_name: String, _file_id: FileId) {
+        // This will be properly integrated in Sprint 4 when SimpleIndexer is updated
+        // For now, this is a placeholder that maintains the interface
+        eprintln!("RustBehavior::add_trait_impl called - will be integrated in Sprint 4");
+    }
+    
+    fn add_inherent_methods(&self, _type_name: String, _methods: Vec<String>) {
+        // This will be properly integrated in Sprint 4 when SimpleIndexer is updated
+        eprintln!("RustBehavior::add_inherent_methods called - will be integrated in Sprint 4");
+    }
+    
+    fn add_trait_methods(&self, _trait_name: String, _methods: Vec<String>) {
+        // This will be properly integrated in Sprint 4 when SimpleIndexer is updated
+        eprintln!("RustBehavior::add_trait_methods called - will be integrated in Sprint 4");
+    }
+    
+    fn resolve_method_trait(&self, _type_name: &str, _method: &str) -> Option<&str> {
+        // This will be properly integrated in Sprint 4 when SimpleIndexer is updated
+        // For now, return None to maintain backward compatibility
+        None
+    }
+    
+    fn format_method_call(&self, receiver: &str, method: &str) -> String {
+        // Rust uses :: for associated functions and . for methods
+        // Since we don't have context here, default to method syntax
+        format!("{}.{}", receiver, method)
+    }
+    
+    fn inheritance_relation_name(&self) -> &'static str {
+        // Rust uses "implements" for traits
+        "implements"
+    }
+    
+    fn map_relationship(&self, language_specific: &str) -> crate::relationship::RelationKind {
+        use crate::relationship::RelationKind;
+        match language_specific {
+            "implements" => RelationKind::Implements,
+            "uses" => RelationKind::Uses,
+            "calls" => RelationKind::Calls,
+            "defines" => RelationKind::Defines,
+            "references" => RelationKind::References,
+            _ => RelationKind::References,
+        }
     }
 }
 
