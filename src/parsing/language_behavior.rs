@@ -40,9 +40,13 @@
 //! 3. Register both in `ParserFactory`
 //! 4. (Future) Register in the language registry for auto-discovery
 
+use crate::parsing::resolution::{
+    GenericInheritanceResolver, GenericResolutionContext, InheritanceResolver, ResolutionScope,
+};
+use crate::relationship::RelationKind;
 use crate::storage::DocumentIndex;
-use crate::{Symbol, SymbolId, Visibility};
-use std::path::Path;
+use crate::{FileId, Symbol, SymbolId, Visibility};
+use std::path::{Path, PathBuf};
 use tree_sitter::Language;
 
 /// Trait for language-specific behavior and configuration
@@ -190,6 +194,111 @@ pub trait LanguageBehavior: Send + Sync {
         }
 
         None
+    }
+
+    // ========== New Resolution Methods (v0.4.1) ==========
+
+    /// Create a language-specific resolution context
+    ///
+    /// Returns a resolution scope that implements the language's scoping rules.
+    /// Default implementation returns a generic context that works for most languages.
+    fn create_resolution_context(&self, file_id: FileId) -> Box<dyn ResolutionScope> {
+        Box::new(GenericResolutionContext::new(file_id))
+    }
+
+    /// Create a language-specific inheritance resolver
+    ///
+    /// Returns an inheritance resolver that handles the language's inheritance model.
+    /// Default implementation returns a generic resolver.
+    fn create_inheritance_resolver(&self) -> Box<dyn InheritanceResolver> {
+        Box::new(GenericInheritanceResolver::new())
+    }
+
+    /// Add an import to the language's import tracking
+    ///
+    /// Default implementation is a no-op. Languages should override to track imports.
+    fn add_import(&self, _import: crate::indexing::Import) {
+        // Default: no-op
+    }
+
+    /// Register a file with its module path
+    ///
+    /// Default implementation is a no-op. Languages should override to track files.
+    fn register_file(&self, _path: PathBuf, _file_id: FileId, _module_path: String) {
+        // Default: no-op
+    }
+
+    /// Resolve a symbol using language-specific resolution rules
+    ///
+    /// Default implementation delegates to the resolution context.
+    fn resolve_symbol(
+        &self,
+        name: &str,
+        context: &dyn ResolutionScope,
+        _document_index: &DocumentIndex,
+    ) -> Option<SymbolId> {
+        context.resolve(name)
+    }
+
+    /// Add a trait/interface implementation
+    ///
+    /// Default implementation is a no-op. Languages with traits/interfaces should override.
+    fn add_trait_impl(&self, _type_name: String, _trait_name: String, _file_id: FileId) {
+        // Default: no-op for languages without traits
+    }
+
+    /// Add inherent methods for a type
+    ///
+    /// Default implementation is a no-op. Languages with inherent methods should override.
+    fn add_inherent_methods(&self, _type_name: String, _methods: Vec<String>) {
+        // Default: no-op for languages without inherent methods
+    }
+
+    /// Add methods that a trait/interface defines
+    ///
+    /// Default implementation is a no-op. Languages with traits/interfaces should override.
+    fn add_trait_methods(&self, _trait_name: String, _methods: Vec<String>) {
+        // Default: no-op
+    }
+
+    /// Resolve which trait/interface provides a method
+    ///
+    /// Returns the trait/interface name if the method comes from one, None if inherent.
+    fn resolve_method_trait(&self, _type_name: &str, _method: &str) -> Option<&str> {
+        None
+    }
+
+    /// Format a method call for this language
+    ///
+    /// Default uses the module separator (e.g., Type::method for Rust, Type.method for others)
+    fn format_method_call(&self, receiver: &str, method: &str) -> String {
+        format!("{}{}{}", receiver, self.module_separator(), method)
+    }
+
+    /// Get the inheritance relationship name for this language
+    ///
+    /// Returns "implements" for languages with interfaces, "extends" for inheritance.
+    fn inheritance_relation_name(&self) -> &'static str {
+        if self.supports_traits() {
+            "implements"
+        } else {
+            "extends"
+        }
+    }
+
+    /// Map language-specific relationship to generic RelationKind
+    ///
+    /// Allows languages to define how their concepts map to the generic relationship types.
+    fn map_relationship(&self, language_specific: &str) -> RelationKind {
+        match language_specific {
+            "extends" => RelationKind::Extends,
+            "implements" => RelationKind::Implements,
+            "inherits" => RelationKind::Extends,
+            "uses" => RelationKind::Uses,
+            "calls" => RelationKind::Calls,
+            "defines" => RelationKind::Defines,
+            _ => RelationKind::References,
+        }
     }
 }
 

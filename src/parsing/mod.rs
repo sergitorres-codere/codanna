@@ -6,6 +6,7 @@ pub mod parser;
 pub mod php;
 pub mod python;
 pub mod registry;
+pub mod resolution;
 pub mod rust;
 pub mod typescript;
 
@@ -17,5 +18,9 @@ pub use parser::LanguageParser;
 pub use php::{PhpBehavior, PhpParser};
 pub use python::{PythonBehavior, PythonParser};
 pub use registry::{LanguageDefinition, LanguageId, LanguageRegistry, RegistryError, get_registry};
+pub use resolution::{
+    GenericInheritanceResolver, GenericResolutionContext, InheritanceResolver, ResolutionScope,
+    ScopeLevel, ScopeType,
+};
 pub use rust::{RustBehavior, RustParser};
 pub use typescript::{TypeScriptBehavior, TypeScriptParser};
