@@ -1,5 +1,20 @@
 # Adding Language Support
 
+> ⚠️ **IMPORTANT NOTICE - Breaking Changes Coming in v0.4.1** ⚠️
+> 
+> We are currently refactoring the language behavior system to be truly language-agnostic.
+> This will make adding new languages significantly easier and more maintainable.
+> 
+> **If you're planning to add a new language:**
+> - Please wait for the v0.4.1 release (expected August 17, 2025, TypeScript included)
+> - The new architecture will eliminate many manual steps
+> - Language-specific resolution logic will be self-contained
+> 
+> **Current limitations being addressed:**
+> - Hardcoded Rust-specific resolution logic in `SimpleIndexer`
+> - Language-specific traits/interfaces handled incorrectly
+> - Module path resolution assumes Rust conventions
+
 Languages self-register via the registry system. Each language lives in its own subdirectory for clean organization.
 
 ## Architecture

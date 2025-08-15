@@ -6,9 +6,27 @@ Thank you for your interest in contributing to Codanna! This guide will help you
 
 - [Development Setup](#development-setup)
 - [Development Guidelines](./development/guidelines.md) - Rust coding principles (MUST READ)
-- [Adding Language Support](./development/language-support.md) - How to add new language parsers
+- [Adding Language Support](./development/language-support.md) - How to add new language parsers **(⚠️ Breaking changes coming in v0.4.1)**
 - [Testing Your Changes](#testing-your-changes)
 - [Submitting Pull Requests](#submitting-pull-requests)
+
+## ⚠️ Important Notice for Contributors
+
+**Major refactoring in progress (v0.4.1)**
+
+We are refactoring the language behavior system to eliminate hardcoded Rust-specific assumptions. This will significantly improve the architecture for adding new languages.
+
+**What's changing:**
+- Language-specific resolution logic moving to behavior modules
+- SimpleIndexer becoming truly language-agnostic
+- Each language will handle its own scoping rules and inheritance models
+
+**If you're planning to contribute:**
+- **Adding a new language?** Please wait for v0.4.1 (expected August 17, 2025, TypeScript is included)
+- **Bug fixes?** Continue as normal
+- **Feature additions?** Check if they touch resolution/indexing logic first
+
+This refactoring will make the codebase much cleaner and easier to extend.
 
 ## Development Setup
 
@@ -122,6 +140,8 @@ This replicates the complete GitHub Actions workflow.
 ## Adding New Features
 
 ### Language Support
+
+> **⚠️ Note:** Language support architecture is being refactored in v0.4.1. If you're planning to add a new language, please wait for this release or coordinate with maintainers.
 
 See [Adding Language Support](./development/language-support.md) for the complete guide. Critical checklist:
 
