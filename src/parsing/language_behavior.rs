@@ -42,10 +42,11 @@
 
 use crate::parsing::resolution::{
     GenericInheritanceResolver, GenericResolutionContext, InheritanceResolver, ResolutionScope,
+    ScopeLevel,
 };
 use crate::relationship::RelationKind;
 use crate::storage::DocumentIndex;
-use crate::{FileId, Symbol, SymbolId, Visibility};
+use crate::{FileId, IndexError, IndexResult, Symbol, SymbolId, Visibility};
 use std::path::{Path, PathBuf};
 use tree_sitter::Language;
 
@@ -299,6 +300,125 @@ pub trait LanguageBehavior: Send + Sync {
             "defines" => RelationKind::Defines,
             _ => RelationKind::References,
         }
+    }
+    
+    /// Build a complete resolution context for a file
+    ///
+    /// This is the main entry point for resolution context creation.
+    /// Each language implements this to build its resolution context according
+    /// to its specific rules (imports, visibility, scoping, etc.).
+    ///
+    /// Default implementation creates a basic context with module symbols only.
+    fn build_resolution_context(
+        &self,
+        file_id: FileId,
+        document_index: &DocumentIndex,
+    ) -> IndexResult<Box<dyn ResolutionScope>> {
+        // Default: Create basic context and add module-level symbols
+        let mut context = self.create_resolution_context(file_id);
+        
+        // Add file's module-level symbols
+        let file_symbols = document_index
+            .find_symbols_by_file(file_id)
+            .map_err(|e| IndexError::TantivyError {
+                operation: "find_symbols_by_file".to_string(),
+                cause: e.to_string(),
+            })?;
+            
+        for symbol in file_symbols {
+            if self.is_resolvable_symbol(&symbol) {
+                context.add_symbol(
+                    symbol.name.to_string(),
+                    symbol.id,
+                    ScopeLevel::Module,
+                );
+            }
+        }
+        
+        Ok(context)
+    }
+    
+    /// Check if a symbol should be resolvable (added to resolution context)
+    ///
+    /// Languages override this to filter which symbols are available for resolution.
+    /// For example, local variables might not be resolvable from other scopes.
+    ///
+    /// Default implementation includes common top-level symbols.
+    fn is_resolvable_symbol(&self, symbol: &Symbol) -> bool {
+        use crate::SymbolKind;
+        
+        // Check scope_context first if available
+        if let Some(scope_context) = symbol.scope_context {
+            use crate::symbol::ScopeContext;
+            match scope_context {
+                ScopeContext::Module | ScopeContext::Global | ScopeContext::Package => true,
+                ScopeContext::Local { .. } | ScopeContext::Parameter => false,
+                ScopeContext::ClassMember => {
+                    // Class members might be resolvable depending on visibility
+                    matches!(symbol.visibility, Visibility::Public)
+                }
+            }
+        } else {
+            // Fallback to symbol kind for backward compatibility
+            matches!(
+                symbol.kind,
+                SymbolKind::Function
+                    | SymbolKind::Method
+                    | SymbolKind::Struct
+                    | SymbolKind::Trait
+                    | SymbolKind::Interface
+                    | SymbolKind::Class
+                    | SymbolKind::TypeAlias
+                    | SymbolKind::Enum
+                    | SymbolKind::Constant
+            )
+        }
+    }
+    
+    /// Check if a symbol is visible from another file
+    ///
+    /// Languages implement their visibility rules here.
+    /// For example, Rust checks pub, Python might check __all__, etc.
+    ///
+    /// Default implementation checks basic visibility.
+    fn is_symbol_visible_from_file(
+        &self,
+        symbol: &Symbol,
+        from_file: FileId,
+    ) -> bool {
+        // Same file: always visible
+        if symbol.file_id == from_file {
+            return true;
+        }
+        
+        // Different file: check visibility
+        matches!(symbol.visibility, Visibility::Public)
+    }
+    
+    /// Get imports for a file
+    ///
+    /// Returns the list of imports that were registered for this file.
+    /// Languages should track imports when add_import() is called.
+    ///
+    /// Default implementation returns empty (no imports).
+    fn get_imports_for_file(&self, _file_id: FileId) -> Vec<crate::indexing::Import> {
+        Vec::new()
+    }
+    
+    /// Resolve an import to a symbol ID
+    ///
+    /// Takes an import and resolves it to an actual symbol in the index.
+    /// Languages implement their specific import resolution logic here.
+    ///
+    /// Default implementation tries basic name matching.
+    fn resolve_import(
+        &self,
+        import: &crate::indexing::Import,
+        document_index: &DocumentIndex,
+    ) -> Option<SymbolId> {
+        // Default: Try to resolve by exact name match
+        // Languages should override with proper import resolution
+        self.resolve_import_path(&import.path, document_index)
     }
 }
 

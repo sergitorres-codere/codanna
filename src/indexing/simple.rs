@@ -2370,6 +2370,15 @@ impl SimpleIndexer {
 
     /// Build resolution context for a file with all available symbols
     fn build_resolution_context(&self, file_id: FileId) -> IndexResult<ResolutionContext> {
+        // Try to use behavior's build_resolution_context if available
+        if let Ok(behavior) = self.get_behavior_for_file(file_id) {
+            // For now, we can't directly return Box<dyn ResolutionScope> as ResolutionContext
+            // So we'll fall through to the old implementation
+            // This will be fully migrated in Sprint 4.5.5
+            // TODO: Change return type to Box<dyn ResolutionScope> in Sprint 4.5.5
+        }
+        
+        // Fallback to old implementation for now
         let mut context = ResolutionContext::new(file_id);
 
         // 1. Add imported symbols
