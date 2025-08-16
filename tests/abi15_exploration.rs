@@ -596,4 +596,98 @@ mod abi15_tests {
         println!("  - Can validate node types at behavior construction");
         println!("  - Field information could enhance symbol extraction");
     }
+
+    #[test]
+    fn explore_typescript_import_structure() {
+        use tree_sitter::{Node, Parser};
+
+        let mut parser = Parser::new();
+        parser
+            .set_language(&tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into())
+            .unwrap();
+
+        println!("\n=== TypeScript Import Statement Structure ===");
+        println!("CRITICAL LESSON: import_clause is NOT a field, it's a child node!");
+        println!("This means node.child_by_field_name(\"import_clause\") returns None!");
+        println!("Must use: node.children(&mut cursor).find(|c| c.kind() == \"import_clause\")\n");
+
+        let test_cases = vec![
+            ("import React from 'react';", "Default import"),
+            ("import { Component } from 'react';", "Named import"),
+            ("import React, { Component } from 'react';", "Mixed import"),
+            ("import * as utils from './utils';", "Namespace import"),
+            ("import type { Props } from './types';", "Type-only import"),
+            ("import './styles.css';", "Side-effect import"),
+        ];
+
+        for (code, description) in test_cases {
+            println!("--- {description} ---");
+            println!("Code: {code}");
+
+            if let Some(tree) = parser.parse(code, None) {
+                let root = tree.root_node();
+                let mut cursor = root.walk();
+
+                for child in root.children(&mut cursor) {
+                    if child.kind() == "import_statement" {
+                        analyze_import_node(child, code);
+                    }
+                }
+            }
+            println!();
+        }
+
+        println!("=== KEY FINDINGS FOR IMPLEMENTATION ===");
+        println!("1. import_clause is a CHILD not a FIELD");
+        println!("2. source IS a field (use child_by_field_name(\"source\"))");
+        println!("3. Within import_clause:");
+        println!("   - First 'identifier' child = default import name");
+        println!("   - 'named_imports' child = {{ Component, useState }}");
+        println!("   - 'namespace_import' child = * as name");
+        println!("4. For namespace imports, the identifier is nested inside namespace_import");
+        println!("5. Type-only imports have a 'type' keyword as first child");
+
+        fn analyze_import_node(node: Node, code: &str) {
+            println!("  import_statement structure:");
+
+            // Show all children with field names
+            let mut cursor = node.walk();
+            for (i, child) in node.children(&mut cursor).enumerate() {
+                let field_name = node.field_name_for_child(i as u32);
+                println!(
+                    "    [{}] kind='{}', field={:?}, text='{}'",
+                    i,
+                    child.kind(),
+                    field_name,
+                    &code[child.byte_range()]
+                );
+
+                // Dive into import_clause
+                if child.kind() == "import_clause" {
+                    let mut clause_cursor = child.walk();
+                    for (j, grandchild) in child.children(&mut clause_cursor).enumerate() {
+                        println!(
+                            "      clause[{}]: kind='{}', text='{}'",
+                            j,
+                            grandchild.kind(),
+                            &code[grandchild.byte_range()]
+                        );
+
+                        // Show namespace_import contents
+                        if grandchild.kind() == "namespace_import" {
+                            let mut ns_cursor = grandchild.walk();
+                            for (k, ggc) in grandchild.children(&mut ns_cursor).enumerate() {
+                                println!(
+                                    "        ns[{}]: kind='{}', text='{}'",
+                                    k,
+                                    ggc.kind(),
+                                    &code[ggc.byte_range()]
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

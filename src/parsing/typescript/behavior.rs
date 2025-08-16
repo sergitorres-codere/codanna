@@ -201,4 +201,100 @@ impl LanguageBehavior for TypeScriptBehavior {
         // TODO: Implement full ES module resolution algorithm
         self.resolve_import_path(&import.path, document_index)
     }
+
+    fn get_module_path_for_file(&self, file_id: FileId) -> Option<String> {
+        // Use the BehaviorState to get module path (O(1) lookup)
+        self.state.get_module_path(file_id)
+    }
+
+    fn import_matches_symbol(
+        &self,
+        import_path: &str,
+        symbol_module_path: &str,
+        importing_module: Option<&str>,
+    ) -> bool {
+        // Helper function to normalize path separators to dots
+        fn normalize_path(path: &str) -> String {
+            path.replace('/', ".")
+        }
+
+        // Helper function to resolve relative path to absolute module path
+        fn resolve_relative_path(import_path: &str, importing_mod: &str) -> String {
+            if import_path.starts_with("./") {
+                // Same directory import
+                let relative = import_path.trim_start_matches("./");
+                let normalized = normalize_path(relative);
+
+                if importing_mod.is_empty() {
+                    normalized
+                } else {
+                    format!("{importing_mod}.{normalized}")
+                }
+            } else if import_path.starts_with("../") {
+                // Parent directory import
+                // Start with the importing module parts as owned strings
+                let mut module_parts: Vec<String> =
+                    importing_mod.split('.').map(|s| s.to_string()).collect();
+
+                let mut path_remaining: &str = import_path;
+
+                // Navigate up for each '../'
+                while path_remaining.starts_with("../") {
+                    if !module_parts.is_empty() {
+                        module_parts.pop();
+                    }
+                    // If we've gone above the module root, we just continue
+                    // This handles cases like ../../../some/path from a shallow module
+                    path_remaining = &path_remaining[3..];
+                }
+
+                // Add the remaining path
+                if !path_remaining.is_empty() {
+                    let normalized = normalize_path(path_remaining);
+                    module_parts.extend(
+                        normalized
+                            .split('.')
+                            .filter(|s| !s.is_empty())
+                            .map(|s| s.to_string()),
+                    );
+                }
+
+                module_parts.join(".")
+            } else {
+                // Not a relative path, return as-is
+                import_path.to_string()
+            }
+        }
+
+        // Helper function to check if path matches with optional index resolution
+        fn matches_with_index(candidate: &str, target: &str) -> bool {
+            candidate == target || format!("{candidate}.index") == target
+        }
+
+        // Case 1: Exact match (most common case, check first for performance)
+        if import_path == symbol_module_path {
+            return true;
+        }
+
+        // Case 2: Only do complex matching if we have the importing module context
+        if let Some(importing_mod) = importing_module {
+            // TypeScript import resolution differs from Rust:
+            // - Relative imports start with './' or '../'
+            // - Absolute imports are package names or path aliases
+
+            if import_path.starts_with("./") || import_path.starts_with("../") {
+                // Resolve relative path to absolute module path
+                let resolved = resolve_relative_path(import_path, importing_mod);
+
+                // Check if it matches (with or without index)
+                if matches_with_index(&resolved, symbol_module_path) {
+                    return true;
+                }
+            }
+            // else: bare module imports and scoped packages
+            // These need exact match for now (TODO: implement proper resolution)
+        }
+
+        false
+    }
 }

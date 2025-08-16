@@ -758,6 +758,214 @@ impl TypeScriptParser {
             _ => None,
         }
     }
+
+    /// Extract imports from AST node recursively
+    fn extract_imports_from_node(
+        &self,
+        node: Node,
+        code: &str,
+        file_id: FileId,
+        imports: &mut Vec<Import>,
+    ) {
+        match node.kind() {
+            "import_statement" => {
+                self.process_import_statement(node, code, file_id, imports);
+            }
+            "export_statement" => {
+                // Check if it's a re-export (has source)
+                if node.child_by_field_name("source").is_some() {
+                    self.process_export_statement(node, code, file_id, imports);
+                }
+            }
+            _ => {
+                // Recurse into children
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    self.extract_imports_from_node(child, code, file_id, imports);
+                }
+            }
+        }
+    }
+
+    /// Process an import statement node
+    fn process_import_statement(
+        &self,
+        node: Node,
+        code: &str,
+        file_id: FileId,
+        imports: &mut Vec<Import>,
+    ) {
+        eprintln!(
+            "ENTERING process_import_statement, code: {}",
+            &code[node.byte_range()]
+        );
+
+        // Debug: print all children
+        let mut cursor = node.walk();
+        eprintln!("  Node has {} children:", node.child_count());
+        for (i, child) in node.children(&mut cursor).enumerate() {
+            eprintln!(
+                "    child[{}]: kind='{}', field_name={:?}",
+                i,
+                child.kind(),
+                node.field_name_for_child(i as u32)
+            );
+        }
+
+        // Get the source (the module being imported from)
+        let source_node = match node.child_by_field_name("source") {
+            Some(n) => n,
+            None => return,
+        };
+
+        let source_path = &code[source_node.byte_range()];
+        let source_path = source_path.trim_matches(|c| c == '"' || c == '\'' || c == '`');
+
+        // Process import clause (what's being imported)
+        // Note: import_clause is not a named field, we need to find it by kind
+        let import_clause = {
+            let mut cursor = node.walk();
+            node.children(&mut cursor)
+                .find(|c| c.kind() == "import_clause")
+        };
+
+        if let Some(import_clause) = import_clause {
+            eprintln!(
+                "  Found import_clause: {}",
+                &code[import_clause.byte_range()]
+            );
+
+            // Check for different import types
+            let mut has_default = false;
+            let mut has_named = false;
+            let mut has_namespace = false;
+            let mut default_name = None;
+            let mut namespace_name = None;
+
+            let mut cursor = import_clause.walk();
+            for child in import_clause.children(&mut cursor) {
+                eprintln!(
+                    "    Child kind: {}, text: {}",
+                    child.kind(),
+                    &code[child.byte_range()]
+                );
+                match child.kind() {
+                    "identifier" => {
+                        // Default import
+                        has_default = true;
+                        let name = code[child.byte_range()].to_string();
+                        eprintln!("      Setting default_name = {name}");
+                        default_name = Some(name);
+                    }
+                    "named_imports" => {
+                        // Named imports exist
+                        has_named = true;
+                    }
+                    "namespace_import" => {
+                        // * as name
+                        has_namespace = true;
+                        let mut ns_cursor = child.walk();
+                        let children: Vec<_> = child.children(&mut ns_cursor).collect();
+                        if let Some(identifier) =
+                            children.iter().rev().find(|n| n.kind() == "identifier")
+                        {
+                            namespace_name = Some(code[identifier.byte_range()].to_string());
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            // Add imports based on what we found
+            // Following Rust pattern: one Import per module, with alias for default/namespace
+            eprintln!(
+                "  Summary: has_default={has_default}, has_named={has_named}, has_namespace={has_namespace}"
+            );
+            eprintln!("  default_name={default_name:?}, namespace_name={namespace_name:?}");
+
+            if has_namespace {
+                // Namespace import: import * as utils from './utils'
+                imports.push(Import {
+                    path: source_path.to_string(),
+                    alias: namespace_name,
+                    file_id,
+                    is_glob: true,
+                });
+            } else if has_default && has_named {
+                // Mixed import: import React, { Component } from 'react'
+                // We create one import with the default as alias
+                imports.push(Import {
+                    path: source_path.to_string(),
+                    alias: default_name,
+                    file_id,
+                    is_glob: false,
+                });
+            } else if has_default {
+                // Default only: import React from 'react'
+                eprintln!("  Adding default import: path='{source_path}', alias={default_name:?}");
+                imports.push(Import {
+                    path: source_path.to_string(),
+                    alias: default_name,
+                    file_id,
+                    is_glob: false,
+                });
+            } else if has_named {
+                // Named only: import { Component } from 'react'
+                imports.push(Import {
+                    path: source_path.to_string(),
+                    alias: None,
+                    file_id,
+                    is_glob: false,
+                });
+            }
+        } else {
+            // Side-effect import (no import clause)
+            imports.push(Import {
+                path: source_path.to_string(),
+                alias: None,
+                file_id,
+                is_glob: false,
+            });
+        }
+    }
+
+    /// Process export statements (for re-exports)
+    fn process_export_statement(
+        &self,
+        node: Node,
+        code: &str,
+        file_id: FileId,
+        imports: &mut Vec<Import>,
+    ) {
+        // Get the source module
+        let source_node = match node.child_by_field_name("source") {
+            Some(n) => n,
+            None => return,
+        };
+
+        let source_path = &code[source_node.byte_range()];
+        let source_path = source_path.trim_matches(|c| c == '"' || c == '\'' || c == '`');
+
+        // Check what's being exported
+        let node_text = &code[node.byte_range()];
+        if node_text.contains("* from") {
+            // export * from './module'
+            imports.push(Import {
+                path: source_path.to_string(),
+                alias: None,
+                file_id,
+                is_glob: true,
+            });
+        } else {
+            // Named re-exports - just track the module being imported from
+            imports.push(Import {
+                path: source_path.to_string(),
+                alias: None,
+                file_id,
+                is_glob: false,
+            });
+        }
+    }
 }
 
 impl LanguageParser for TypeScriptParser {
@@ -849,9 +1057,15 @@ impl LanguageParser for TypeScriptParser {
         extends
     }
 
-    fn find_imports(&mut self, _code: &str, _file_id: FileId) -> Vec<Import> {
-        // TODO: Implement import extraction
-        Vec::new()
+    fn find_imports(&mut self, code: &str, file_id: FileId) -> Vec<Import> {
+        let mut imports = Vec::new();
+
+        if let Some(tree) = self.parser.parse(code, None) {
+            let root = tree.root_node();
+            self.extract_imports_from_node(root, code, file_id, &mut imports);
+        }
+
+        imports
     }
 
     fn find_uses<'a>(&mut self, _code: &'a str) -> Vec<(&'a str, &'a str, Range)> {
@@ -866,5 +1080,217 @@ impl LanguageParser for TypeScriptParser {
 
     fn language(&self) -> crate::parsing::Language {
         crate::parsing::Language::TypeScript
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::FileId;
+
+    #[test]
+    fn test_typescript_import_extraction() {
+        println!("\n=== TypeScript Import Extraction Test ===\n");
+
+        let mut parser = TypeScriptParser::new().unwrap();
+        let file_id = FileId::new(1).unwrap();
+
+        let code = r#"
+import { Component, useState } from 'react';
+import React from 'react';
+import * as utils from './utils';
+import type { Props } from './types';
+import './styles.css';
+export { Button } from './Button';
+export * from './common';
+"#;
+
+        println!("Test code:\n{code}");
+
+        let imports = parser.find_imports(code, file_id);
+
+        println!("\nExtracted {} imports:", imports.len());
+        for (i, import) in imports.iter().enumerate() {
+            println!(
+                "  {}. {} -> {:?} (glob: {})",
+                i + 1,
+                import.path,
+                import.alias,
+                import.is_glob
+            );
+        }
+
+        // Verify counts
+        assert_eq!(imports.len(), 7, "Should extract 7 imports");
+
+        // Verify specific imports
+        // Named import creates one import with no alias
+        assert!(
+            imports
+                .iter()
+                .any(|i| i.path == "react" && i.alias.is_none())
+        );
+        // Default import has alias
+        assert!(
+            imports
+                .iter()
+                .any(|i| i.path == "react" && i.alias == Some("React".to_string()))
+        );
+        // Namespace import has alias and is_glob
+        assert!(
+            imports
+                .iter()
+                .any(|i| i.path == "./utils" && i.alias == Some("utils".to_string()) && i.is_glob)
+        );
+        // Type import (named)
+        assert!(
+            imports
+                .iter()
+                .any(|i| i.path == "./types" && i.alias.is_none())
+        );
+        // Side-effect import
+        assert!(
+            imports
+                .iter()
+                .any(|i| i.path == "./styles.css" && i.alias.is_none())
+        );
+        // Re-export
+        assert!(imports.iter().any(|i| i.path == "./Button"));
+        // Re-export all
+        assert!(imports.iter().any(|i| i.path == "./common" && i.is_glob));
+
+        println!("\n✅ Import extraction test passed");
+    }
+
+    #[test]
+    fn test_complex_import_patterns() {
+        println!("\n=== Complex Import Patterns Test ===\n");
+
+        let mut parser = TypeScriptParser::new().unwrap();
+        let file_id = FileId::new(1).unwrap();
+
+        let code = r#"
+// Mixed default and named
+import React, { Component, useState as useStateHook } from 'react';
+
+// Type mixed with value imports
+import { type Config, createConfig } from './config';
+
+// Aliased imports
+import { Helper as H } from './helper';
+
+// Re-export with rename
+export { default as MyButton } from './Button';
+"#;
+
+        let imports = parser.find_imports(code, file_id);
+
+        println!("Found {} imports in complex patterns", imports.len());
+        for import in &imports {
+            println!(
+                "  - {} -> {:?} (glob: {})",
+                import.path, import.alias, import.is_glob
+            );
+        }
+
+        // Should have 4 imports: react (default), ./config, ./helper, ./Button
+        assert_eq!(imports.len(), 4, "Should have 4 imports");
+
+        // Check for React default import
+        let react_default = imports
+            .iter()
+            .find(|i| i.path == "react" && i.alias == Some("React".to_string()));
+        assert!(react_default.is_some(), "Should find React default import");
+
+        // Check for config import (named imports, no alias)
+        let config = imports
+            .iter()
+            .find(|i| i.path == "./config" && i.alias.is_none());
+        assert!(config.is_some(), "Should find config import");
+
+        // Check for helper import (named imports, no alias on Import struct)
+        let helper = imports
+            .iter()
+            .find(|i| i.path == "./helper" && i.alias.is_none());
+        assert!(helper.is_some(), "Should find helper import");
+
+        println!("✅ Complex patterns handled correctly");
+    }
+
+    #[test]
+    fn test_import_path_formats() {
+        println!("\n=== Import Path Formats Test ===\n");
+
+        let mut parser = TypeScriptParser::new().unwrap();
+        let file_id = FileId::new(1).unwrap();
+
+        let code = r#"
+// Relative paths
+import { a } from './sibling';
+import { b } from '../parent';
+import { c } from '../../grandparent';
+
+// Node modules
+import express from 'express';
+import { Request } from '@types/express';
+
+// Path aliases (would need tsconfig to resolve)
+import { service } from '@app/services';
+
+// Index imports
+import utils from './utils';  // implies ./utils/index
+"#;
+
+        let imports = parser.find_imports(code, file_id);
+
+        println!("Path formats found:");
+        for import in &imports {
+            println!("  - {}", import.path);
+        }
+
+        assert!(imports.iter().any(|i| i.path == "./sibling"));
+        assert!(imports.iter().any(|i| i.path == "../parent"));
+        assert!(imports.iter().any(|i| i.path == "express"));
+        assert!(imports.iter().any(|i| i.path.starts_with("@")));
+
+        println!("✅ Various path formats extracted correctly");
+    }
+
+    #[test]
+    fn test_export_variations() {
+        println!("\n=== Export Variations Test ===\n");
+
+        let mut parser = TypeScriptParser::new().unwrap();
+        let file_id = FileId::new(1).unwrap();
+
+        let code = r#"
+// Re-exports
+export { Component } from 'react';
+export { Helper as PublicHelper } from './helper';
+export * from './utils';
+
+// Type re-exports
+export type { Props } from './types';
+"#;
+
+        let imports = parser.find_imports(code, file_id);
+
+        println!("Export-based imports found:");
+        for import in &imports {
+            println!(
+                "  - {} -> {:?} (glob: {})",
+                import.path, import.alias, import.is_glob
+            );
+        }
+
+        assert!(
+            imports
+                .iter()
+                .any(|i| i.path == "react" && i.alias.is_none())
+        );
+        assert!(imports.iter().any(|i| i.path == "./helper"));
+        assert!(imports.iter().any(|i| i.path == "./utils" && i.is_glob));
+
+        println!("✅ Export variations handled correctly");
     }
 }
