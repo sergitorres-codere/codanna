@@ -405,6 +405,25 @@ mod abi15_tests {
             }
         }
 
+        println!("\n=== CALL-RELATED NODES ===");
+        for node_kind in &[
+            "call_expression",
+            "member_expression",
+            "subscript_expression",
+            "new_expression",
+            "await_expression",
+            "optional_chain",
+            "arguments",
+            "argument",
+            "super",
+            "this",
+        ] {
+            let id = language.id_for_node_kind(node_kind, true);
+            if id != 0 {
+                println!("    {node_kind:30} -> ID: {id}");
+            }
+        }
+
         println!("\n=== IMPORTANT: Use these exact node names in parser implementation!");
         println!("=== DO NOT GUESS node names - always verify with this test first!");
     }

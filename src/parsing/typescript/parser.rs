@@ -986,6 +986,169 @@ impl TypeScriptParser {
             });
         }
     }
+
+    // Helper methods for find_calls()
+    #[allow(clippy::only_used_in_recursion)]
+    fn extract_calls_recursive<'a>(
+        &self,
+        node: &tree_sitter::Node,
+        code: &'a str,
+        current_function: Option<&'a str>,
+        calls: &mut Vec<(&'a str, &'a str, Range)>,
+    ) {
+        // Handle function context - track which function we're inside
+        let function_context = if node.kind() == "function_declaration"
+            || node.kind() == "method_definition"
+            || node.kind() == "arrow_function"
+            || node.kind() == "function_expression"
+        {
+            // Extract function name
+            if let Some(name_node) = node.child_by_field_name("name") {
+                Some(&code[name_node.byte_range()])
+            } else {
+                // Arrow functions might not have a name, check parent
+                current_function
+            }
+        } else {
+            current_function
+        };
+
+        // Check if this is a call expression
+        if node.kind() == "call_expression" {
+            // Skip if it's a method call (handled by find_method_calls)
+            if let Some(function_node) = node.child_by_field_name("function") {
+                if function_node.kind() != "member_expression" {
+                    // It's a regular function call
+                    if let Some(fn_name) = Self::extract_function_name(&function_node, code) {
+                        if let Some(context) = function_context {
+                            let range = Range {
+                                start_line: (node.start_position().row + 1) as u32,
+                                start_column: node.start_position().column as u16,
+                                end_line: (node.end_position().row + 1) as u32,
+                                end_column: node.end_position().column as u16,
+                            };
+                            calls.push((context, fn_name, range));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Recurse to children
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            self.extract_calls_recursive(&child, code, function_context, calls);
+        }
+    }
+
+    #[allow(clippy::only_used_in_recursion)]
+    fn extract_method_calls_recursive(
+        &self,
+        node: &tree_sitter::Node,
+        code: &str,
+        current_function: Option<&str>,
+        calls: &mut Vec<MethodCall>,
+    ) {
+        // Track function context (same as find_calls)
+        let function_context = if node.kind() == "function_declaration"
+            || node.kind() == "method_definition"
+            || node.kind() == "arrow_function"
+            || node.kind() == "function_expression"
+        {
+            // Extract function name
+            if let Some(name_node) = node.child_by_field_name("name") {
+                Some(&code[name_node.byte_range()])
+            } else {
+                current_function
+            }
+        } else {
+            current_function
+        };
+
+        // Check for method calls
+        if node.kind() == "call_expression" {
+            if let Some(function_node) = node.child_by_field_name("function") {
+                if function_node.kind() == "member_expression" {
+                    // It's a method call!
+                    if let Some((receiver, method_name, is_static)) =
+                        self.extract_method_signature(&function_node, code)
+                    {
+                        if let Some(context) = function_context {
+                            let range = Range {
+                                start_line: (node.start_position().row + 1) as u32,
+                                start_column: node.start_position().column as u16,
+                                end_line: (node.end_position().row + 1) as u32,
+                                end_column: node.end_position().column as u16,
+                            };
+
+                            let method_call = MethodCall {
+                                caller: context.to_string(),
+                                method_name: method_name.to_string(),
+                                receiver: receiver.map(|r| r.to_string()),
+                                is_static,
+                                range,
+                            };
+
+                            calls.push(method_call);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Recurse
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            self.extract_method_calls_recursive(&child, code, function_context, calls);
+        }
+    }
+
+    fn extract_method_signature<'a>(
+        &self,
+        member_expr: &tree_sitter::Node,
+        code: &'a str,
+    ) -> Option<(Option<&'a str>, &'a str, bool)> {
+        // member_expression has 'object' and 'property' fields
+        let object = member_expr.child_by_field_name("object");
+        let property = member_expr.child_by_field_name("property");
+
+        match (object, property) {
+            (Some(obj), Some(prop)) => {
+                let receiver = &code[obj.byte_range()];
+                let method_name = &code[prop.byte_range()];
+
+                // Check if it's a static call (TypeScript doesn't have :: but uses .)
+                // We can't easily distinguish static from instance in TypeScript
+                // without type information, so we'll assume instance calls
+                let is_static = false;
+
+                Some((Some(receiver), method_name, is_static))
+            }
+            _ => None,
+        }
+    }
+
+    fn extract_function_name<'a>(node: &tree_sitter::Node, code: &'a str) -> Option<&'a str> {
+        match node.kind() {
+            "identifier" => Some(&code[node.byte_range()]),
+            "await_expression" => {
+                // Handle await foo()
+                if let Some(expr) = node.child_by_field_name("expression") {
+                    Self::extract_function_name(&expr, code)
+                } else {
+                    // Sometimes await_expression has the identifier as a direct child
+                    let mut cursor = node.walk();
+                    for child in node.children(&mut cursor) {
+                        if let Some(name) = Self::extract_function_name(&child, code) {
+                            return Some(name);
+                        }
+                    }
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
 }
 
 impl LanguageParser for TypeScriptParser {
@@ -1047,14 +1210,33 @@ impl LanguageParser for TypeScriptParser {
         None
     }
 
-    fn find_calls<'a>(&mut self, _code: &'a str) -> Vec<(&'a str, &'a str, Range)> {
-        // TODO: Implement call extraction
-        Vec::new()
+    fn find_calls<'a>(&mut self, code: &'a str) -> Vec<(&'a str, &'a str, Range)> {
+        let tree = match self.parser.parse(code, None) {
+            Some(tree) => tree,
+            None => return Vec::new(),
+        };
+
+        let root = tree.root_node();
+        let mut calls = Vec::new();
+
+        // Track current function context
+        self.extract_calls_recursive(&root, code, None, &mut calls);
+
+        calls
     }
 
-    fn find_method_calls(&mut self, _code: &str) -> Vec<MethodCall> {
-        // TODO: Implement method call extraction
-        Vec::new()
+    fn find_method_calls(&mut self, code: &str) -> Vec<MethodCall> {
+        let tree = match self.parser.parse(code, None) {
+            Some(tree) => tree,
+            None => return Vec::new(),
+        };
+
+        let root = tree.root_node();
+        let mut method_calls = Vec::new();
+
+        self.extract_method_calls_recursive(&root, code, None, &mut method_calls);
+
+        method_calls
     }
 
     fn find_implementations<'a>(&mut self, code: &'a str) -> Vec<(&'a str, &'a str, Range)> {
