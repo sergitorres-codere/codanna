@@ -5,7 +5,7 @@
 
 use super::{
     Language, LanguageBehavior, LanguageId, LanguageParser, PhpBehavior, PhpParser, PythonBehavior,
-    PythonParser, RustBehavior, RustParser, get_registry,
+    PythonParser, RustBehavior, RustParser, TypeScriptBehavior, TypeScriptParser, get_registry,
 };
 use crate::{IndexError, IndexResult, Settings};
 use std::sync::Arc;
@@ -206,7 +206,15 @@ impl ParserFactory {
                     behavior: Box::new(PhpBehavior::new()),
                 }
             }
-            Language::JavaScript | Language::TypeScript => {
+            Language::TypeScript => {
+                let parser =
+                    TypeScriptParser::new().map_err(|e| IndexError::General(e.to_string()))?;
+                ParserWithBehavior {
+                    parser: Box::new(parser),
+                    behavior: Box::new(TypeScriptBehavior::new()),
+                }
+            }
+            Language::JavaScript => {
                 return Err(IndexError::General(format!(
                     "{} parser not yet implemented.",
                     language.name()

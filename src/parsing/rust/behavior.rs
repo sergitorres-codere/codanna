@@ -171,6 +171,32 @@ impl LanguageBehavior for RustBehavior {
     fn get_imports_for_file(&self, file_id: FileId) -> Vec<crate::indexing::Import> {
         self.get_imports_from_state(file_id)
     }
+
+    // Override visibility check for Rust-specific semantics
+    fn is_symbol_visible_from_file(&self, symbol: &crate::Symbol, from_file: FileId) -> bool {
+        // Same file: always visible
+        if symbol.file_id == from_file {
+            return true;
+        }
+
+        // Different file: check visibility based on Rust rules
+        match symbol.visibility {
+            Visibility::Public => true,
+            Visibility::Crate => {
+                // pub(crate) is visible from anywhere in the same crate
+                // For now, assume all files are in the same crate
+                // TODO: In the future, check if files are in same crate based on Cargo.toml
+                true
+            }
+            Visibility::Module => {
+                // pub(super) is visible from parent module and siblings
+                // This requires module hierarchy analysis
+                // For now, be conservative and return false
+                false
+            }
+            Visibility::Private => false,
+        }
+    }
 }
 
 #[cfg(test)]

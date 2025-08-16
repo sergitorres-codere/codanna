@@ -87,6 +87,160 @@ mod abi15_tests {
     }
 
     #[test]
+    fn explore_python_abi15_comprehensive() {
+        let language: Language = tree_sitter_python::LANGUAGE.into();
+
+        println!("\n=== Python Language ABI-15 COMPREHENSIVE NODE MAPPING ===");
+        println!("  ABI Version: {}", language.abi_version());
+        println!("  Node kind count: {}", language.node_kind_count());
+
+        println!("\n=== FUNCTION-RELATED NODES ===");
+        for node_kind in &[
+            "function_definition",
+            "lambda",
+            "async_function_definition",
+            "decorator",
+            "decorated_definition",
+            "parameters",
+            "default_parameter",
+            "typed_parameter",
+            "typed_default_parameter",
+        ] {
+            let id = language.id_for_node_kind(node_kind, true);
+            if id != 0 {
+                println!("  ✓ {node_kind} -> ID: {id}");
+            } else {
+                println!("  ✗ {node_kind} NOT FOUND");
+            }
+        }
+
+        println!("\n=== CLASS-RELATED NODES ===");
+        for node_kind in &[
+            "class_definition",
+            "class_body",
+            "argument_list",
+            "inheritance",
+            "base_list",
+            "metaclass",
+        ] {
+            let id = language.id_for_node_kind(node_kind, true);
+            if id != 0 {
+                println!("  ✓ {node_kind} -> ID: {id}");
+            } else {
+                println!("  ✗ {node_kind} NOT FOUND");
+            }
+        }
+
+        println!("\n=== VARIABLE/ASSIGNMENT NODES ===");
+        for node_kind in &[
+            "assignment",
+            "augmented_assignment",
+            "annotated_assignment",
+            "expression_statement",
+            "global_statement",
+            "nonlocal_statement",
+            "identifier",
+            "attribute",
+            "subscript",
+        ] {
+            let id = language.id_for_node_kind(node_kind, true);
+            if id != 0 {
+                println!("  ✓ {node_kind} -> ID: {id}");
+            } else {
+                println!("  ✗ {node_kind} NOT FOUND");
+            }
+        }
+
+        println!("\n=== TYPE-RELATED NODES ===");
+        for node_kind in &[
+            "type",
+            "type_alias_statement",
+            "generic_type",
+            "union_type",
+            "type_parameter",
+            "type_comment",
+            "type_hint",
+            "type_annotation",
+        ] {
+            let id = language.id_for_node_kind(node_kind, true);
+            if id != 0 {
+                println!("  ✓ {node_kind} -> ID: {id}");
+            } else {
+                println!("  ✗ {node_kind} NOT FOUND");
+            }
+        }
+
+        println!("\n=== IMPORT-RELATED NODES ===");
+        for node_kind in &[
+            "import_statement",
+            "import_from_statement",
+            "aliased_import",
+            "dotted_name",
+            "relative_import",
+            "wildcard_import",
+        ] {
+            let id = language.id_for_node_kind(node_kind, true);
+            if id != 0 {
+                println!("  ✓ {node_kind} -> ID: {id}");
+            } else {
+                println!("  ✗ {node_kind} NOT FOUND");
+            }
+        }
+
+        println!("\n=== CONSTANT/LITERAL NODES ===");
+        for node_kind in &[
+            "integer",
+            "float",
+            "string",
+            "true",
+            "false",
+            "none",
+            "list",
+            "dictionary",
+            "set",
+            "tuple",
+        ] {
+            let id = language.id_for_node_kind(node_kind, true);
+            if id != 0 {
+                println!("  ✓ {node_kind} -> ID: {id}");
+            } else {
+                println!("  ✗ {node_kind} NOT FOUND");
+            }
+        }
+
+        println!("\n=== ASYNC/GENERATOR NODES ===");
+        for node_kind in &[
+            "async_function_definition",
+            "async_with_statement",
+            "async_for_statement",
+            "await_expression",
+            "yield_expression",
+            "generator_expression",
+        ] {
+            let id = language.id_for_node_kind(node_kind, true);
+            if id != 0 {
+                println!("  ✓ {node_kind} -> ID: {id}");
+            } else {
+                println!("  ✗ {node_kind} NOT FOUND");
+            }
+        }
+
+        println!("\n=== DOCUMENTATION NODES ===");
+        for node_kind in &["comment", "string", "expression_statement", "docstring"] {
+            let id = language.id_for_node_kind(node_kind, true);
+            if id != 0 {
+                println!("  ✓ {node_kind} -> ID: {id}");
+            } else {
+                println!("  ✗ {node_kind} NOT FOUND");
+            }
+        }
+
+        println!("\n=== Summary ===");
+        println!("Total node kinds available: {}", language.node_kind_count());
+        println!("Use these node names in the Python parser to extract symbols!");
+    }
+
+    #[test]
     fn explore_typescript_abi15_comprehensive() {
         let language: Language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
 

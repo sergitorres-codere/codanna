@@ -305,19 +305,47 @@ pub trait LanguageBehavior: Send + Sync {
     /// Build a complete resolution context for a file
     ///
     /// This is the main entry point for resolution context creation.
-    /// Each language implements this to build its resolution context according
-    /// to its specific rules (imports, visibility, scoping, etc.).
+    /// This language-agnostic implementation:
+    /// 1. Adds imports tracked by the behavior (not ImportResolver)
+    /// 2. Adds resolvable symbols from the current file
+    /// 3. Adds visible symbols from other files
     ///
-    /// Default implementation creates a basic context with module symbols only.
+    /// Each language controls behavior through its overrides of:
+    /// - `get_imports_for_file()` - what imports are available
+    /// - `resolve_import()` - how imports resolve to symbols
+    /// - `is_resolvable_symbol()` - what symbols can be resolved
+    /// - `is_symbol_visible_from_file()` - cross-file visibility rules
     fn build_resolution_context(
         &self,
         file_id: FileId,
         document_index: &DocumentIndex,
     ) -> IndexResult<Box<dyn ResolutionScope>> {
-        // Default: Create basic context and add module-level symbols
+        // Create language-specific resolution context
         let mut context = self.create_resolution_context(file_id);
 
-        // Add file's module-level symbols
+        // 1. Add imported symbols (using behavior's tracked imports, not ImportResolver)
+        let imports = self.get_imports_for_file(file_id);
+        for import in imports {
+            if let Some(symbol_id) = self.resolve_import(&import, document_index) {
+                // Use alias if provided, otherwise use the last segment of the path
+                let name = if let Some(alias) = &import.alias {
+                    alias.clone()
+                } else {
+                    // Let the language determine the separator
+                    import
+                        .path
+                        .split(self.module_separator())
+                        .last()
+                        .unwrap_or(&import.path)
+                        .to_string()
+                };
+
+                // Add as imported symbol (higher priority than module symbols)
+                context.add_symbol(name, symbol_id, ScopeLevel::Module);
+            }
+        }
+
+        // 2. Add file's module-level symbols
         let file_symbols =
             document_index
                 .find_symbols_by_file(file_id)
@@ -329,6 +357,29 @@ pub trait LanguageBehavior: Send + Sync {
         for symbol in file_symbols {
             if self.is_resolvable_symbol(&symbol) {
                 context.add_symbol(symbol.name.to_string(), symbol.id, ScopeLevel::Module);
+            }
+        }
+
+        // 3. Add visible symbols from other files (public/exported symbols)
+        // Note: This is expensive, so we limit to a reasonable number
+        let all_symbols =
+            document_index
+                .get_all_symbols(10000)
+                .map_err(|e| IndexError::TantivyError {
+                    operation: "get_all_symbols".to_string(),
+                    cause: e.to_string(),
+                })?;
+
+        for symbol in all_symbols {
+            // Skip symbols from the current file (already added above)
+            if symbol.file_id == file_id {
+                continue;
+            }
+
+            // Check if this symbol is visible from the current file
+            if self.is_symbol_visible_from_file(&symbol, file_id) {
+                // Add as global symbol (lower priority)
+                context.add_symbol(symbol.name.to_string(), symbol.id, ScopeLevel::Global);
             }
         }
 

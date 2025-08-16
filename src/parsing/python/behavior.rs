@@ -2,7 +2,8 @@
 
 use crate::parsing::LanguageBehavior;
 use crate::parsing::behavior_state::{BehaviorState, StatefulBehavior};
-use crate::{FileId, Visibility};
+use crate::storage::DocumentIndex;
+use crate::{FileId, SymbolId, Visibility};
 use std::path::{Path, PathBuf};
 use tree_sitter::Language;
 
@@ -140,6 +141,58 @@ impl LanguageBehavior for PythonBehavior {
 
     fn get_imports_for_file(&self, file_id: FileId) -> Vec<crate::indexing::Import> {
         self.get_imports_from_state(file_id)
+    }
+
+    // Python-specific: Handle Python module imports
+    fn resolve_import(
+        &self,
+        import: &crate::indexing::Import,
+        document_index: &DocumentIndex,
+    ) -> Option<SymbolId> {
+        // Python imports can be:
+        // 1. Module imports: import os, import sys
+        // 2. From imports: from os import path
+        // 3. Relative imports: from . import foo, from ..bar import baz
+        // 4. Star imports: from module import *
+
+        // For now, use basic resolution
+        // TODO: Implement full Python import resolution with PYTHONPATH
+        self.resolve_import_path(&import.path, document_index)
+    }
+
+    // Python-specific: Check visibility based on naming conventions
+    fn is_symbol_visible_from_file(&self, symbol: &crate::Symbol, from_file: FileId) -> bool {
+        // Same file: always visible
+        if symbol.file_id == from_file {
+            return true;
+        }
+
+        // Python uses naming conventions for visibility:
+        // - __name (double underscore): Private (name mangling)
+        // - _name (single underscore): Module-level/protected
+        // - name (no underscore): Public
+
+        // Check the actual symbol name, not just the visibility field
+        let name = symbol.name.as_ref();
+
+        // Special methods like __init__, __str__ are always public
+        if name.starts_with("__") && name.ends_with("__") {
+            return true;
+        }
+
+        // Private names are not visible outside the module
+        if name.starts_with("__") {
+            return false;
+        }
+
+        // Module-level (_name) symbols are visible but discouraged
+        // Let's be permissive and allow them
+        if name.starts_with('_') {
+            return true;
+        }
+
+        // Public names are always visible
+        true
     }
 }
 

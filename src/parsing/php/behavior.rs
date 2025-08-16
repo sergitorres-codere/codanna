@@ -2,7 +2,8 @@
 
 use crate::parsing::LanguageBehavior;
 use crate::parsing::behavior_state::{BehaviorState, StatefulBehavior};
-use crate::{FileId, Visibility};
+use crate::storage::DocumentIndex;
+use crate::{FileId, SymbolId, Visibility};
 use std::path::{Path, PathBuf};
 use tree_sitter::Language;
 
@@ -126,6 +127,39 @@ impl LanguageBehavior for PhpBehavior {
 
     fn get_imports_for_file(&self, file_id: FileId) -> Vec<crate::indexing::Import> {
         self.get_imports_from_state(file_id)
+    }
+
+    // PHP-specific: Handle PHP use statements and namespace imports
+    fn resolve_import(
+        &self,
+        import: &crate::indexing::Import,
+        document_index: &DocumentIndex,
+    ) -> Option<SymbolId> {
+        // PHP imports can be:
+        // 1. Use statements: use App\Controllers\UserController;
+        // 2. Aliased use: use App\Models\User as UserModel;
+        // 3. Function/const imports: use function array_map;
+        // 4. Grouped imports: use App\{Model, Controller};
+
+        // For now, use basic resolution
+        // TODO: Implement full PHP namespace resolution with PSR-4 autoloading
+        self.resolve_import_path(&import.path, document_index)
+    }
+
+    // PHP-specific: Check visibility based on access modifiers
+    fn is_symbol_visible_from_file(&self, symbol: &crate::Symbol, from_file: FileId) -> bool {
+        // Same file: always visible
+        if symbol.file_id == from_file {
+            return true;
+        }
+
+        // PHP visibility is explicit:
+        // - public: Visible everywhere
+        // - protected: Visible in same class hierarchy
+        // - private: Only visible in same class
+
+        // For cross-file visibility, we only expose public symbols
+        matches!(symbol.visibility, Visibility::Public)
     }
 }
 

@@ -1,10 +1,11 @@
 //! TypeScript-specific language behavior implementation
 
-use crate::Visibility;
 use crate::parsing::LanguageBehavior;
 use crate::parsing::behavior_state::{BehaviorState, StatefulBehavior};
 use crate::parsing::resolution::{InheritanceResolver, ResolutionScope};
+use crate::storage::DocumentIndex;
 use crate::types::FileId;
+use crate::{SymbolId, Visibility};
 use std::path::{Path, PathBuf};
 use tree_sitter::Language;
 
@@ -146,5 +147,58 @@ impl LanguageBehavior for TypeScriptBehavior {
 
     fn get_imports_for_file(&self, file_id: FileId) -> Vec<crate::indexing::Import> {
         self.get_imports_from_state(file_id)
+    }
+
+    // TypeScript-specific: Support hoisting
+    fn is_resolvable_symbol(&self, symbol: &crate::Symbol) -> bool {
+        use crate::SymbolKind;
+        use crate::symbol::ScopeContext;
+
+        // TypeScript hoists function declarations and class declarations
+        // They can be used before their definition in the file
+        let hoisted = matches!(
+            symbol.kind,
+            SymbolKind::Function | SymbolKind::Class | SymbolKind::Interface | SymbolKind::Enum
+        );
+
+        if hoisted {
+            return true;
+        }
+
+        // Check scope_context for non-hoisted symbols
+        if let Some(scope_context) = symbol.scope_context {
+            match scope_context {
+                ScopeContext::Module | ScopeContext::Global | ScopeContext::Package => true,
+                ScopeContext::Local { .. } | ScopeContext::Parameter => false,
+                ScopeContext::ClassMember => {
+                    // Class members are resolvable if public or exported
+                    matches!(symbol.visibility, Visibility::Public)
+                }
+            }
+        } else {
+            // Fallback for symbols without scope_context
+            matches!(
+                symbol.kind,
+                SymbolKind::TypeAlias | SymbolKind::Constant | SymbolKind::Variable
+            )
+        }
+    }
+
+    // TypeScript-specific: Handle ES module imports
+    fn resolve_import(
+        &self,
+        import: &crate::indexing::Import,
+        document_index: &DocumentIndex,
+    ) -> Option<SymbolId> {
+        // TypeScript imports can be:
+        // 1. Relative imports: ./foo, ../bar, ./utils/helper
+        // 2. Absolute imports: @app/utils, lodash
+        // 3. Named imports: import { foo } from './bar'
+        // 4. Default imports: import foo from './bar'
+        // 5. Namespace imports: import * as foo from './bar'
+
+        // For now, use basic resolution
+        // TODO: Implement full ES module resolution algorithm
+        self.resolve_import_path(&import.path, document_index)
     }
 }
