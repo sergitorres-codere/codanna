@@ -424,6 +424,29 @@ mod abi15_tests {
             }
         }
 
+        // TYPE USAGE NODES (for find_uses implementation)
+        println!("\n=== TYPE USAGE NODES (for find_uses) ===");
+        for node_kind in &[
+            "formal_parameters",
+            "required_parameter",
+            "optional_parameter",
+            "rest_parameter",
+            "type_annotation",
+            "return_type",
+            "implements_clause",
+            "extends_clause",
+            "constraint",
+            "default_type",
+            "variable_declarator",
+            "lexical_declaration",
+            "variable_declaration",
+        ] {
+            let id = language.id_for_node_kind(node_kind, true);
+            if id != 0 {
+                println!("    {node_kind:30} -> ID: {id}");
+            }
+        }
+
         println!("\n=== IMPORTANT: Use these exact node names in parser implementation!");
         println!("=== DO NOT GUESS node names - always verify with this test first!");
     }

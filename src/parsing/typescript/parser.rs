@@ -409,7 +409,15 @@ impl TypeScriptParser {
 
                         let visibility = self.determine_visibility(node, code);
 
-                        symbols.push(self.create_symbol(
+                        // Check if this is an arrow function assignment
+                        let is_arrow_function =
+                            if let Some(value_node) = child.child_by_field_name("value") {
+                                value_node.kind() == "arrow_function"
+                            } else {
+                                false
+                            };
+
+                        let mut symbol = self.create_symbol(
                             counter.next_id(),
                             name.to_string(),
                             kind,
@@ -424,7 +432,15 @@ impl TypeScriptParser {
                             None,
                             module_path,
                             visibility,
-                        ));
+                        );
+
+                        // Override scope context for arrow functions - they are never hoisted
+                        if is_arrow_function {
+                            symbol.scope_context =
+                                Some(crate::symbol::ScopeContext::Local { hoisted: false });
+                        }
+
+                        symbols.push(symbol);
                     }
                 }
             }
@@ -1041,6 +1057,345 @@ impl TypeScriptParser {
         }
     }
 
+    fn extract_type_uses_recursive<'a>(
+        &self,
+        node: &tree_sitter::Node,
+        code: &'a str,
+        uses: &mut Vec<(&'a str, &'a str, Range)>,
+    ) {
+        match node.kind() {
+            // Function declarations with parameters and return types
+            "function_declaration"
+            | "function_signature"
+            | "method_definition"
+            | "method_signature" => {
+                let context_name = node
+                    .child_by_field_name("name")
+                    .map(|n| &code[n.byte_range()])
+                    .unwrap_or("anonymous");
+
+                // Check parameters
+                if let Some(params) = node.child_by_field_name("parameters") {
+                    self.extract_parameter_types(params, code, context_name, uses);
+                }
+
+                // Check return type - try both "type" and "return_type" fields
+                if let Some(return_type) = node.child_by_field_name("type") {
+                    self.extract_type_from_annotation(&return_type, code, context_name, uses);
+                } else if let Some(return_type) = node.child_by_field_name("return_type") {
+                    self.extract_type_from_annotation(&return_type, code, context_name, uses);
+                } else {
+                    // Also look for type_annotation as a direct child (not a field)
+                    let mut cursor = node.walk();
+                    for child in node.children(&mut cursor) {
+                        if child.kind() == "type_annotation" {
+                            // Make sure it's the return type (comes after parameters)
+                            if child.start_position().column > 30 {
+                                // Heuristic: return types are usually after column 30
+                                self.extract_type_from_annotation(&child, code, context_name, uses);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Class declarations with fields
+            "class_declaration" | "abstract_class_declaration" => {
+                let class_name = node
+                    .child_by_field_name("name")
+                    .map(|n| &code[n.byte_range()])
+                    .unwrap_or("anonymous");
+
+                // Check for class_heritage which contains extends and implements
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    if child.kind() == "class_heritage" {
+                        // Look for implements_clause and extends_clause within heritage
+                        let mut heritage_cursor = child.walk();
+                        for heritage_child in child.children(&mut heritage_cursor) {
+                            if heritage_child.kind() == "implements_clause" {
+                                self.extract_implements_types(
+                                    &heritage_child,
+                                    code,
+                                    class_name,
+                                    uses,
+                                );
+                            } else if heritage_child.kind() == "extends_clause" {
+                                self.extract_extends_types(&heritage_child, code, class_name, uses);
+                            }
+                        }
+                    }
+                }
+
+                // Check class body for field types
+                if let Some(body) = node.child_by_field_name("body") {
+                    self.extract_class_field_types(&body, code, class_name, uses);
+                }
+            }
+
+            // Variable declarations with type annotations
+            "variable_declarator" => {
+                if let Some(name_node) = node.child_by_field_name("name") {
+                    let var_name = &code[name_node.byte_range()];
+
+                    // Look for type annotation
+                    if let Some(type_ann) = node.child_by_field_name("type") {
+                        self.extract_type_from_annotation(&type_ann, code, var_name, uses);
+                    }
+                }
+            }
+
+            // Interface declarations with extends
+            "interface_declaration" => {
+                let interface_name = node
+                    .child_by_field_name("name")
+                    .map(|n| &code[n.byte_range()])
+                    .unwrap_or("anonymous");
+
+                // Check extends clause - look through all children
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    if child.kind() == "extends_clause" || child.kind() == "extends_type_clause" {
+                        self.extract_extends_types(&child, code, interface_name, uses);
+                    }
+                }
+            }
+
+            _ => {}
+        }
+
+        // Recurse to children
+        for child in node.children(&mut node.walk()) {
+            self.extract_type_uses_recursive(&child, code, uses);
+        }
+    }
+
+    fn extract_parameter_types<'a>(
+        &self,
+        params_node: tree_sitter::Node,
+        code: &'a str,
+        context_name: &'a str,
+        uses: &mut Vec<(&'a str, &'a str, Range)>,
+    ) {
+        for param in params_node.children(&mut params_node.walk()) {
+            if matches!(
+                param.kind(),
+                "required_parameter" | "optional_parameter" | "rest_parameter"
+            ) {
+                if let Some(type_ann) = param.child_by_field_name("type") {
+                    self.extract_type_from_annotation(&type_ann, code, context_name, uses);
+                }
+            }
+        }
+    }
+
+    fn extract_type_from_annotation<'a>(
+        &self,
+        type_node: &tree_sitter::Node,
+        code: &'a str,
+        context_name: &'a str,
+        uses: &mut Vec<(&'a str, &'a str, Range)>,
+    ) {
+        // Find the actual type identifier
+        if let Some(type_name) = self.extract_simple_type_name(type_node, code) {
+            let range = Range::new(
+                type_node.start_position().row as u32,
+                type_node.start_position().column as u16,
+                type_node.end_position().row as u32,
+                type_node.end_position().column as u16,
+            );
+            uses.push((context_name, type_name, range));
+        }
+    }
+
+    #[allow(clippy::only_used_in_recursion)]
+    fn extract_simple_type_name<'a>(
+        &self,
+        node: &tree_sitter::Node,
+        code: &'a str,
+    ) -> Option<&'a str> {
+        match node.kind() {
+            "type_identifier" => Some(&code[node.byte_range()]),
+            "predefined_type" => Some(&code[node.byte_range()]),
+            "generic_type" => {
+                // For generic types like Array<User>, extract the base type
+                if let Some(name) = node.child_by_field_name("name") {
+                    return Some(&code[name.byte_range()]);
+                }
+                None
+            }
+            _ => {
+                // Try to find a type_identifier child
+                for child in node.children(&mut node.walk()) {
+                    if let Some(name) = self.extract_simple_type_name(&child, code) {
+                        return Some(name);
+                    }
+                }
+                None
+            }
+        }
+    }
+
+    fn extract_class_field_types<'a>(
+        &self,
+        body_node: &tree_sitter::Node,
+        code: &'a str,
+        class_name: &'a str,
+        uses: &mut Vec<(&'a str, &'a str, Range)>,
+    ) {
+        for child in body_node.children(&mut body_node.walk()) {
+            if matches!(
+                child.kind(),
+                "public_field_definition" | "property_declaration"
+            ) {
+                if let Some(type_ann) = child.child_by_field_name("type") {
+                    self.extract_type_from_annotation(&type_ann, code, class_name, uses);
+                }
+            }
+        }
+    }
+
+    fn extract_implements_types<'a>(
+        &self,
+        implements_node: &tree_sitter::Node,
+        code: &'a str,
+        class_name: &'a str,
+        uses: &mut Vec<(&'a str, &'a str, Range)>,
+    ) {
+        for child in implements_node.children(&mut implements_node.walk()) {
+            if matches!(child.kind(), "type_identifier" | "generic_type") {
+                if let Some(type_name) = self.extract_simple_type_name(&child, code) {
+                    let range = Range::new(
+                        child.start_position().row as u32,
+                        child.start_position().column as u16,
+                        child.end_position().row as u32,
+                        child.end_position().column as u16,
+                    );
+                    uses.push((class_name, type_name, range));
+                }
+            }
+        }
+    }
+
+    fn extract_extends_types<'a>(
+        &self,
+        extends_node: &tree_sitter::Node,
+        code: &'a str,
+        interface_name: &'a str,
+        uses: &mut Vec<(&'a str, &'a str, Range)>,
+    ) {
+        for child in extends_node.children(&mut extends_node.walk()) {
+            if matches!(child.kind(), "type_identifier" | "generic_type") {
+                if let Some(type_name) = self.extract_simple_type_name(&child, code) {
+                    let range = Range::new(
+                        child.start_position().row as u32,
+                        child.start_position().column as u16,
+                        child.end_position().row as u32,
+                        child.end_position().column as u16,
+                    );
+                    uses.push((interface_name, type_name, range));
+                }
+            }
+        }
+    }
+
+    #[allow(clippy::only_used_in_recursion)]
+    fn extract_method_defines_recursive<'a>(
+        &self,
+        node: &tree_sitter::Node,
+        code: &'a str,
+        defines: &mut Vec<(&'a str, &'a str, Range)>,
+    ) {
+        match node.kind() {
+            // Interface method signatures
+            "interface_declaration" => {
+                let interface_name = node
+                    .child_by_field_name("name")
+                    .map(|n| &code[n.byte_range()])
+                    .unwrap_or("anonymous");
+
+                if let Some(body) = node.child_by_field_name("body") {
+                    for child in body.children(&mut body.walk()) {
+                        if child.kind() == "method_signature" {
+                            if let Some(name_node) = child.child_by_field_name("name") {
+                                let method_name = &code[name_node.byte_range()];
+                                let range = Range::new(
+                                    child.start_position().row as u32,
+                                    child.start_position().column as u16,
+                                    child.end_position().row as u32,
+                                    child.end_position().column as u16,
+                                );
+                                defines.push((interface_name, method_name, range));
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Class method definitions
+            "class_declaration" | "abstract_class_declaration" => {
+                let class_name = node
+                    .child_by_field_name("name")
+                    .map(|n| &code[n.byte_range()])
+                    .unwrap_or("anonymous");
+
+                if let Some(body) = node.child_by_field_name("body") {
+                    for child in body.children(&mut body.walk()) {
+                        if matches!(
+                            child.kind(),
+                            "method_definition" | "abstract_method_signature"
+                        ) {
+                            if let Some(name_node) = child.child_by_field_name("name") {
+                                let method_name = &code[name_node.byte_range()];
+                                let range = Range::new(
+                                    child.start_position().row as u32,
+                                    child.start_position().column as u16,
+                                    child.end_position().row as u32,
+                                    child.end_position().column as u16,
+                                );
+                                defines.push((class_name, method_name, range));
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Type aliases with object types (method signatures in type literals)
+            "type_alias_declaration" => {
+                let type_name = node
+                    .child_by_field_name("name")
+                    .map(|n| &code[n.byte_range()])
+                    .unwrap_or("anonymous");
+
+                if let Some(value) = node.child_by_field_name("value") {
+                    if value.kind() == "object_type" {
+                        for child in value.children(&mut value.walk()) {
+                            if child.kind() == "method_signature" {
+                                if let Some(name_node) = child.child_by_field_name("name") {
+                                    let method_name = &code[name_node.byte_range()];
+                                    let range = Range::new(
+                                        child.start_position().row as u32,
+                                        child.start_position().column as u16,
+                                        child.end_position().row as u32,
+                                        child.end_position().column as u16,
+                                    );
+                                    defines.push((type_name, method_name, range));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            _ => {}
+        }
+
+        // Recurse to children
+        for child in node.children(&mut node.walk()) {
+            self.extract_method_defines_recursive(&child, code, defines);
+        }
+    }
+
     #[allow(clippy::only_used_in_recursion)]
     fn extract_method_calls_recursive(
         &self,
@@ -1270,14 +1625,32 @@ impl LanguageParser for TypeScriptParser {
         imports
     }
 
-    fn find_uses<'a>(&mut self, _code: &'a str) -> Vec<(&'a str, &'a str, Range)> {
-        // TODO: Implement type usage extraction
-        Vec::new()
+    fn find_uses<'a>(&mut self, code: &'a str) -> Vec<(&'a str, &'a str, Range)> {
+        let tree = match self.parser.parse(code, None) {
+            Some(tree) => tree,
+            None => return Vec::new(),
+        };
+
+        let root = tree.root_node();
+        let mut uses = Vec::new();
+
+        self.extract_type_uses_recursive(&root, code, &mut uses);
+
+        uses
     }
 
-    fn find_defines<'a>(&mut self, _code: &'a str) -> Vec<(&'a str, &'a str, Range)> {
-        // TODO: Implement method definition extraction
-        Vec::new()
+    fn find_defines<'a>(&mut self, code: &'a str) -> Vec<(&'a str, &'a str, Range)> {
+        let tree = match self.parser.parse(code, None) {
+            Some(tree) => tree,
+            None => return Vec::new(),
+        };
+
+        let root = tree.root_node();
+        let mut defines = Vec::new();
+
+        self.extract_method_defines_recursive(&root, code, &mut defines);
+
+        defines
     }
 
     fn language(&self) -> crate::parsing::Language {
