@@ -961,8 +961,11 @@ impl TypeScriptParser {
         let source_path = &code[source_node.byte_range()];
         let source_path = source_path.trim_matches(|c| c == '"' || c == '\'' || c == '`');
 
-        // Check what's being exported
+        // Check if it's a type-only export
         let node_text = &code[node.byte_range()];
+        let is_type_only = node_text.starts_with("export type");
+
+        // Check what's being exported
         if node_text.contains("* from") {
             // export * from './module'
             imports.push(Import {
@@ -970,7 +973,7 @@ impl TypeScriptParser {
                 alias: None,
                 file_id,
                 is_glob: true,
-                is_type_only: false, // Re-exports are not type-only
+                is_type_only,
             });
         } else {
             // Named re-exports - just track the module being imported from
@@ -979,7 +982,7 @@ impl TypeScriptParser {
                 alias: None,
                 file_id,
                 is_glob: false,
-                is_type_only: false, // Re-exports are not type-only
+                is_type_only,
             });
         }
     }
