@@ -677,9 +677,8 @@ async fn main() {
             if config.debug {
                 eprintln!("DEBUG: Creating new index");
             }
-            let skip_trait_resolver = !needs_trait_resolver;
-            let mut new_indexer =
-                SimpleIndexer::with_settings_lazy(settings.clone(), skip_trait_resolver);
+            // Create a new indexer with the given settings
+            let mut new_indexer = SimpleIndexer::with_settings_lazy(settings.clone());
             // Clear Tantivy index if force re-indexing directory
             if force_recreate_index {
                 if let Err(e) = new_indexer.clear_tantivy_index() {

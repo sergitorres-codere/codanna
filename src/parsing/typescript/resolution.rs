@@ -86,6 +86,10 @@ impl TypeScriptResolutionContext {
 }
 
 impl ResolutionScope for TypeScriptResolutionContext {
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
     fn add_symbol(&mut self, name: String, symbol_id: SymbolId, scope_level: ScopeLevel) {
         match scope_level {
             ScopeLevel::Local => {

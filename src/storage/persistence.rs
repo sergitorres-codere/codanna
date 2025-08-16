@@ -95,8 +95,9 @@ impl IndexPersistence {
         let tantivy_path = self.base_path.join("tantivy");
         if tantivy_path.join("meta.json").exists() {
             // Create indexer that will load from Tantivy
+            // Note: skip_trait_resolver no longer needed - behaviors handle resolution now
             let mut indexer = if skip_trait_resolver {
-                SimpleIndexer::with_settings_lazy(settings, skip_trait_resolver)
+                SimpleIndexer::with_settings_lazy(settings)
             } else {
                 SimpleIndexer::with_settings(settings)
             };

@@ -460,9 +460,82 @@ pub trait LanguageBehavior: Send + Sync {
         import: &crate::indexing::Import,
         document_index: &DocumentIndex,
     ) -> Option<SymbolId> {
-        // Default: Try to resolve by exact name match
-        // Languages should override with proper import resolution
-        self.resolve_import_path(&import.path, document_index)
+        // Get the importing module path for context
+        let importing_module = self.get_module_path_for_file(import.file_id);
+
+        // Use enhanced resolution with module context
+        self.resolve_import_path_with_context(
+            &import.path,
+            importing_module.as_deref(),
+            document_index,
+        )
+    }
+
+    /// Check if an import path matches a symbol's module path
+    ///
+    /// This allows each language to implement custom matching rules.
+    /// For example, Rust needs to handle relative imports where
+    /// "helpers::func" should match "crate::module::helpers::func"
+    /// when imported from "crate::module".
+    ///
+    /// # Arguments
+    /// * `import_path` - The import path as written in source
+    /// * `symbol_module_path` - The full module path of the symbol
+    /// * `importing_module` - The module doing the importing (if known)
+    ///
+    /// # Default Implementation
+    /// Exact match only. Languages should override for relative imports.
+    fn import_matches_symbol(
+        &self,
+        import_path: &str,
+        symbol_module_path: &str,
+        _importing_module: Option<&str>,
+    ) -> bool {
+        import_path == symbol_module_path
+    }
+
+    /// Get the module path for a file from behavior state
+    ///
+    /// Default implementation returns None. Languages with state tracking
+    /// should override to return the module path.
+    fn get_module_path_for_file(&self, _file_id: FileId) -> Option<String> {
+        None
+    }
+
+    /// Enhanced import path resolution with module context
+    ///
+    /// This is separate from resolve_import_path for backward compatibility.
+    /// The default implementation uses import_matches_symbol for matching.
+    fn resolve_import_path_with_context(
+        &self,
+        import_path: &str,
+        importing_module: Option<&str>,
+        document_index: &DocumentIndex,
+    ) -> Option<SymbolId> {
+        // Split the path using this language's separator
+        let separator = self.module_separator();
+        let segments: Vec<&str> = import_path.split(separator).collect();
+
+        if segments.is_empty() {
+            return None;
+        }
+
+        // The symbol name is the last segment
+        let symbol_name = segments.last()?;
+
+        // Find symbols with this name (using index for performance)
+        let candidates = document_index.find_symbols_by_name(symbol_name).ok()?;
+
+        // Find the one with matching module path using language-specific rules
+        for candidate in &candidates {
+            if let Some(module_path) = &candidate.module_path {
+                if self.import_matches_symbol(import_path, module_path.as_ref(), importing_module) {
+                    return Some(candidate.id);
+                }
+            }
+        }
+
+        None
     }
 }
 

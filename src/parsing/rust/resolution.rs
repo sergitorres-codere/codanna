@@ -56,9 +56,40 @@ impl RustResolutionContext {
     pub fn add_import(&mut self, path: String, alias: Option<String>) {
         self.imports.push((path, alias));
     }
+
+    // Methods compatible with old ResolutionContext API
+
+    /// Add a local variable or parameter to the current scope
+    pub fn add_local(&mut self, name: String, symbol_id: SymbolId) {
+        self.local_scope.insert(name, symbol_id);
+    }
+
+    /// Add an imported symbol with resolved SymbolId
+    pub fn add_import_symbol(&mut self, name: String, symbol_id: SymbolId, _is_aliased: bool) {
+        self.imported_symbols.insert(name, symbol_id);
+    }
+
+    /// Add a module-level symbol from the current file
+    pub fn add_module_symbol(&mut self, name: String, symbol_id: SymbolId) {
+        self.module_symbols.insert(name, symbol_id);
+    }
+
+    /// Add a crate-level public symbol
+    pub fn add_crate_symbol(&mut self, name: String, symbol_id: SymbolId) {
+        self.crate_symbols.insert(name, symbol_id);
+    }
+
+    /// Check if a symbol with the given name was imported
+    pub fn is_imported(&self, name: &str) -> bool {
+        self.imported_symbols.contains_key(name)
+    }
 }
 
 impl ResolutionScope for RustResolutionContext {
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
     fn add_symbol(&mut self, name: String, symbol_id: SymbolId, scope_level: ScopeLevel) {
         match scope_level {
             ScopeLevel::Local => {
@@ -158,6 +189,7 @@ impl ResolutionScope for RustResolutionContext {
 /// - Trait implementations
 /// - Inherent methods
 /// - Method resolution with Rust's preference rules
+#[derive(Clone)]
 pub struct RustTraitResolver {
     /// Maps type names to traits they implement
     /// Key: "TypeName", Value: Vec<("TraitName", file_id)>

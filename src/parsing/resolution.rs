@@ -45,6 +45,9 @@ pub trait ResolutionScope: Send + Sync {
 
     /// Get all symbols currently in scope (for debugging)
     fn symbols_in_scope(&self) -> Vec<(String, SymbolId, ScopeLevel)>;
+
+    /// Get as Any for downcasting (needed for language-specific operations)
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
 }
 
 /// Language-agnostic inheritance resolver
@@ -108,6 +111,10 @@ impl GenericResolutionContext {
 }
 
 impl ResolutionScope for GenericResolutionContext {
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
     fn add_symbol(&mut self, name: String, symbol_id: SymbolId, scope_level: ScopeLevel) {
         self.symbols
             .entry(scope_level)

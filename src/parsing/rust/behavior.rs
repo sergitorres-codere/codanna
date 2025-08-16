@@ -6,6 +6,7 @@ use crate::Visibility;
 use crate::parsing::behavior_state::{BehaviorState, StatefulBehavior};
 use crate::parsing::{InheritanceResolver, LanguageBehavior, ResolutionScope};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, RwLock};
 use tree_sitter::Language;
 
 /// Rust language behavior implementation
@@ -13,6 +14,7 @@ use tree_sitter::Language;
 pub struct RustBehavior {
     language: Language,
     state: BehaviorState,
+    trait_resolver: Arc<RwLock<RustTraitResolver>>,
 }
 
 impl RustBehavior {
@@ -21,6 +23,7 @@ impl RustBehavior {
         Self {
             language: tree_sitter_rust::LANGUAGE.into(),
             state: BehaviorState::new(),
+            trait_resolver: Arc::new(RwLock::new(RustTraitResolver::new())),
         }
     }
 }
@@ -110,28 +113,35 @@ impl LanguageBehavior for RustBehavior {
     }
 
     fn create_inheritance_resolver(&self) -> Box<dyn InheritanceResolver> {
-        Box::new(RustTraitResolver::new())
+        // Clone the current state of the trait resolver
+        // This is a snapshot at this point in time
+        let resolver = self.trait_resolver.read().unwrap();
+        Box::new(resolver.clone())
     }
 
-    fn add_trait_impl(&self, _type_name: String, _trait_name: String, _file_id: FileId) {
-        // This will be properly integrated in Sprint 4 when SimpleIndexer is updated
-        // For now, this is a placeholder that maintains the interface
-        eprintln!("RustBehavior::add_trait_impl called - will be integrated in Sprint 4");
+    fn add_trait_impl(&self, type_name: String, trait_name: String, file_id: FileId) {
+        // Activate the actual functionality from RustTraitResolver
+        let mut resolver = self.trait_resolver.write().unwrap();
+        resolver.add_trait_impl(type_name, trait_name, file_id);
     }
 
-    fn add_inherent_methods(&self, _type_name: String, _methods: Vec<String>) {
-        // This will be properly integrated in Sprint 4 when SimpleIndexer is updated
-        eprintln!("RustBehavior::add_inherent_methods called - will be integrated in Sprint 4");
+    fn add_inherent_methods(&self, type_name: String, methods: Vec<String>) {
+        // Activate the actual functionality from RustTraitResolver
+        let mut resolver = self.trait_resolver.write().unwrap();
+        resolver.add_inherent_methods(type_name, methods);
     }
 
-    fn add_trait_methods(&self, _trait_name: String, _methods: Vec<String>) {
-        // This will be properly integrated in Sprint 4 when SimpleIndexer is updated
-        eprintln!("RustBehavior::add_trait_methods called - will be integrated in Sprint 4");
+    fn add_trait_methods(&self, trait_name: String, methods: Vec<String>) {
+        // Activate the actual functionality from RustTraitResolver
+        let mut resolver = self.trait_resolver.write().unwrap();
+        resolver.add_trait_methods(trait_name, methods);
     }
 
     fn resolve_method_trait(&self, _type_name: &str, _method: &str) -> Option<&str> {
-        // This will be properly integrated in Sprint 4 when SimpleIndexer is updated
-        // For now, return None to maintain backward compatibility
+        // Note: Due to the lifetime constraints of returning &str from a RwLock,
+        // we can't implement this directly. The actual resolution happens through
+        // create_inheritance_resolver() which returns a snapshot of the resolver.
+        // This will be addressed when we change the API to return String instead of &str.
         None
     }
 
@@ -196,6 +206,51 @@ impl LanguageBehavior for RustBehavior {
             }
             Visibility::Private => false,
         }
+    }
+
+    fn get_module_path_for_file(&self, file_id: FileId) -> Option<String> {
+        // Use the BehaviorState to get module path (O(1) lookup)
+        self.state.get_module_path(file_id)
+    }
+
+    fn import_matches_symbol(
+        &self,
+        import_path: &str,
+        symbol_module_path: &str,
+        importing_module: Option<&str>,
+    ) -> bool {
+        // Case 1: Exact match (most common case, check first for performance)
+        if import_path == symbol_module_path {
+            return true;
+        }
+
+        // Case 2: Only do complex matching if we have the importing module context
+        if let Some(importing_mod) = importing_module {
+            // Check if it's a relative import (doesn't start with crate:: or std libs)
+            if !import_path.starts_with("crate::")
+                && !import_path.starts_with("std::")
+                && !import_path.starts_with("core::")
+                && !import_path.starts_with("alloc::")
+            {
+                // Try as relative to importing module
+                // Example: helpers::func in crate::module -> crate::module::helpers::func
+                let candidate = format!("{importing_mod}::{import_path}");
+                if candidate == symbol_module_path {
+                    return true;
+                }
+
+                // Try as sibling module (same parent)
+                // Example: In crate::module::submodule, helpers::func -> crate::module::helpers::func
+                if let Some(parent) = importing_mod.rsplit_once("::") {
+                    let sibling = format!("{}::{}", parent.0, import_path);
+                    if sibling == symbol_module_path {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        false
     }
 }
 
