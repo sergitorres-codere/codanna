@@ -149,6 +149,83 @@ impl LanguageBehavior for TypeScriptBehavior {
         self.get_imports_from_state(file_id)
     }
 
+    fn build_resolution_context(
+        &self,
+        file_id: FileId,
+        document_index: &DocumentIndex,
+    ) -> crate::error::IndexResult<Box<dyn ResolutionScope>> {
+        use crate::error::IndexError;
+
+        // Create TypeScript-specific resolution context
+        let mut context = TypeScriptResolutionContext::new(file_id);
+
+        // 1. Add imported symbols (using behavior's tracked imports)
+        let imports = self.get_imports_for_file(file_id);
+        for import in imports {
+            if let Some(symbol_id) = self.resolve_import(&import, document_index) {
+                // Use alias if provided, otherwise use the last segment of the path
+                let name = if let Some(alias) = &import.alias {
+                    alias.clone()
+                } else {
+                    import
+                        .path
+                        .split(self.module_separator())
+                        .last()
+                        .unwrap_or(&import.path)
+                        .to_string()
+                };
+
+                // Use the is_type_only field to determine where to place the import
+                context.add_import_symbol(name, symbol_id, import.is_type_only);
+            }
+        }
+
+        // 2. Add file's module-level symbols with proper scope context
+        let file_symbols =
+            document_index
+                .find_symbols_by_file(file_id)
+                .map_err(|e| IndexError::TantivyError {
+                    operation: "find_symbols_by_file".to_string(),
+                    cause: e.to_string(),
+                })?;
+
+        for symbol in file_symbols {
+            if self.is_resolvable_symbol(&symbol) {
+                // Use the new method that respects scope_context for hoisting
+                context.add_symbol_with_context(
+                    symbol.name.to_string(),
+                    symbol.id,
+                    symbol.scope_context.as_ref(),
+                );
+            }
+        }
+
+        // 3. Add visible symbols from other files (public/exported symbols)
+        // Note: This is expensive, so we limit to a reasonable number
+        let all_symbols =
+            document_index
+                .get_all_symbols(10000)
+                .map_err(|e| IndexError::TantivyError {
+                    operation: "get_all_symbols".to_string(),
+                    cause: e.to_string(),
+                })?;
+
+        for symbol in all_symbols {
+            // Only add if visible from this file
+            if symbol.file_id != file_id && self.is_symbol_visible_from_file(&symbol, file_id) {
+                // Global symbols go to global scope, others to module scope
+                let scope_level = match symbol.visibility {
+                    Visibility::Public => crate::parsing::ScopeLevel::Global,
+                    _ => crate::parsing::ScopeLevel::Module,
+                };
+
+                context.add_symbol(symbol.name.to_string(), symbol.id, scope_level);
+            }
+        }
+
+        Ok(Box::new(context))
+    }
+
     // TypeScript-specific: Support hoisting
     fn is_resolvable_symbol(&self, symbol: &crate::Symbol) -> bool {
         use crate::SymbolKind;

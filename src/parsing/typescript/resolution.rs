@@ -54,7 +54,8 @@ pub struct TypeScriptResolutionContext {
     global_symbols: HashMap<String, SymbolId>,
 
     /// Type space symbols (interfaces, type aliases)
-    /// TODO(Sprint 4): NEVER POPULATED - needs parser to identify type-only symbols
+    /// NOTE: Currently populated via add_import_symbol() for type-only imports.
+    /// TODO: Extend Import struct to track is_type_only flag for proper population.
     type_space: HashMap<String, SymbolId>,
 
     /// Track nested scopes (blocks, functions, etc.)
@@ -83,6 +84,68 @@ impl TypeScriptResolutionContext {
     pub fn add_import(&mut self, path: String, alias: Option<String>) {
         self.imports.push((path, alias));
     }
+
+    /// Add an imported symbol to the context
+    ///
+    /// This is called when an import is resolved to add the symbol to the appropriate space.
+    /// Type-only imports go to the type space, others to imported_symbols.
+    pub fn add_import_symbol(&mut self, name: String, symbol_id: SymbolId, is_type_only: bool) {
+        if is_type_only {
+            // Type-only imports are only available in type contexts
+            self.type_space.insert(name, symbol_id);
+        } else {
+            // Regular imports are available everywhere
+            self.imported_symbols.insert(name, symbol_id);
+        }
+    }
+
+    /// Add a symbol with proper scope context
+    ///
+    /// This method uses the symbol's scope_context to determine proper placement.
+    /// Functions are hoisted, let/const are block-scoped, var is function-scoped.
+    pub fn add_symbol_with_context(
+        &mut self,
+        name: String,
+        symbol_id: SymbolId,
+        scope_context: Option<&crate::symbol::ScopeContext>,
+    ) {
+        use crate::symbol::ScopeContext;
+
+        match scope_context {
+            Some(ScopeContext::Local { hoisted: true }) => {
+                // Hoisted declarations (functions, var)
+                self.hoisted_scope.insert(name, symbol_id);
+            }
+            Some(ScopeContext::Local { hoisted: false }) => {
+                // Block-scoped declarations (let, const, arrow functions)
+                self.local_scope.insert(name, symbol_id);
+            }
+            Some(ScopeContext::ClassMember) => {
+                // Class members go to local scope within the class
+                self.local_scope.insert(name, symbol_id);
+            }
+            Some(ScopeContext::Parameter) => {
+                // Function parameters are local
+                self.local_scope.insert(name, symbol_id);
+            }
+            Some(ScopeContext::Module) => {
+                // Module-level declarations
+                self.module_symbols.insert(name, symbol_id);
+            }
+            Some(ScopeContext::Package) => {
+                // Imported symbols
+                self.imported_symbols.insert(name, symbol_id);
+            }
+            Some(ScopeContext::Global) => {
+                // Global/ambient declarations
+                self.global_symbols.insert(name, symbol_id);
+            }
+            None => {
+                // Default to local scope if no context
+                self.local_scope.insert(name, symbol_id);
+            }
+        }
+    }
 }
 
 impl ResolutionScope for TypeScriptResolutionContext {
@@ -93,16 +156,11 @@ impl ResolutionScope for TypeScriptResolutionContext {
     fn add_symbol(&mut self, name: String, symbol_id: SymbolId, scope_level: ScopeLevel) {
         match scope_level {
             ScopeLevel::Local => {
-                // TODO(Sprint 4): CRITICAL - Replace heuristic with AST-based detection
-                // Current implementation uses name prefix which is WRONG
-                // Need: Parser to provide actual declaration type (var/let/const/function)
-                // Impact: Hoisting behavior is currently incorrect for real TypeScript
-                if name.starts_with("function") {
-                    // HACK: Should check AST node type
-                    self.hoisted_scope.insert(name, symbol_id);
-                } else {
-                    self.local_scope.insert(name, symbol_id);
-                }
+                // NOTE: This method doesn't have access to hoisting information.
+                // For proper hoisting behavior, use add_symbol_with_context() instead,
+                // which uses the symbol's scope_context from the parser.
+                // For now, we add to local scope (non-hoisted) by default.
+                self.local_scope.insert(name, symbol_id);
             }
             ScopeLevel::Module => {
                 self.module_symbols.insert(name, symbol_id);

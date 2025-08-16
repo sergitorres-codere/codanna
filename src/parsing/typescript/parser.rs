@@ -803,6 +803,9 @@ impl TypeScriptParser {
         // Debug: print all children
         let mut cursor = node.walk();
         eprintln!("  Node has {} children:", node.child_count());
+
+        // Check if this is a type-only import (has 'type' keyword after 'import')
+        let mut is_type_only = false;
         for (i, child) in node.children(&mut cursor).enumerate() {
             eprintln!(
                 "    child[{}]: kind='{}', field_name={:?}",
@@ -810,6 +813,11 @@ impl TypeScriptParser {
                 child.kind(),
                 node.field_name_for_child(i as u32)
             );
+            // Check for 'type' keyword (appears in type-only imports)
+            if child.kind() == "type" && i == 1 {
+                is_type_only = true;
+                eprintln!("    Detected type-only import!");
+            }
         }
 
         // Get the source (the module being imported from)
@@ -890,6 +898,7 @@ impl TypeScriptParser {
                     alias: namespace_name,
                     file_id,
                     is_glob: true,
+                    is_type_only,
                 });
             } else if has_default && has_named {
                 // Mixed import: import React, { Component } from 'react'
@@ -899,15 +908,19 @@ impl TypeScriptParser {
                     alias: default_name,
                     file_id,
                     is_glob: false,
+                    is_type_only,
                 });
             } else if has_default {
                 // Default only: import React from 'react'
-                eprintln!("  Adding default import: path='{source_path}', alias={default_name:?}");
+                eprintln!(
+                    "  Adding default import: path='{source_path}', alias={default_name:?}, type_only={is_type_only}"
+                );
                 imports.push(Import {
                     path: source_path.to_string(),
                     alias: default_name,
                     file_id,
                     is_glob: false,
+                    is_type_only,
                 });
             } else if has_named {
                 // Named only: import { Component } from 'react'
@@ -916,6 +929,7 @@ impl TypeScriptParser {
                     alias: None,
                     file_id,
                     is_glob: false,
+                    is_type_only,
                 });
             }
         } else {
@@ -925,6 +939,7 @@ impl TypeScriptParser {
                 alias: None,
                 file_id,
                 is_glob: false,
+                is_type_only: false, // Side-effect imports are never type-only
             });
         }
     }
@@ -955,6 +970,7 @@ impl TypeScriptParser {
                 alias: None,
                 file_id,
                 is_glob: true,
+                is_type_only: false, // Re-exports are not type-only
             });
         } else {
             // Named re-exports - just track the module being imported from
@@ -963,6 +979,7 @@ impl TypeScriptParser {
                 alias: None,
                 file_id,
                 is_glob: false,
+                is_type_only: false, // Re-exports are not type-only
             });
         }
     }

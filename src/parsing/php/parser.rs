@@ -957,6 +957,7 @@ impl PhpParser {
                             alias,
                             is_glob: false,
                             file_id,
+                            is_type_only: false,
                         });
                     }
                 }
@@ -982,6 +983,7 @@ impl PhpParser {
                         alias: None,
                         is_glob: false,
                         file_id,
+                        is_type_only: false,
                     });
                 }
             }

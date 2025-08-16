@@ -132,6 +132,7 @@ impl RustParser {
                     alias: None,
                     file_id,
                     is_glob: false,
+                    is_type_only: false,
                 });
             }
             "scoped_identifier" => {
@@ -142,6 +143,7 @@ impl RustParser {
                     alias: None,
                     file_id,
                     is_glob: false,
+                    is_type_only: false,
                 });
             }
             "use_as_clause" => {
@@ -155,6 +157,7 @@ impl RustParser {
                             alias: Some(alias),
                             file_id,
                             is_glob: false,
+                            is_type_only: false,
                         });
                     }
                 }
@@ -170,6 +173,7 @@ impl RustParser {
                             alias: None,
                             file_id,
                             is_glob: true,
+                            is_type_only: false,
                         });
                         break;
                     }
@@ -229,6 +233,7 @@ impl RustParser {
                     alias: None,
                     file_id,
                     is_glob: false,
+                    is_type_only: false,
                 });
             }
             "use_as_clause" => {
@@ -246,6 +251,7 @@ impl RustParser {
                             alias: Some(alias),
                             file_id,
                             is_glob: false,
+                            is_type_only: false,
                         });
                     }
                 }

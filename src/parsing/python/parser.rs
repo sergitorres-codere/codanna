@@ -741,6 +741,7 @@ impl PythonParser {
                     alias: None,
                     file_id,
                     is_glob: false,
+                    is_type_only: false,
                 });
             }
         }
@@ -764,6 +765,7 @@ impl PythonParser {
                     alias: None,
                     file_id,
                     is_glob: true,
+                    is_type_only: false,
                 });
             } else {
                 // Process individual imports
@@ -821,6 +823,7 @@ impl PythonParser {
                         alias: None,
                         file_id,
                         is_glob: false,
+                        is_type_only: false,
                     });
                 }
                 "aliased_import" => {
@@ -854,6 +857,7 @@ impl PythonParser {
                 alias: alias.map(|s| s.to_string()),
                 file_id,
                 is_glob: false,
+                is_type_only: false,
             });
         }
     }

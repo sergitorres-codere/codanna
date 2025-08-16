@@ -31,6 +31,8 @@ pub struct Import {
     pub file_id: FileId,
     /// Whether this is a glob import (e.g., "use foo::*")
     pub is_glob: bool,
+    /// Whether this is a type-only import (TypeScript: `import type { Foo }`)
+    pub is_type_only: bool,
 }
 
 /// Tracks module structure and imports across files
@@ -325,6 +327,7 @@ mod tests {
             alias: None,
             file_id: file_id_2,
             is_glob: false,
+            is_type_only: false,
         });
 
         // Verify file registration

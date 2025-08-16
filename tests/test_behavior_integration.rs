@@ -416,6 +416,7 @@ fn test_new_behavior_methods_exist() {
             alias: Some("test".into()),
             file_id,
             is_glob: false,
+            is_type_only: false,
         });
 
         behavior.register_file(
