@@ -8,6 +8,9 @@ pub mod trait_resolver;
 pub mod transaction;
 pub mod walker;
 
+#[cfg(test)]
+mod cutover_test;
+
 pub use file_info::{FileInfo, calculate_hash, get_utc_timestamp};
 pub use fs_watcher::{FileSystemWatcher, WatchError};
 pub use progress::IndexStats;

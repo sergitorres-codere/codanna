@@ -76,7 +76,8 @@ tempfile = "3.20.0"
 testcontainers = "0.15"
 
 [features]
-default = []
+default = ["use-legacy-resolution"]
+use-legacy-resolution = []  # Keep old TraitResolver/ImportResolver system (will be removed in v0.5)
 http-server = ["axum", "tower", "tower-http"]
 https-server = ["http-server", "axum-server", "rustls", "rcgen"]
 axum = ["dep:axum"]

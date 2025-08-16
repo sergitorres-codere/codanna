@@ -2,9 +2,10 @@
 //! This version uses Tantivy as the single source of truth for all data
 
 use crate::indexing::{
-    FileWalker, ImportResolver, IndexStats, IndexTransaction, ResolutionContext, TraitResolver,
-    calculate_hash, get_utc_timestamp,
+    FileWalker, IndexStats, IndexTransaction, ResolutionContext, calculate_hash, get_utc_timestamp,
 };
+#[cfg(feature = "use-legacy-resolution")]
+use crate::indexing::{ImportResolver, TraitResolver};
 use crate::parsing::{LanguageId, MethodCall, ParserFactory, get_registry};
 use crate::relationship::RelationshipMetadata;
 use crate::semantic::SimpleSemanticSearch;
@@ -63,7 +64,9 @@ struct UnresolvedRelationship {
 /// The main indexer struct that handles parsing and indexing of source code
 pub struct SimpleIndexer {
     parser_factory: ParserFactory,
+    #[cfg(feature = "use-legacy-resolution")]
     import_resolver: ImportResolver,
+    #[cfg(feature = "use-legacy-resolution")]
     trait_resolver: TraitResolver,
     settings: Arc<Settings>,
     document_index: DocumentIndex,
@@ -118,6 +121,7 @@ impl SimpleIndexer {
         let document_index =
             DocumentIndex::new(tantivy_path).expect("Failed to create Tantivy index");
 
+        #[allow(unused_variables)]
         let debug = settings.debug;
 
         // Try to load symbol cache if it exists
@@ -125,7 +129,9 @@ impl SimpleIndexer {
 
         let mut indexer = Self {
             parser_factory: ParserFactory::new(settings.clone()),
+            #[cfg(feature = "use-legacy-resolution")]
             import_resolver: ImportResolver::with_debug(debug),
+            #[cfg(feature = "use-legacy-resolution")]
             trait_resolver: TraitResolver::new(),
             settings,
             document_index,
@@ -173,11 +179,14 @@ impl SimpleIndexer {
         let document_index =
             DocumentIndex::new(tantivy_path).expect("Failed to create Tantivy index");
 
+        #[allow(unused_variables)]
         let debug = settings.debug;
 
         let mut indexer = Self {
             parser_factory: ParserFactory::new(settings.clone()),
+            #[cfg(feature = "use-legacy-resolution")]
             import_resolver: ImportResolver::with_debug(debug),
+            #[cfg(feature = "use-legacy-resolution")]
             trait_resolver: TraitResolver::new(),
             settings,
             document_index,
@@ -665,13 +674,17 @@ impl SimpleIndexer {
             );
             // Use behavior's register_file method instead of ImportResolver
             behavior.register_file(path.to_path_buf(), file_id, mod_path.clone());
-            // Still register with ImportResolver for now (will remove later)
-            self.import_resolver.register_file(
-                path.to_path_buf(),
-                file_id,
-                mod_path.clone(),
-                language_id,
-            );
+
+            #[cfg(feature = "use-legacy-resolution")]
+            {
+                // Still register with ImportResolver when using legacy resolution
+                self.import_resolver.register_file(
+                    path.to_path_buf(),
+                    file_id,
+                    mod_path.clone(),
+                    language_id,
+                );
+            }
         } else {
             debug_print!(self, "No module path for file {:?}", path);
         }
@@ -830,8 +843,17 @@ impl SimpleIndexer {
         for import in imports {
             // Use behavior's add_import method instead of ImportResolver
             behavior.add_import(import.clone());
-            // Still add to ImportResolver for now (will remove later)
-            self.import_resolver.add_import(import);
+
+            #[cfg(feature = "use-legacy-resolution")]
+            {
+                // Still add to ImportResolver when using legacy resolution
+                self.import_resolver.add_import(import);
+            }
+            #[cfg(not(feature = "use-legacy-resolution"))]
+            {
+                // With new system, behaviors handle this directly
+                let _ = import;
+            }
         }
 
         // Track traits for later use in relationship extraction
@@ -1020,12 +1042,16 @@ impl SimpleIndexer {
             );
             // Use behavior's add_trait_impl method instead of TraitResolver
             behavior.add_trait_impl(type_name.to_string(), trait_name.to_string(), file_id);
-            // Still register with trait resolver for now (will remove later)
-            self.trait_resolver.add_trait_impl(
-                type_name.to_string(),
-                trait_name.to_string(),
-                file_id,
-            );
+
+            #[cfg(feature = "use-legacy-resolution")]
+            {
+                // Still register with trait resolver when using legacy resolution
+                self.trait_resolver.add_trait_impl(
+                    type_name.to_string(),
+                    trait_name.to_string(),
+                    file_id,
+                );
+            }
             self.add_relationships_by_name(
                 type_name,
                 trait_name,
@@ -1079,8 +1105,12 @@ impl SimpleIndexer {
                 for (type_name, methods) in methods_by_type {
                     // Use behavior's add_inherent_methods
                     behavior.add_inherent_methods(type_name.clone(), methods.clone());
-                    // Still register with trait resolver for now (will remove later)
-                    self.trait_resolver.add_inherent_methods(type_name, methods);
+
+                    #[cfg(feature = "use-legacy-resolution")]
+                    {
+                        // Still register with trait resolver when using legacy resolution
+                        self.trait_resolver.add_inherent_methods(type_name, methods);
+                    }
                 }
             }
         }
@@ -1126,19 +1156,30 @@ impl SimpleIndexer {
                             definer_name
                         );
                         // Update behavior with method info
-                        let existing_methods = self
-                            .trait_resolver
-                            .get_trait_methods(definer_name)
-                            .unwrap_or_default();
-                        let mut methods = existing_methods;
-                        let method_name_str = method_name.to_string();
-                        if !methods.contains(&method_name_str) {
-                            methods.push(method_name_str.clone());
-                            // Use behavior's add_trait_methods
-                            behavior.add_trait_methods(definer_name.to_string(), methods.clone());
-                            // Still update trait resolver for now (will remove later)
-                            self.trait_resolver
-                                .add_trait_methods(definer_name.to_string(), methods);
+                        #[cfg(feature = "use-legacy-resolution")]
+                        {
+                            let existing_methods = self
+                                .trait_resolver
+                                .get_trait_methods(definer_name)
+                                .unwrap_or_default();
+                            let mut methods = existing_methods;
+                            let method_name_str = method_name.to_string();
+                            if !methods.contains(&method_name_str) {
+                                methods.push(method_name_str.clone());
+                                // Use behavior's add_trait_methods
+                                behavior
+                                    .add_trait_methods(definer_name.to_string(), methods.clone());
+                                // Still update trait resolver for now (will remove later)
+                                self.trait_resolver
+                                    .add_trait_methods(definer_name.to_string(), methods);
+                            }
+                        }
+                        #[cfg(not(feature = "use-legacy-resolution"))]
+                        {
+                            // With new system, just use behavior directly
+                            let method_name_str = method_name.to_string();
+                            behavior
+                                .add_trait_methods(definer_name.to_string(), vec![method_name_str]);
                         }
                     }
                 }
@@ -1695,7 +1736,7 @@ impl SimpleIndexer {
     }
 
     /// Get import resolver for testing
-    #[cfg(test)]
+    #[cfg(all(test, feature = "use-legacy-resolution"))]
     pub fn import_resolver(&self) -> &ImportResolver {
         &self.import_resolver
     }
@@ -1791,7 +1832,9 @@ impl SimpleIndexer {
     /// Clear the Tantivy index
     pub fn clear_tantivy_index(&mut self) -> IndexResult<()> {
         // Clear trait resolver data as well
+        #[cfg(feature = "use-legacy-resolution")]
         self.trait_resolver.clear();
+
         self.trait_symbols_by_file.clear();
         self.variable_types.clear();
 
@@ -1992,11 +2035,15 @@ impl SimpleIndexer {
 
             if let (Some(type_sym), Some(trait_sym)) = (type_symbol, trait_symbol) {
                 debug_print!(self, "{} implements {}", type_sym.name, trait_sym.name);
-                self.trait_resolver.add_trait_impl(
-                    type_sym.name.to_string(),
-                    trait_sym.name.to_string(),
-                    type_sym.file_id,
-                );
+
+                #[cfg(feature = "use-legacy-resolution")]
+                {
+                    self.trait_resolver.add_trait_impl(
+                        type_sym.name.to_string(),
+                        trait_sym.name.to_string(),
+                        type_sym.file_id,
+                    );
+                }
             }
         }
 
@@ -2050,8 +2097,16 @@ impl SimpleIndexer {
         }
 
         // Update trait resolver
-        for (trait_name, methods) in trait_methods {
-            self.trait_resolver.add_trait_methods(trait_name, methods);
+        #[cfg(feature = "use-legacy-resolution")]
+        {
+            for (trait_name, methods) in trait_methods {
+                self.trait_resolver.add_trait_methods(trait_name, methods);
+            }
+        }
+        #[cfg(not(feature = "use-legacy-resolution"))]
+        {
+            // With new system, behaviors handle this directly
+            let _ = trait_methods;
         }
 
         Ok(())
@@ -2155,28 +2210,35 @@ impl SimpleIndexer {
             Ok(b) => b,
             Err(_) => {
                 // Fallback to old resolver if no behavior available
-                match self
-                    .trait_resolver
-                    .resolve_method_trait(type_name, method_name)
+                #[cfg(feature = "use-legacy-resolution")]
                 {
-                    Some(trait_name) => {
-                        let trait_method = format!("{trait_name}::{method_name}");
-                        return context
-                            .resolve(&trait_method)
-                            .or_else(|| context.resolve(method_name));
-                    }
-                    None => {
-                        if self
-                            .trait_resolver
-                            .is_inherent_method(type_name, method_name)
-                        {
-                            let type_method = format!("{type_name}::{method_name}");
+                    match self
+                        .trait_resolver
+                        .resolve_method_trait(type_name, method_name)
+                    {
+                        Some(trait_name) => {
+                            let trait_method = format!("{trait_name}::{method_name}");
                             return context
-                                .resolve(&type_method)
+                                .resolve(&trait_method)
                                 .or_else(|| context.resolve(method_name));
                         }
-                        return None;
+                        None => {
+                            if self
+                                .trait_resolver
+                                .is_inherent_method(type_name, method_name)
+                            {
+                                let type_method = format!("{type_name}::{method_name}");
+                                return context
+                                    .resolve(&type_method)
+                                    .or_else(|| context.resolve(method_name));
+                            }
+                            return None;
+                        }
                     }
+                }
+                #[cfg(not(feature = "use-legacy-resolution"))]
+                {
+                    return None;
                 }
             }
         };
@@ -2200,41 +2262,50 @@ impl SimpleIndexer {
             None => {
                 // For now, still check with trait_resolver for inherent methods
                 // (behaviors don't have is_inherent_method yet)
-                if self
-                    .trait_resolver
-                    .is_inherent_method(type_name, method_name)
+                #[cfg(feature = "use-legacy-resolution")]
                 {
-                    debug_print!(
-                        self,
-                        "Method {} is inherent on type {}",
-                        method_name,
-                        type_name
-                    );
-                    let type_method = format!("{type_name}::{method_name}");
-                    let result = context
-                        .resolve(&type_method)
-                        .or_else(|| context.resolve(method_name));
-                    debug_print!(
-                        self,
-                        "Inherent method resolution result for {}: {:?}",
-                        method_name,
+                    if self
+                        .trait_resolver
+                        .is_inherent_method(type_name, method_name)
+                    {
+                        debug_print!(
+                            self,
+                            "Method {} is inherent on type {}",
+                            method_name,
+                            type_name
+                        );
+                        let type_method = format!("{type_name}::{method_name}");
+                        let result = context
+                            .resolve(&type_method)
+                            .or_else(|| context.resolve(method_name));
+                        debug_print!(
+                            self,
+                            "Inherent method resolution result for {}: {:?}",
+                            method_name,
+                            result
+                        );
                         result
-                    );
-                    result
-                } else {
-                    debug_print!(
-                        self,
-                        "Method {} not found on type {}",
-                        method_name,
-                        type_name
-                    );
+                    } else {
+                        debug_print!(
+                            self,
+                            "Method {} not found on type {}",
+                            method_name,
+                            type_name
+                        );
+                        let result = context.resolve(method_name);
+                        debug_print!(
+                            self,
+                            "Direct resolution result for {}: {:?}",
+                            method_name,
+                            result
+                        );
+                        result
+                    }
+                }
+                #[cfg(not(feature = "use-legacy-resolution"))]
+                {
+                    // Without legacy resolution, just try direct resolution
                     let result = context.resolve(method_name);
-                    debug_print!(
-                        self,
-                        "Direct resolution result for {}: {:?}",
-                        method_name,
-                        result
-                    );
                     result
                 }
             }
@@ -2299,72 +2370,80 @@ impl SimpleIndexer {
         debug_print!(self, "Found type for {}: {}", receiver, type_name);
 
         // Check if method comes from a trait
-        match self
-            .trait_resolver
-            .resolve_method_trait(type_name, &method_call.method_name)
+        #[cfg(feature = "use-legacy-resolution")]
         {
-            Some(trait_name) => {
-                debug_print!(
-                    self,
-                    "Method {} comes from trait {}",
-                    method_call.method_name,
-                    trait_name
-                );
-                // Try trait::method resolution first
-                let trait_method = format!("{}::{}", trait_name, method_call.method_name);
-                let result = context
-                    .resolve(&trait_method)
-                    .or_else(|| context.resolve(&method_call.method_name));
-                debug_print!(
-                    self,
-                    "Resolution result for {}: {:?}",
-                    method_call.method_name,
-                    result
-                );
-                result
-            }
-            None => {
-                // Could be an inherent method or not exist
-                if self
-                    .trait_resolver
-                    .is_inherent_method(type_name, &method_call.method_name)
-                {
+            match self
+                .trait_resolver
+                .resolve_method_trait(type_name, &method_call.method_name)
+            {
+                Some(trait_name) => {
                     debug_print!(
                         self,
-                        "Method {} is inherent on type {}",
+                        "Method {} comes from trait {}",
                         method_call.method_name,
-                        type_name
+                        trait_name
                     );
-                    // Try Type::method format for inherent methods
-                    let type_method = format!("{}::{}", type_name, method_call.method_name);
+                    // Try trait::method resolution first
+                    let trait_method = format!("{}::{}", trait_name, method_call.method_name);
                     let result = context
-                        .resolve(&type_method)
+                        .resolve(&trait_method)
                         .or_else(|| context.resolve(&method_call.method_name));
                     debug_print!(
                         self,
-                        "Inherent method resolution result for {}: {:?}",
-                        method_call.method_name,
-                        result
-                    );
-                    result
-                } else {
-                    debug_print!(
-                        self,
-                        "Method {} not found on type {}",
-                        method_call.method_name,
-                        type_name
-                    );
-                    // Last resort - try to resolve just the method name
-                    let result = context.resolve(&method_call.method_name);
-                    debug_print!(
-                        self,
-                        "Direct resolution result for {}: {:?}",
+                        "Resolution result for {}: {:?}",
                         method_call.method_name,
                         result
                     );
                     result
                 }
+                None => {
+                    // Could be an inherent method or not exist
+                    if self
+                        .trait_resolver
+                        .is_inherent_method(type_name, &method_call.method_name)
+                    {
+                        debug_print!(
+                            self,
+                            "Method {} is inherent on type {}",
+                            method_call.method_name,
+                            type_name
+                        );
+                        // Try Type::method format for inherent methods
+                        let type_method = format!("{}::{}", type_name, method_call.method_name);
+                        let result = context
+                            .resolve(&type_method)
+                            .or_else(|| context.resolve(&method_call.method_name));
+                        debug_print!(
+                            self,
+                            "Inherent method resolution result for {}: {:?}",
+                            method_call.method_name,
+                            result
+                        );
+                        result
+                    } else {
+                        debug_print!(
+                            self,
+                            "Method {} not found on type {}",
+                            method_call.method_name,
+                            type_name
+                        );
+                        // Last resort - try to resolve just the method name
+                        let result = context.resolve(&method_call.method_name);
+                        debug_print!(
+                            self,
+                            "Direct resolution result for {}: {:?}",
+                            method_call.method_name,
+                            result
+                        );
+                        result
+                    }
+                }
             }
+        }
+        #[cfg(not(feature = "use-legacy-resolution"))]
+        {
+            // Without legacy resolution, just try direct resolution
+            context.resolve(&method_call.method_name)
         }
     }
 
@@ -2382,32 +2461,35 @@ impl SimpleIndexer {
         let mut context = ResolutionContext::new(file_id);
 
         // 1. Add imported symbols
-        if let Some(imports) = self.import_resolver.imports_by_file.get(&file_id) {
-            for import in imports {
-                // Resolve the import to actual symbols
-                if let Some(symbol_id) = self.import_resolver.resolve_symbol(
-                    &import.path, // Pass full path, not just last segment
-                    file_id,
-                    &self.document_index,
-                    |lang_id| self.parser_factory.create_behavior_from_registry(lang_id),
-                ) {
-                    let name = if let Some(alias) = &import.alias {
-                        alias.clone()
-                    } else {
-                        import
-                            .path
-                            .split("::")
-                            .last()
-                            .unwrap_or(&import.path)
-                            .to_string()
-                    };
-                    debug_print!(
-                        self,
-                        "Adding import to context: name='{}', symbol_id={:?}",
-                        name,
-                        symbol_id
-                    );
-                    context.add_import(name, symbol_id, import.alias.is_some());
+        #[cfg(feature = "use-legacy-resolution")]
+        {
+            if let Some(imports) = self.import_resolver.imports_by_file.get(&file_id) {
+                for import in imports {
+                    // Resolve the import to actual symbols
+                    if let Some(symbol_id) = self.import_resolver.resolve_symbol(
+                        &import.path, // Pass full path, not just last segment
+                        file_id,
+                        &self.document_index,
+                        |lang_id| self.parser_factory.create_behavior_from_registry(lang_id),
+                    ) {
+                        let name = if let Some(alias) = &import.alias {
+                            alias.clone()
+                        } else {
+                            import
+                                .path
+                                .split("::")
+                                .last()
+                                .unwrap_or(&import.path)
+                                .to_string()
+                        };
+                        debug_print!(
+                            self,
+                            "Adding import to context: name='{}', symbol_id={:?}",
+                            name,
+                            symbol_id
+                        );
+                        context.add_import(name, symbol_id, import.alias.is_some());
+                    }
                 }
             }
         }
@@ -3042,6 +3124,7 @@ pub struct World;
     }
 
     #[test]
+    #[cfg(feature = "use-legacy-resolution")]
     fn test_simple_import_resolution() {
         use std::fs;
         use tempfile::TempDir;
@@ -3242,6 +3325,7 @@ fn main() {
     }
 
     #[test]
+    #[cfg(feature = "use-legacy-resolution")]
     fn test_import_resolution() {
         use std::fs;
         use tempfile::TempDir;
