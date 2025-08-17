@@ -30,7 +30,7 @@ impl CodeAnalyzer {
             symbols: HashMap::new(),
         }
     }
-    
+
     pub fn analyze_function(&mut self, name: &str, line: usize, column: usize) {
         let symbol = Symbol {
             name: name.to_string(),
@@ -38,13 +38,13 @@ impl CodeAnalyzer {
             line,
             column,
         };
-        
+
         self.symbols
             .entry(name.to_string())
             .or_insert_with(Vec::new)
             .push(symbol);
     }
-    
+
     pub fn analyze_struct(&mut self, name: &str, line: usize, column: usize) {
         let symbol = Symbol {
             name: name.to_string(),
@@ -52,21 +52,21 @@ impl CodeAnalyzer {
             line,
             column,
         };
-        
+
         self.symbols
             .entry(name.to_string())
             .or_insert_with(Vec::new)
             .push(symbol);
     }
-    
+
     pub fn find_symbol(&self, name: &str) -> Option<&Vec<Symbol>> {
         self.symbols.get(name)
     }
-    
+
     pub fn get_all_symbols(&self) -> Vec<&Symbol> {
         self.symbols.values().flatten().collect()
     }
-    
+
     pub fn count_by_kind(&self, kind: SymbolKind) -> usize {
         self.symbols
             .values()
@@ -84,11 +84,11 @@ impl Default for CodeAnalyzer {
 
 pub fn analyze_code(code: &str) -> CodeAnalyzer {
     let mut analyzer = CodeAnalyzer::new();
-    
+
     // Simple heuristic analysis
     for (line_num, line) in code.lines().enumerate() {
         let trimmed = line.trim();
-        
+
         if trimmed.starts_with("fn ") {
             if let Some(name) = extract_function_name(trimmed) {
                 analyzer.analyze_function(name, line_num + 1, 0);
@@ -99,7 +99,7 @@ pub fn analyze_code(code: &str) -> CodeAnalyzer {
             }
         }
     }
-    
+
     analyzer
 }
 

@@ -9,15 +9,15 @@ pub struct GuidanceConfig {
     /// Enable/disable guidance system globally
     #[serde(default = "default_enabled")]
     pub enabled: bool,
-    
+
     /// Default confidence level for generated guidance
     #[serde(default = "default_confidence")]
     pub default_confidence: f32,
-    
+
     /// Tool-specific guidance templates
     #[serde(default)]
     pub tools: HashMap<String, ToolGuidance>,
-    
+
     /// Global template variables
     #[serde(default)]
     pub global_vars: HashMap<String, String>,
@@ -28,17 +28,17 @@ pub struct GuidanceConfig {
 pub struct ToolGuidance {
     /// Template for when no results are found
     pub no_results: Option<String>,
-    
+
     /// Template for a single result
     pub single_result: Option<String>,
-    
+
     /// Template for multiple results
     pub multiple_results: Option<String>,
-    
+
     /// Custom templates based on result count ranges
     #[serde(default)]
     pub ranges: Vec<RangeTemplate>,
-    
+
     /// Tool-specific variables
     #[serde(default)]
     pub variables: HashMap<String, String>,
@@ -82,7 +82,7 @@ fn default_global_vars() -> HashMap<String, String> {
 
 fn default_tool_templates() -> HashMap<String, ToolGuidance> {
     let mut tools = HashMap::new();
-    
+
     // Semantic search defaults
     tools.insert("semantic_search_docs".to_string(), ToolGuidance {
         no_results: Some(
@@ -103,7 +103,7 @@ fn default_tool_templates() -> HashMap<String, ToolGuidance> {
         ],
         variables: HashMap::new(),
     });
-    
+
     // Find symbol defaults
     tools.insert("find_symbol".to_string(), ToolGuidance {
         no_results: Some(
@@ -118,7 +118,7 @@ fn default_tool_templates() -> HashMap<String, ToolGuidance> {
         ranges: vec![],
         variables: HashMap::new(),
     });
-    
+
     // Get calls defaults
     tools.insert("get_calls".to_string(), ToolGuidance {
         no_results: Some(
@@ -133,7 +133,7 @@ fn default_tool_templates() -> HashMap<String, ToolGuidance> {
         ranges: vec![],
         variables: HashMap::new(),
     });
-    
+
     // Find callers defaults
     tools.insert("find_callers".to_string(), ToolGuidance {
         no_results: Some(
@@ -148,7 +148,7 @@ fn default_tool_templates() -> HashMap<String, ToolGuidance> {
         ranges: vec![],
         variables: HashMap::new(),
     });
-    
+
     // Analyze impact defaults
     tools.insert("analyze_impact".to_string(), ToolGuidance {
         no_results: Some(
@@ -174,7 +174,7 @@ fn default_tool_templates() -> HashMap<String, ToolGuidance> {
         ],
         variables: HashMap::new(),
     });
-    
+
     // Search symbols defaults
     tools.insert("search_symbols".to_string(), ToolGuidance {
         no_results: Some(
@@ -189,7 +189,7 @@ fn default_tool_templates() -> HashMap<String, ToolGuidance> {
         ranges: vec![],
         variables: HashMap::new(),
     });
-    
+
     // Semantic search with context defaults
     tools.insert("semantic_search_with_context".to_string(), ToolGuidance {
         no_results: Some(
@@ -204,7 +204,7 @@ fn default_tool_templates() -> HashMap<String, ToolGuidance> {
         ranges: vec![],
         variables: HashMap::new(),
     });
-    
+
     tools
 }
 
@@ -213,13 +213,13 @@ impl ToolGuidance {
     pub fn get_template(&self, result_count: usize) -> Option<&str> {
         // Check custom ranges first
         for range in &self.ranges {
-            let in_range = result_count >= range.min && 
+            let in_range = result_count >= range.min &&
                 range.max.map_or(true, |max| result_count <= max);
             if in_range {
                 return Some(&range.template);
             }
         }
-        
+
         // Fall back to standard templates
         match result_count {
             0 => self.no_results.as_deref(),

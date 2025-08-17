@@ -20,7 +20,7 @@ impl Error for ParseError {}
 
 pub trait Parser {
     type Output;
-    
+
     fn parse(&self, input: &str) -> Result<Self::Output, ParseError>;
     fn validate(&self, input: &str) -> bool;
 }
@@ -33,7 +33,7 @@ impl JsonParser {
     pub fn new(strict_mode: bool) -> Self {
         Self { strict_mode }
     }
-    
+
     pub fn parse_string(&self, s: &str) -> Result<String, ParseError> {
         // Simple string parsing logic
         if s.starts_with('"') && s.ends_with('"') {
@@ -46,7 +46,7 @@ impl JsonParser {
             })
         }
     }
-    
+
     pub fn parse_number(&self, s: &str) -> Result<f64, ParseError> {
         s.parse::<f64>().map_err(|_| ParseError {
             message: "Invalid number format".to_string(),
@@ -58,7 +58,7 @@ impl JsonParser {
 
 impl Parser for JsonParser {
     type Output = serde_json::Value;
-    
+
     fn parse(&self, input: &str) -> Result<Self::Output, ParseError> {
         serde_json::from_str(input).map_err(|e| ParseError {
             message: e.to_string(),
@@ -66,7 +66,7 @@ impl Parser for JsonParser {
             column: e.column(),
         })
     }
-    
+
     fn validate(&self, input: &str) -> bool {
         self.parse(input).is_ok()
     }
@@ -75,14 +75,14 @@ impl Parser for JsonParser {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_parse_string() {
         let parser = JsonParser::new(true);
         assert_eq!(parser.parse_string("\"hello\"").unwrap(), "hello");
         assert!(parser.parse_string("hello").is_err());
     }
-    
+
     #[test]
     fn test_parse_number() {
         let parser = JsonParser::new(true);

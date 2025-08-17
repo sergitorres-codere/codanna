@@ -112,11 +112,11 @@ impl TypeScriptResolutionContext {
         use crate::symbol::ScopeContext;
 
         match scope_context {
-            Some(ScopeContext::Local { hoisted: true }) => {
+            Some(ScopeContext::Local { hoisted: true, .. }) => {
                 // Hoisted declarations (functions, var)
                 self.hoisted_scope.insert(name, symbol_id);
             }
-            Some(ScopeContext::Local { hoisted: false }) => {
+            Some(ScopeContext::Local { hoisted: false, .. }) => {
                 // Block-scoped declarations (let, const, arrow functions)
                 self.local_scope.insert(name, symbol_id);
             }

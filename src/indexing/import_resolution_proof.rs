@@ -1,4 +1,4 @@
-//! Import resolution proof test module  
+//! Import resolution proof test module
 //! Verifies that language-specific import matching works correctly
 //! Lives in src/indexing to have access to SimpleIndexer and Tantivy
 //!
@@ -108,7 +108,7 @@ mod helpers {
     pub fn helper_function() -> String {
         "Helper".to_string()
     }
-    
+
     pub struct HelperStruct {
         pub value: i32,
     }

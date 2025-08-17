@@ -21,7 +21,7 @@ function processUser(user: User): Result<User> {
 class UserService implements IService {
     private client: HttpClient;
     private cache: Map<string, User>;
-    
+
     async getUser(id: string): Promise<User> {
         return this.client.get(`/users/${id}`);
     }
@@ -124,16 +124,16 @@ class UserService implements IUserService {
         // Implementation
         return {} as User;
     }
-    
+
     createUser(data: UserData): User {
         // Implementation
         return {} as User;
     }
-    
+
     deleteUser(id: string): void {
         // Implementation
     }
-    
+
     private validateUser(user: User): boolean {
         return true;
     }
@@ -143,7 +143,7 @@ class UserService implements IUserService {
 abstract class BaseService {
     abstract connect(): void;
     abstract disconnect(): void;
-    
+
     protected log(message: string): void {
         console.log(message);
     }

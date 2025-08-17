@@ -1,14 +1,14 @@
 /// Processes a batch of items efficiently.
-/// 
+///
 /// This function uses parallel processing for better performance
 /// on large datasets. It's optimized for throughput over latency.
-/// 
+///
 /// # Arguments
 /// * `items` - A slice of items to process
-/// 
+///
 /// # Returns
 /// * `Result<ProcessedBatch, Error>` - The processed batch or an error
-/// 
+///
 /// # Example
 /// ```
 /// let items = vec![Item::new(1), Item::new(2)];
@@ -26,14 +26,14 @@ fn not_documented() {
 }
 
 /** Configuration structure for the processing system.
- * 
+ *
  * This struct holds all the runtime parameters needed
  * to configure the batch processor.
  */
 pub struct Config {
     /// Maximum number of items to process in parallel
     pub max_parallel: usize,
-    /// Timeout for each item in milliseconds  
+    /// Timeout for each item in milliseconds
     pub timeout_ms: u64,
 }
 
@@ -53,22 +53,22 @@ fn edge_case_not_doc() {
 pub struct Point {
     /// X coordinate
     pub x: f64,
-    /// Y coordinate  
+    /// Y coordinate
     pub y: f64,
 }
 
 impl Point {
     /// Creates a new point at the given coordinates.
-    /// 
+    ///
     /// # Arguments
     /// * `x` - The x coordinate
     /// * `y` - The y coordinate
     pub fn new(x: f64, y: f64) -> Self {
         Self { x, y }
     }
-    
+
     /// Calculates the Euclidean distance to another point.
-    /// 
+    ///
     /// Uses the standard distance formula: √((x2-x1)² + (y2-y1)²)
     pub fn distance(&self, other: &Point) -> f64 {
         let dx = self.x - other.x;
@@ -87,13 +87,13 @@ pub trait Area {
 pub struct Rectangle {
     /// Top-left corner of the rectangle
     pub top_left: Point,
-    /// Bottom-right corner of the rectangle  
+    /// Bottom-right corner of the rectangle
     pub bottom_right: Point,
 }
 
 impl Area for Rectangle {
     /// Calculates the area of the rectangle.
-    /// 
+    ///
     /// Area = width × height
     fn area(&self) -> f64 {
         let width = (self.bottom_right.x - self.top_left.x).abs();
@@ -103,11 +103,11 @@ impl Area for Rectangle {
 }
 
 /** A processor that handles items in batches.
- * 
+ *
  * This is a more complex example with multiple paragraphs
  * of documentation. The processor can be configured with
  * various options to control its behavior.
- * 
+ *
  * It supports both synchronous and asynchronous processing
  * modes, depending on the requirements.
  */
@@ -117,7 +117,7 @@ pub struct BatchProcessor {
 
 impl BatchProcessor {
     /** Creates a new batch processor with default configuration.
-     * 
+     *
      * The default configuration uses:
      * - max_parallel: number of CPU cores
      * - timeout_ms: 5000
@@ -130,7 +130,7 @@ impl BatchProcessor {
             }
         }
     }
-    
+
     /// Processes a single batch with the current configuration
     pub fn process(&self, batch: &Batch) -> Result<(), Error> {
         // Processing logic here
@@ -145,7 +145,7 @@ fn empty_line_in_doc() {}
 
 ///Multiple
 ///lines
-///without spaces  
+///without spaces
 fn compact_docs() {}
 
 // Stub types for compilation

@@ -77,6 +77,11 @@ impl TypeScriptParser {
     ) {
         match node.kind() {
             "function_declaration" => {
+                // Extract function name for parent tracking
+                let func_name = node
+                    .child_by_field_name("name")
+                    .map(|n| code[n.byte_range()].to_string());
+
                 if let Some(symbol) =
                     self.process_function(node, code, file_id, counter, module_path)
                 {
@@ -85,6 +90,13 @@ impl TypeScriptParser {
                 // Note: In TypeScript, function declarations are hoisted
                 // But we process nested symbols in the function's scope
                 self.context.enter_scope(ScopeType::hoisting_function());
+
+                // Save the current parent context before setting new one
+                let saved_function = self.context.current_function().map(|s| s.to_string());
+                let saved_class = self.context.current_class().map(|s| s.to_string());
+                // Set current function for parent tracking BEFORE processing children
+                self.context.set_current_function(func_name.clone());
+
                 // Process children for nested functions/classes
                 for child in node.children(&mut node.walk()) {
                     if child.kind() != "identifier" && child.kind() != "formal_parameters" {
@@ -98,17 +110,43 @@ impl TypeScriptParser {
                         );
                     }
                 }
+
+                // Exit scope first (this clears the current context)
                 self.context.exit_scope();
+
+                // Then restore the previous parent context
+                self.context.set_current_function(saved_function);
+                self.context.set_current_class(saved_class);
             }
             "class_declaration" | "abstract_class_declaration" => {
+                // Extract class name for parent tracking
+                let class_name = node
+                    .children(&mut node.walk())
+                    .find(|n| n.kind() == "type_identifier")
+                    .map(|n| code[n.byte_range()].to_string());
+
                 if let Some(symbol) = self.process_class(node, code, file_id, counter, module_path)
                 {
                     symbols.push(symbol);
                     // Enter class scope for processing members
                     self.context.enter_scope(ScopeType::Class);
+
+                    // Save the current parent context before setting new one
+                    let saved_function = self.context.current_function().map(|s| s.to_string());
+                    let saved_class = self.context.current_class().map(|s| s.to_string());
+
+                    // Set current class for parent tracking
+                    self.context.set_current_class(class_name.clone());
+
                     // Extract class members
                     self.extract_class_members(node, code, file_id, counter, symbols, module_path);
+
+                    // Exit scope first (this clears the current context)
                     self.context.exit_scope();
+
+                    // Then restore the previous parent context
+                    self.context.set_current_function(saved_function);
+                    self.context.set_current_class(saved_class);
                 }
             }
             "interface_declaration" => {
@@ -251,13 +289,30 @@ impl TypeScriptParser {
             for child in body.children(&mut cursor) {
                 match child.kind() {
                     "method_definition" => {
+                        // Extract method name for parent tracking
+                        let method_name = child
+                            .child_by_field_name("name")
+                            .map(|n| code[n.byte_range()].to_string());
+
                         if let Some(symbol) =
                             self.process_method(child, code, file_id, counter, module_path)
                         {
                             symbols.push(symbol);
                         }
+
                         // Also process the method body for nested classes/functions
                         if let Some(body) = child.child_by_field_name("body") {
+                            // Enter function scope for method body
+                            self.context
+                                .enter_scope(ScopeType::Function { hoisting: false });
+
+                            // Save the current parent context before setting new one
+                            let saved_function =
+                                self.context.current_function().map(|s| s.to_string());
+
+                            // Set current function to the method name
+                            self.context.set_current_function(method_name.clone());
+
                             for body_child in body.children(&mut body.walk()) {
                                 self.extract_symbols_from_node(
                                     body_child,
@@ -268,6 +323,12 @@ impl TypeScriptParser {
                                     module_path,
                                 );
                             }
+
+                            // Exit scope first (this clears the current context)
+                            self.context.exit_scope();
+
+                            // Then restore the previous parent context when exiting method
+                            self.context.set_current_function(saved_function);
                         }
                     }
                     "public_field_definition" | "property_declaration" => {
@@ -436,8 +497,40 @@ impl TypeScriptParser {
 
                         // Override scope context for arrow functions - they are never hoisted
                         if is_arrow_function {
-                            symbol.scope_context =
-                                Some(crate::symbol::ScopeContext::Local { hoisted: false });
+                            // Arrow functions are not hoisted, but keep the parent context that was already set
+                            match symbol.scope_context {
+                                Some(crate::symbol::ScopeContext::Local {
+                                    parent_name,
+                                    parent_kind,
+                                    ..
+                                }) => {
+                                    symbol.scope_context =
+                                        Some(crate::symbol::ScopeContext::Local {
+                                            hoisted: false, // Arrow functions are never hoisted
+                                            parent_name,    // Keep the parent context
+                                            parent_kind,    // Keep the parent kind
+                                        });
+                                }
+                                _ => {
+                                    // If not already Local, make it Local with parent context
+                                    let (parent_name, parent_kind) = if let Some(func_name) =
+                                        self.context.current_function()
+                                    {
+                                        (Some(func_name.into()), Some(crate::SymbolKind::Function))
+                                    } else if let Some(class_name) = self.context.current_class() {
+                                        (Some(class_name.into()), Some(crate::SymbolKind::Class))
+                                    } else {
+                                        (None, None)
+                                    };
+
+                                    symbol.scope_context =
+                                        Some(crate::symbol::ScopeContext::Local {
+                                            hoisted: false,
+                                            parent_name,
+                                            parent_kind,
+                                        });
+                                }
+                            }
                         }
 
                         symbols.push(symbol);
@@ -643,17 +736,38 @@ impl TypeScriptParser {
                     if let Some(interface_name_node) = node.child_by_field_name("name") {
                         let interface_name = &code[interface_name_node.byte_range()];
 
-                        // Check for extends clause (interface extension)
-                        if let Some(extends_clause) = node.child_by_field_name("extends") {
-                            self.process_extends_clause(
-                                extends_clause,
-                                code,
-                                interface_name,
-                                implementations,
-                            );
+                        // Check for extends_type_clause - it's a child node, not a field!
+                        // ABI-15 exploration shows: interfaces use "extends_type_clause" not "extends_clause"
+                        let mut cursor = node.walk();
+                        for child in node.children(&mut cursor) {
+                            if child.kind() == "extends_type_clause" {
+                                // Extract the extended interface(s)
+                                // The extended type is in field "type"
+                                if let Some(type_node) = child.child_by_field_name("type") {
+                                    if let Some(base_name) = self.extract_type_name(type_node, code)
+                                    {
+                                        let range = Range::new(
+                                            type_node.start_position().row as u32,
+                                            type_node.start_position().column as u16,
+                                            type_node.end_position().row as u32,
+                                            type_node.end_position().column as u16,
+                                        );
+                                        implementations.push((interface_name, base_name, range));
+                                    }
+                                } else {
+                                    // Fallback: process as before for multiple extends
+                                    self.process_extends_clause(
+                                        child,
+                                        code,
+                                        interface_name,
+                                        implementations,
+                                    );
+                                }
+                            }
                         }
                     }
                 }
+                // When extends_only = false, skip interfaces entirely since they don't implement
             }
             _ => {}
         }
@@ -678,26 +792,30 @@ impl TypeScriptParser {
         for child in heritage_node.children(&mut cursor) {
             match child.kind() {
                 "extends_clause" => {
-                    // Process extends clause for both extends_only and regular find_implementations
-                    // Skip "extends" keyword, get the type
-                    let mut extends_cursor = child.walk();
-                    for extends_child in child.children(&mut extends_cursor) {
-                        if extends_child.kind() == "type_identifier"
-                            || extends_child.kind() == "identifier"
-                            || extends_child.kind() == "nested_type_identifier"
-                            || extends_child.kind() == "generic_type"
-                        {
-                            if let Some(base_name) = self.extract_type_name(extends_child, code) {
-                                let range = Range::new(
-                                    extends_child.start_position().row as u32,
-                                    extends_child.start_position().column as u16,
-                                    extends_child.end_position().row as u32,
-                                    extends_child.end_position().column as u16,
-                                );
-                                implementations.push((class_name, base_name, range));
+                    // Process extends clause ONLY when looking for extends relationships
+                    if extends_only {
+                        let mut extends_cursor = child.walk();
+                        for extends_child in child.children(&mut extends_cursor) {
+                            if extends_child.kind() == "type_identifier"
+                                || extends_child.kind() == "identifier"
+                                || extends_child.kind() == "nested_type_identifier"
+                                || extends_child.kind() == "generic_type"
+                            {
+                                if let Some(base_name) = self.extract_type_name(extends_child, code)
+                                {
+                                    let range = Range::new(
+                                        extends_child.start_position().row as u32,
+                                        extends_child.start_position().column as u16,
+                                        extends_child.end_position().row as u32,
+                                        extends_child.end_position().column as u16,
+                                    );
+                                    implementations.push((class_name, base_name, range));
+                                }
                             }
                         }
                     }
+                    // When extends_only = false, we skip extends clause
+                    // because we only want implements relationships
                 }
                 "implements_clause" => {
                     // Only process implements clause when NOT looking for extends only
@@ -1161,6 +1279,45 @@ impl TypeScriptParser {
                 }
             }
 
+            // NEW: Handle constructor calls with generic type arguments
+            // Example: new Map<string, Session>()
+            "new_expression" => {
+                // Get the context for the variable this is assigned to
+                // We need to traverse up to find the variable_declarator
+                let context_name = if let Some(parent) = node.parent() {
+                    if parent.kind() == "variable_declarator" {
+                        parent
+                            .child_by_field_name("name")
+                            .map(|n| &code[n.byte_range()])
+                            .unwrap_or("anonymous")
+                    } else {
+                        "anonymous"
+                    }
+                } else {
+                    "anonymous"
+                };
+
+                // Check for type_arguments field
+                if let Some(type_args) = node.child_by_field_name("type_arguments") {
+                    self.extract_types_from_type_arguments(&type_args, code, context_name, uses);
+                }
+            }
+
+            // NEW: Handle function calls with generic type arguments
+            // Example: useState<Session>(null)
+            "call_expression" => {
+                // Get the function being called for context
+                let func_name = node
+                    .child_by_field_name("function")
+                    .map(|n| &code[n.byte_range()])
+                    .unwrap_or("anonymous");
+
+                // Check for type_arguments field
+                if let Some(type_args) = node.child_by_field_name("type_arguments") {
+                    self.extract_types_from_type_arguments(&type_args, code, func_name, uses);
+                }
+            }
+
             _ => {}
         }
 
@@ -1295,6 +1452,59 @@ impl TypeScriptParser {
                     );
                     uses.push((interface_name, type_name, range));
                 }
+            }
+        }
+    }
+
+    /// Extract type references from type_arguments node
+    /// Handles cases like: <string, Session> or <Map<string, User>>
+    #[allow(clippy::only_used_in_recursion)]
+    fn extract_types_from_type_arguments<'a>(
+        &self,
+        type_args_node: &tree_sitter::Node,
+        code: &'a str,
+        context_name: &'a str,
+        uses: &mut Vec<(&'a str, &'a str, Range)>,
+    ) {
+        for child in type_args_node.children(&mut type_args_node.walk()) {
+            match child.kind() {
+                // Simple type identifiers like Session, User
+                "type_identifier" => {
+                    let type_name = &code[child.byte_range()];
+                    let range = Range::new(
+                        child.start_position().row as u32,
+                        child.start_position().column as u16,
+                        child.end_position().row as u32,
+                        child.end_position().column as u16,
+                    );
+                    uses.push((context_name, type_name, range));
+                }
+                // Generic types like Map<string, User>
+                "generic_type" => {
+                    // Extract the base type (e.g., Map)
+                    if let Some(name_node) = child.child_by_field_name("name") {
+                        let type_name = &code[name_node.byte_range()];
+                        let range = Range::new(
+                            name_node.start_position().row as u32,
+                            name_node.start_position().column as u16,
+                            name_node.end_position().row as u32,
+                            name_node.end_position().column as u16,
+                        );
+                        uses.push((context_name, type_name, range));
+                    }
+                    // Recursively extract nested type arguments
+                    if let Some(nested_args) = child.child_by_field_name("type_arguments") {
+                        self.extract_types_from_type_arguments(
+                            &nested_args,
+                            code,
+                            context_name,
+                            uses,
+                        );
+                    }
+                }
+                // Skip punctuation and predefined types
+                "<" | ">" | "," | "predefined_type" => {}
+                _ => {}
             }
         }
     }
@@ -1735,6 +1945,185 @@ export * from './common';
         assert!(imports.iter().any(|i| i.path == "./common" && i.is_glob));
 
         println!("\n✅ Import extraction test passed");
+    }
+
+    #[test]
+    fn test_generic_type_extraction_in_constructors() {
+        println!("\n=== TypeScript Generic Type Extraction in Constructors Test ===\n");
+
+        let mut parser = TypeScriptParser::new().unwrap();
+
+        let code = r#"
+interface Session {
+    id: string;
+}
+
+interface User {
+    name: string;
+}
+
+const sessions = new Map<string, Session>();
+const users = new Set<User>();
+const nested = new Array<Map<string, User>>();
+const simple = new Map();
+const typed: Map<string, Session> = new Map();
+const hook = useState<Session>(null);
+"#;
+
+        println!("Test code:\n{code}");
+
+        // Extract type uses
+        let uses = parser.find_uses(code);
+
+        println!("\nExtracted {} type uses:", uses.len());
+        for (i, (context, type_name, _range)) in uses.iter().enumerate() {
+            println!("  {}. {} uses {}", i + 1, context, type_name);
+        }
+
+        // Verify that generic type parameters are captured
+        assert!(
+            uses.iter()
+                .any(|(ctx, typ, _)| ctx == &"sessions" && typ == &"Session"),
+            "Should capture: sessions uses Session"
+        );
+
+        assert!(
+            uses.iter()
+                .any(|(ctx, typ, _)| ctx == &"users" && typ == &"User"),
+            "Should capture: users uses User"
+        );
+
+        assert!(
+            uses.iter()
+                .any(|(ctx, typ, _)| ctx == &"nested" && typ == &"User"),
+            "Should capture: nested uses User (from Map<string, User>)"
+        );
+
+        // Note: Type annotations are already handled by the existing code
+        // in the "variable_declarator" case, which extracts from node.child_by_field_name("type")
+        assert!(
+            uses.iter()
+                .any(|(ctx, typ, _)| ctx == &"typed" && (typ == &"Session" || typ == &"Map")),
+            "Should capture type annotation (either Map or Session)"
+        );
+
+        assert!(
+            uses.iter()
+                .any(|(ctx, typ, _)| ctx == &"useState" && typ == &"Session"),
+            "Should capture: useState uses Session (from function call)"
+        );
+
+        println!("\n✅ Generic type extraction test passed");
+    }
+
+    #[test]
+    fn test_extends_vs_implements_separation() {
+        println!("\n=== TypeScript Extends vs Implements Separation Test ===\n");
+
+        let mut parser = TypeScriptParser::new().unwrap();
+
+        let code = r#"
+interface Serializable {
+    serialize(): string;
+}
+
+interface Comparable<T> {
+    compareTo(other: T): number;
+}
+
+class BaseEntity {
+    id: number;
+}
+
+// Class extends another class
+class User extends BaseEntity implements Serializable, Comparable<User> {
+    name: string;
+
+    serialize(): string {
+        return JSON.stringify(this);
+    }
+
+    compareTo(other: User): number {
+        return this.id - other.id;
+    }
+}
+
+// Class extends a class (inheritance chain)
+class Admin extends User {
+    permissions: string[];
+}
+
+// Interface extends another interface
+interface AdvancedSerializable extends Serializable {
+    deserialize(data: string): void;
+}
+"#;
+
+        println!("Test code:\n{code}");
+
+        // Get extends relationships
+        let extends = parser.find_extends(code);
+        println!("\nExtends relationships ({}):", extends.len());
+        for (child, parent, _) in &extends {
+            println!("  {child} extends {parent}");
+        }
+
+        // Get implements relationships
+        let implements = parser.find_implementations(code);
+        println!("\nImplements relationships ({}):", implements.len());
+        for (implementor, interface, _) in &implements {
+            println!("  {implementor} implements {interface}");
+        }
+
+        // Verify extends relationships
+        assert!(
+            extends
+                .iter()
+                .any(|(c, p, _)| c == &"User" && p == &"BaseEntity"),
+            "User should extend BaseEntity"
+        );
+        assert!(
+            extends
+                .iter()
+                .any(|(c, p, _)| c == &"Admin" && p == &"User"),
+            "Admin should extend User"
+        );
+        assert!(
+            extends
+                .iter()
+                .any(|(c, p, _)| c == &"AdvancedSerializable" && p == &"Serializable"),
+            "AdvancedSerializable should extend Serializable"
+        );
+
+        // Verify implements relationships
+        assert!(
+            implements
+                .iter()
+                .any(|(c, i, _)| c == &"User" && i == &"Serializable"),
+            "User should implement Serializable"
+        );
+        assert!(
+            implements
+                .iter()
+                .any(|(c, i, _)| c == &"User" && i == &"Comparable"),
+            "User should implement Comparable"
+        );
+
+        // Verify separation - extends should NOT be in implements
+        assert!(
+            !implements
+                .iter()
+                .any(|(c, p, _)| c == &"User" && p == &"BaseEntity"),
+            "User extends BaseEntity should NOT be in implements"
+        );
+        assert!(
+            !implements
+                .iter()
+                .any(|(c, p, _)| c == &"Admin" && p == &"User"),
+            "Admin extends User should NOT be in implements"
+        );
+
+        println!("\n✅ Extends vs Implements separation test passed");
     }
 
     #[test]

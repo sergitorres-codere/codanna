@@ -388,10 +388,10 @@ impl LanguageBehavior for PythonBehavior {
         }
 
         // Check scope context
-        if let Some(scope_context) = symbol.scope_context {
+        if let Some(ref scope_context) = symbol.scope_context {
             match scope_context {
                 ScopeContext::Module | ScopeContext::Global => true,
-                ScopeContext::Local { hoisted } => {
+                ScopeContext::Local { hoisted, .. } => {
                     // In Python, nothing is truly hoisted
                     // But functions defined at module level are available
                     !hoisted && symbol.kind == SymbolKind::Function

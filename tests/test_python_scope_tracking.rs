@@ -12,13 +12,13 @@ fn test_python_module_level_symbols() {
 # Module-level constant
 MAX_SIZE = 100
 
-# Module-level variable  
+# Module-level variable
 count = 0
 
 def module_func():
     """Module function"""
     pass
-    
+
 class MyClass:
     """Module class"""
     pass
@@ -56,15 +56,15 @@ fn test_python_class_member_scope() {
     let code = r#"
 class MyClass:
     """Test class"""
-    
+
     def __init__(self):
         """Constructor"""
         self.instance_var = 0
-    
+
     def method(self):
         """Instance method"""
         return self.instance_var
-        
+
     @classmethod
     def class_method(cls):
         """Class method"""
@@ -107,16 +107,16 @@ fn test_python_nested_function_scope() {
     let code = r#"
 def outer():
     """Outer function"""
-    
+
     def inner():
         """Inner function"""
-        
+
         def deeply_nested():
             """Deeply nested function"""
             pass
-        
+
         return deeply_nested
-    
+
     return inner
 "#;
 
@@ -134,7 +134,11 @@ def outer():
     assert!(inner.is_some());
     assert_eq!(
         inner.unwrap().scope_context,
-        Some(ScopeContext::Local { hoisted: false })
+        Some(ScopeContext::Local {
+            hoisted: false,
+            parent_name: None,
+            parent_kind: None
+        })
     );
 
     // Deeply nested is local to inner
@@ -142,7 +146,11 @@ def outer():
     assert!(deeply.is_some());
     assert_eq!(
         deeply.unwrap().scope_context,
-        Some(ScopeContext::Local { hoisted: false })
+        Some(ScopeContext::Local {
+            hoisted: false,
+            parent_name: None,
+            parent_kind: None
+        })
     );
 }
 
@@ -154,16 +162,16 @@ GLOBAL_CONST = 42
 
 def process_data():
     local_var = 10
-    
+
     class LocalClass:
         def local_method(self):
             pass
-    
+
     return LocalClass()
 
 class GlobalClass:
     CLASS_VAR = 100
-    
+
     def method(self):
         method_local = 5
         return method_local
@@ -191,7 +199,11 @@ class GlobalClass:
     assert!(local_class.is_some());
     assert_eq!(
         local_class.unwrap().scope_context,
-        Some(ScopeContext::Local { hoisted: false })
+        Some(ScopeContext::Local {
+            hoisted: false,
+            parent_name: None,
+            parent_kind: None
+        })
     );
 
     // Global class

@@ -30,7 +30,7 @@ fn safe_process(value: i32) -> Option<i32> {
 fn main() {
     let data = vec![1, 2, 3, 4, 5];
     let results = process_batch(data);
-    
+
     for value in results {
         if let Some(processed) = safe_process(value) {
             println!("Processed: {}", processed);

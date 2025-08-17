@@ -266,7 +266,7 @@ use App\Services\AuthService;
 
 class UserController extends BaseController {
     private AuthService $authService;
-    
+
     public function show(int $id): User {
         return User::find($id);
     }

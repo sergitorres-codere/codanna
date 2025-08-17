@@ -35,7 +35,7 @@ pub fn create_help_text() -> String {
 
     // Quick Start section
     let quick_start = r#"$ codanna init              # Initialize in current directory
-$ codanna index src         # Index your source code  
+$ codanna index src         # Index your source code
 $ codanna serve --http --watch      # HTTP server with OAuth
 $ codanna serve --https --watch     # HTTPS server with TLS"#;
 

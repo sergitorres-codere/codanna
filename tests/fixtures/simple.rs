@@ -17,7 +17,7 @@ impl Point {
     fn new(x: f64, y: f64) -> Self {
         Self { x, y }
     }
-    
+
     fn distance(&self, other: &Point) -> f64 {
         let dx = self.x - other.x;
         let dy = self.y - other.y;
@@ -34,11 +34,11 @@ impl Rectangle {
     pub fn width(&self) -> f64 {
         (self.bottom_right.x - self.top_left.x).abs()
     }
-    
+
     pub fn height(&self) -> f64 {
         (self.bottom_right.y - self.top_left.y).abs()
     }
-    
+
     pub fn area(&self) -> f64 {
         self.width() * self.height()
     }

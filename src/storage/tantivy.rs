@@ -43,6 +43,7 @@ pub struct IndexSchema {
     pub column: Field,
     pub context: Field,
     pub visibility: Field,
+    pub scope_context: Field,
 
     // Relationship fields
     pub from_symbol_id: Field,
@@ -106,6 +107,7 @@ impl IndexSchema {
         let module_path = builder.add_text_field("module_path", STRING | STORED);
         let kind = builder.add_text_field("kind", STRING | STORED);
         let visibility = builder.add_u64_field("visibility", STORED);
+        let scope_context = builder.add_text_field("scope_context", STRING | STORED);
 
         // Relationship fields
         let from_symbol_id = builder.add_u64_field("from_symbol_id", indexed_u64_options.clone());
@@ -144,6 +146,7 @@ impl IndexSchema {
             column,
             context,
             visibility,
+            scope_context,
             from_symbol_id,
             to_symbol_id,
             relation_kind,
@@ -774,6 +777,7 @@ impl DocumentIndex {
         module_path: &str,
         context: Option<&str>,
         visibility: crate::Visibility,
+        scope_context: Option<crate::ScopeContext>,
     ) -> StorageResult<()> {
         let mut writer_lock = self.writer.lock().map_err(|_| StorageError::LockPoisoned)?;
         let writer = writer_lock.as_mut().ok_or(StorageError::NoActiveBatch)?;
@@ -803,6 +807,13 @@ impl DocumentIndex {
         doc.add_text(self.schema.module_path, module_path);
         doc.add_text(self.schema.kind, format!("{kind:?}"));
         doc.add_u64(self.schema.visibility, visibility as u64);
+
+        // Store scope_context as a string (serialized enum)
+        if let Some(scope) = scope_context {
+            doc.add_text(self.schema.scope_context, format!("{scope:?}"));
+        } else {
+            doc.add_text(self.schema.scope_context, "None");
+        }
 
         // Add default vector fields - these will be updated later if vectors are generated
         if self.has_vector_support() {
@@ -1238,6 +1249,57 @@ impl DocumentIndex {
             })
             .unwrap_or(Visibility::Private);
 
+        // Get scope_context from stored field
+        let scope_context = doc
+            .get_first(self.schema.scope_context)
+            .and_then(|v| v.as_str())
+            .and_then(|s| {
+                // Parse the serialized scope context
+                match s {
+                    "None" => None,
+                    "Module" => Some(crate::ScopeContext::Module),
+                    "Global" => Some(crate::ScopeContext::Global),
+                    "Package" => Some(crate::ScopeContext::Package),
+                    "Parameter" => Some(crate::ScopeContext::Parameter),
+                    "ClassMember" => Some(crate::ScopeContext::ClassMember),
+                    s if s.starts_with("Local") => {
+                        // Handle Local { hoisted: bool, parent_name: Option<String>, parent_kind: Option<SymbolKind> } format
+                        let hoisted = s.contains("hoisted: true") || s.contains("hoisted:true");
+
+                        // Extract parent_name if present
+                        let parent_name = if s.contains("parent_name: Some(") {
+                            let start = s.find("parent_name: Some(\"").map(|i| i + 19)?;
+                            let end = s[start..].find('"').map(|i| start + i)?;
+                            Some(s[start..end].to_string().into())
+                        } else {
+                            None
+                        };
+
+                        // Extract parent_kind if present
+                        let parent_kind = if s.contains("parent_kind: Some(") {
+                            let start = s.find("parent_kind: Some(").map(|i| i + 18)?;
+                            let end = s[start..].find(')').map(|i| start + i)?;
+                            let kind_str = &s[start..end];
+                            match kind_str {
+                                "Function" => Some(crate::SymbolKind::Function),
+                                "Class" => Some(crate::SymbolKind::Class),
+                                "Method" => Some(crate::SymbolKind::Method),
+                                _ => None,
+                            }
+                        } else {
+                            None
+                        };
+
+                        Some(crate::ScopeContext::Local {
+                            hoisted,
+                            parent_name,
+                            parent_kind,
+                        })
+                    }
+                    _ => None,
+                }
+            });
+
         Ok(Symbol {
             id: SymbolId(symbol_id as u32),
             name: name.into(),
@@ -1253,7 +1315,7 @@ impl DocumentIndex {
             doc_comment: doc_comment.map(|s| s.into()),
             module_path: module_path.map(|s| s.into()),
             visibility,
-            scope_context: None, // TODO: Deserialize from storage when available
+            scope_context,
         })
     }
 
@@ -1738,8 +1800,23 @@ impl DocumentIndex {
                 .as_ref()
                 .map(|s| s.as_ref())
                 .unwrap_or(""),
-            None, // context not stored in Symbol struct
+            None, // context (old field, different from scope_context)
             symbol.visibility,
+            // NOTE: We clone scope_context here because ScopeContext now contains CompactString
+            // (for parent_name) which doesn't implement Copy. This clone happens during indexing
+            // where we process thousands of symbols per second.
+            //
+            // PERFORMANCE TRADEOFF: Each clone allocates for the parent_name string. For a typical
+            // function name of ~20 chars, this is a small allocation. At 10,000 symbols/sec, this
+            // could add measurable overhead.
+            //
+            // TODO: Benchmark impact and consider:
+            // 1. Changing add_document to accept &Option<ScopeContext> to avoid the clone
+            // 2. Using Arc<str> for parent_name to make cloning cheaper
+            // 3. Accepting the overhead if it's <5% performance impact
+            //
+            // This should be tested with real workloads to ensure we maintain our performance targets.
+            symbol.scope_context.clone(),
         )
     }
 
@@ -2044,6 +2121,7 @@ mod tests {
                 "crate::parser",
                 None,
                 crate::Visibility::Public,
+                Some(crate::ScopeContext::Module),
             )
             .unwrap();
 
@@ -2084,6 +2162,7 @@ mod tests {
                 "crate::server",
                 None,
                 crate::Visibility::Private,
+                Some(crate::ScopeContext::Module),
             )
             .unwrap();
 
@@ -2238,6 +2317,7 @@ mod tests {
                 "crate",
                 None,
                 crate::Visibility::Public,
+                Some(crate::ScopeContext::Module),
             )
             .unwrap();
 
@@ -2425,6 +2505,7 @@ mod tests {
                 "test",
                 None,
                 crate::Visibility::Public,
+                Some(crate::ScopeContext::Module),
             )
             .unwrap();
         index_no_vectors.commit_batch().unwrap();
@@ -2463,6 +2544,7 @@ mod tests {
                 "test",
                 None,
                 crate::Visibility::Public,
+                Some(crate::ScopeContext::Module),
             )
             .unwrap();
         index_with_vectors.commit_batch().unwrap();

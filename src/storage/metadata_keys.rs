@@ -7,7 +7,7 @@ use std::fmt;
 pub enum MetadataKey {
     /// Counter for next file ID
     FileCounter,
-    /// Counter for next symbol ID  
+    /// Counter for next symbol ID
     SymbolCounter,
 }
 

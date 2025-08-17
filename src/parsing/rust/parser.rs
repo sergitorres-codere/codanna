@@ -1499,15 +1499,15 @@ mod tests {
         let mut parser = RustParser::new().unwrap();
         let code = r#"
             fn helper() {}
-            
+
             struct Data {
                 value: i32,
             }
-            
+
             fn process(d: Data) -> i32 {
                 d.value
             }
-            
+
             trait Operation {
                 fn execute(&self);
             }
@@ -1547,11 +1547,11 @@ mod tests {
             fn helper(x: i32) -> i32 {
                 x * 2
             }
-            
+
             fn process(x: i32) -> i32 {
                 helper(x) + 1
             }
-            
+
             fn main() {
                 let result = process(42);
                 let doubled = helper(result);
@@ -1613,16 +1613,16 @@ mod tests {
                 x: f64,
                 y: f64,
             }
-            
+
             struct Rectangle {
                 top_left: Point,
                 bottom_right: Point,
             }
-            
+
             fn distance(p1: Point, p2: Point) -> f64 {
                 ((p2.x - p1.x).powi(2) + (p2.y - p1.y).powi(2)).sqrt()
             }
-            
+
             fn get_center(rect: Rectangle) -> Point {
                 Point {
                     x: (rect.top_left.x + rect.bottom_right.x) / 2.0,
@@ -1688,29 +1688,29 @@ mod tests {
                 fn next(&mut self) -> Option<Self::Item>;
                 fn size_hint(&self) -> (usize, Option<usize>);
             }
-            
+
             struct Counter {
                 count: u32,
             }
-            
+
             impl Counter {
                 fn new() -> Self {
                     Self { count: 0 }
                 }
-                
+
                 fn increment(&mut self) {
                     self.count += 1;
                 }
             }
-            
+
             impl Iterator for Counter {
                 type Item = u32;
-                
+
                 fn next(&mut self) -> Option<Self::Item> {
                     self.count += 1;
                     Some(self.count)
                 }
-                
+
                 fn size_hint(&self) -> (usize, Option<usize>) {
                     (usize::MAX, None)
                 }
@@ -1771,18 +1771,18 @@ mod tests {
             trait Display {
                 fn fmt(&self) -> String;
             }
-            
+
             struct Point {
                 x: i32,
                 y: i32,
             }
-            
+
             impl Display for Point {
                 fn fmt(&self) -> String {
                     format!("({}, {})", self.x, self.y)
                 }
             }
-            
+
             impl std::fmt::Debug for Point {
                 fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                     write!(f, "Point({}, {})", self.x, self.y)
@@ -1821,29 +1821,29 @@ mod tests {
             struct SimpleType {
                 value: i32,
             }
-            
+
             impl SimpleType {
                 fn simple_method(&self) -> i32 {
                     self.value
                 }
-                
+
                 fn another_method(&mut self) {
                     self.value += 1;
                 }
             }
-            
+
             impl Option<String> {
                 fn option_method(&self) -> bool {
                     self.is_some()
                 }
             }
-            
+
             impl Vec<i32> {
                 fn vec_method(&self) -> i32 {
                     self.iter().sum()
                 }
             }
-            
+
             // This has a trait, so not inherent
             impl Display for SimpleType {
                 fn fmt(&self, f: &mut Formatter) -> Result {
@@ -1890,7 +1890,7 @@ mod tests {
         let mut parser = RustParser::new().unwrap();
         let code = r#"
 /// This is a well-documented function.
-/// 
+///
 /// It has multiple lines of documentation
 /// explaining what it does.
 pub fn documented_function() {}
@@ -1899,7 +1899,7 @@ pub fn documented_function() {}
 fn not_documented() {}
 
 /** This is a block doc comment.
- * 
+ *
  * It uses the block style.
  */
 pub struct DocumentedStruct {
@@ -2021,7 +2021,7 @@ fn empty_line_doc() {}
 ///Together
 fn compact_doc() {}
 
-/// Trim test   
+/// Trim test
 fn trim_test() {}
         "#;
 
@@ -2074,11 +2074,11 @@ fn trim_test() {}
                 let ref_config = &config;
                 let opt = Some(config);
             }
-            
+
             struct Config {
                 host: String,
             }
-            
+
             struct Server {
                 port: u16,
             }
@@ -2128,14 +2128,14 @@ fn trim_test() {}
                     write!(f, "({}, {})", self.x, self.y)
                 }
             }
-            
+
             fn process_data() {
                 let point = Point::new(10, 20);
                 let result = point.distance_to(&origin);
-                
+
                 let data = DataProcessor::default();
                 data.process();
-                
+
                 let vec = Vec::new();
                 vec.push(42);
             }
@@ -2184,10 +2184,10 @@ fn trim_test() {}
                 fn process(&self) {}
                 fn new() -> Self { Data }
             }
-            
+
             fn main() {
                 let data = Data::new();  // Static call
-                data.process();          // Instance call  
+                data.process();          // Instance call
                 self.validate();         // Self call
             }
         "#;

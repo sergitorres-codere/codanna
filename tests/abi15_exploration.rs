@@ -13,6 +13,200 @@ mod abi15_tests {
     use tree_sitter::Language;
 
     #[test]
+    fn explore_typescript_interface_extends_structure() {
+        let language: Language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
+        let mut parser = tree_sitter::Parser::new();
+        parser.set_language(&language).unwrap();
+
+        println!("\n=== TypeScript Interface Extends Structure Exploration ===");
+
+        let code = r#"
+interface Serializable {
+    serialize(): string;
+}
+
+interface AdvancedSerializable extends Serializable {
+    deserialize(data: string): void;
+}
+
+class User extends BaseEntity implements Serializable {
+    name: string;
+}
+"#;
+
+        let tree = parser.parse(code, None).unwrap();
+        let root = tree.root_node();
+
+        println!("Analyzing interface and class inheritance structures:\n");
+
+        fn analyze_node(node: tree_sitter::Node, code: &str, depth: usize) {
+            let indent = "  ".repeat(depth);
+
+            if node.kind() == "interface_declaration" || node.kind() == "class_declaration" {
+                println!("{}Found {} at depth {}:", indent, node.kind(), depth);
+                println!(
+                    "{}  Full text: '{}'",
+                    indent,
+                    &code[node.byte_range()].lines().next().unwrap_or("")
+                );
+
+                // Show all children with field names
+                let mut cursor = node.walk();
+                for (i, child) in node.children(&mut cursor).enumerate() {
+                    let field_name = node.field_name_for_child(i as u32);
+                    println!(
+                        "{}  Child {}: [{}] field={:?}",
+                        indent,
+                        i,
+                        child.kind(),
+                        field_name
+                    );
+
+                    // Dive deeper into extends/implements related nodes
+                    if child.kind().contains("extends")
+                        || child.kind().contains("implements")
+                        || child.kind() == "class_heritage"
+                    {
+                        println!("{}    -> Exploring {}:", indent, child.kind());
+                        let mut sub_cursor = child.walk();
+                        for (j, subchild) in child.children(&mut sub_cursor).enumerate() {
+                            let sub_field = child.field_name_for_child(j as u32);
+                            println!(
+                                "{}      Sub {}: [{}] field={:?} text='{}'",
+                                indent,
+                                j,
+                                subchild.kind(),
+                                sub_field,
+                                &code[subchild.byte_range()]
+                            );
+                        }
+                    }
+                }
+                println!();
+            }
+
+            // Recurse
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                analyze_node(child, code, depth + 1);
+            }
+        }
+
+        analyze_node(root, code, 0);
+
+        println!("\n=== KEY FINDINGS ===");
+        println!("1. Check if 'extends' is a field or a child node for interfaces");
+        println!(
+            "2. Identify the exact node kind for interface extends (extends_clause vs extends_type_clause)"
+        );
+        println!("3. Compare with class extends structure");
+    }
+
+    #[test]
+    fn explore_typescript_generic_constructor_nodes() {
+        let language: Language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
+        let mut parser = tree_sitter::Parser::new();
+        parser.set_language(&language).unwrap();
+
+        println!("\n=== TypeScript Generic Constructor Node Exploration ===");
+
+        // Test case: new Map<string, Session>()
+        let code = r#"
+interface Session {
+    id: string;
+}
+const sessions = new Map<string, Session>();
+const simple = new Map();
+const nested = new Array<Map<string, User>>();
+const func = useState<Session>(null);
+const typed: Map<string, Session> = new Map();
+"#;
+
+        let tree = parser.parse(code, None).unwrap();
+        let root = tree.root_node();
+
+        fn print_node_tree(node: tree_sitter::Node, code: &str, indent: usize) {
+            let node_text = &code[node.byte_range()];
+            let truncated = if node_text.len() > 40 {
+                format!("{}...", &node_text[..40].replace('\n', "\\n"))
+            } else {
+                node_text.replace('\n', "\\n")
+            };
+
+            println!(
+                "{:indent$}[{}] '{}' (id: {}, has_field: {})",
+                "",
+                node.kind(),
+                truncated,
+                node.kind_id(),
+                node.child_count() > 0,
+                indent = indent
+            );
+
+            // Print field names if available
+            let mut cursor = node.walk();
+            for (i, child) in node.children(&mut cursor).enumerate() {
+                if let Some(field_name) = node.field_name_for_child(i as u32) {
+                    println!(
+                        "{:indent$}  └─ field: '{}'",
+                        "",
+                        field_name,
+                        indent = indent + 2
+                    );
+                }
+                print_node_tree(child, code, indent + 4);
+            }
+        }
+
+        println!("\nFull tree structure:");
+        print_node_tree(root, code, 0);
+
+        // Now specifically look for patterns
+        println!("\n=== Analyzing 'new Map<string, Session>()' pattern ===");
+
+        fn find_new_expressions(node: tree_sitter::Node, code: &str, depth: usize) {
+            if node.kind() == "new_expression" {
+                println!("\nFound new_expression at depth {depth}:");
+                println!("  Full text: '{}'", &code[node.byte_range()]);
+
+                let mut cursor = node.walk();
+                for (i, child) in node.children(&mut cursor).enumerate() {
+                    let field_name = node.field_name_for_child(i as u32);
+                    println!(
+                        "  Child {}: [{}] field={:?} text='{}'",
+                        i,
+                        child.kind(),
+                        field_name,
+                        &code[child.byte_range()]
+                    );
+
+                    // If this is type_arguments, explore deeper
+                    if child.kind() == "type_arguments" {
+                        println!("    Found type_arguments!");
+                        let mut type_cursor = child.walk();
+                        for (j, type_child) in child.children(&mut type_cursor).enumerate() {
+                            println!(
+                                "      Type arg {}: [{}] '{}'",
+                                j,
+                                type_child.kind(),
+                                &code[type_child.byte_range()]
+                            );
+                        }
+                    }
+                }
+            }
+
+            // Recurse
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                find_new_expressions(child, code, depth + 1);
+            }
+        }
+
+        find_new_expressions(root, code, 0);
+    }
+
+    #[test]
     fn explore_rust_abi15_features() {
         let language: Language = tree_sitter_rust::LANGUAGE.into();
 

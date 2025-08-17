@@ -222,7 +222,7 @@ impl MethodCall {
     /// Handles the legacy tuple format used by the current parser system.
     /// Converts patterns like:
     /// - `"self.method"` → self method call
-    /// - `"Type::method"` → static method call  
+    /// - `"Type::method"` → static method call
     /// - `"receiver@method"` → instance call with receiver hint
     /// - `"method"` → plain function call
     ///
@@ -316,7 +316,7 @@ mod tests {
                 let parts: Vec<&str> = target.split("::").collect();
                 if parts.len() == 2 {
                     if debug {
-                        eprintln!("DEBUG: Parsing static call '{}' -> type: '{}', method: '{}'", 
+                        eprintln!("DEBUG: Parsing static call '{}' -> type: '{}', method: '{}'",
                                  target, parts[0], parts[1]);
                     }
                     MethodCall::new(caller, parts[1], *range)
@@ -330,7 +330,7 @@ mod tests {
                 let parts: Vec<&str> = target.split('@').collect();
                 if parts.len() == 2 {
                     if debug {
-                        eprintln!("DEBUG: Parsing receiver hint '{}' -> receiver: '{}', method: '{}'", 
+                        eprintln!("DEBUG: Parsing receiver hint '{}' -> receiver: '{}', method: '{}'",
                                  target, parts[0], parts[1]);
                     }
                     MethodCall::new(caller, parts[1], *range)

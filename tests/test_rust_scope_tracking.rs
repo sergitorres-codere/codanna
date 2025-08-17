@@ -32,17 +32,17 @@ static mut COUNTER: u32 = 0;
 // Module-level function
 fn module_function() {
     let local_var = 42;
-    
+
     // Nested function (closure)
     let closure = |x| {
         x + local_var
     };
-    
+
     // Nested type
     struct InnerStruct {
         field: i32,
     }
-    
+
     closure(10);
 }
 
@@ -61,12 +61,12 @@ impl MyStruct {
             name,
         }
     }
-    
+
     // Instance method
     fn method(&self) -> i32 {
         self.field
     }
-    
+
     // Mutable method
     fn mut_method(&mut self) {
         self.field += 1;
@@ -117,8 +117,10 @@ mod submodule {
     for symbol in &symbols {
         let scope_str = match &symbol.scope_context {
             Some(ScopeContext::Module) => "MODULE",
-            Some(ScopeContext::Local { hoisted: false }) => "LOCAL (not hoisted)",
-            Some(ScopeContext::Local { hoisted: true }) => "LOCAL (hoisted - unexpected for Rust!)",
+            Some(ScopeContext::Local { hoisted: false, .. }) => "LOCAL (not hoisted)",
+            Some(ScopeContext::Local { hoisted: true, .. }) => {
+                "LOCAL (hoisted - unexpected for Rust!)"
+            }
             Some(ScopeContext::ClassMember) => "CLASS_MEMBER",
             Some(ScopeContext::Parameter) => "PARAMETER",
             Some(ScopeContext::Package) => "PACKAGE",
@@ -204,7 +206,11 @@ mod submodule {
         );
         assert_eq!(
             is.scope_context,
-            Some(ScopeContext::Local { hoisted: false })
+            Some(ScopeContext::Local {
+                hoisted: false,
+                parent_name: None,
+                parent_kind: None
+            })
         );
     } else {
         println!("WARNING: InnerStruct not found in symbols!");
@@ -248,16 +254,16 @@ fn outer_function() {
     struct InnerStruct {
         value: i32,
     }
-    
+
     impl InnerStruct {
         fn inner_method(&self) -> i32 {
             self.value
         }
     }
-    
+
     // Closure
     let add = |a, b| a + b;
-    
+
     // Nested function via closure
     let nested = || {
         println!("nested");
@@ -267,7 +273,7 @@ fn outer_function() {
 // Test module nesting
 mod outer_mod {
     pub fn outer_mod_fn() {}
-    
+
     pub mod inner_mod {
         pub fn inner_mod_fn() {}
     }

@@ -396,7 +396,7 @@ pub trait LanguageBehavior: Send + Sync {
         use crate::SymbolKind;
 
         // Check scope_context first if available
-        if let Some(scope_context) = symbol.scope_context {
+        if let Some(ref scope_context) = symbol.scope_context {
             use crate::symbol::ScopeContext;
             match scope_context {
                 ScopeContext::Module | ScopeContext::Global | ScopeContext::Package => true,

@@ -31,20 +31,20 @@ $GLOBALS['app_name'] = 'MyApp';
 function moduleHelper($param) {
     // Function local variable
     $localVar = 42;
-    
+
     // Closure (anonymous function)
     $closure = function($x) use ($localVar) {
         // Closure local variable
         $closureLocal = $x * 2;
         return $closureLocal + $localVar;
     };
-    
+
     // Nested function definition (creates at module level in PHP)
     function nestedFunction() {
         $nestedLocal = 'nested';
         return $nestedLocal;
     }
-    
+
     return $closure($param);
 }
 
@@ -54,51 +54,51 @@ class User {
     private $id;
     protected $email;
     public $name;
-    
+
     // Class constant
     const STATUS_ACTIVE = 'active';
     const STATUS_INACTIVE = 'inactive';
-    
+
     // Static property
     private static $instances = 0;
-    
+
     // Constructor
     public function __construct($name, $email) {
         $this->name = $name;
         $this->email = $email;
         self::$instances++;
     }
-    
+
     // Instance method
     public function getEmail() {
         // Method local variable
         $formatted = strtolower($this->email);
         return $formatted;
     }
-    
+
     // Static method
     public static function getInstanceCount() {
         return self::$instances;
     }
-    
+
     // Method with closure
     public function process($items) {
         $multiplier = 10;
-        
+
         // Closure inside method
         $processor = function($item) use ($multiplier) {
             return $item * $multiplier;
         };
-        
+
         return array_map($processor, $items);
     }
-    
+
     // Protected method
     protected function validate() {
         $rules = ['email' => 'required'];
         return true;
     }
-    
+
     // Private method
     private function generateId() {
         $this->id = uniqid();
@@ -114,15 +114,15 @@ interface UserInterface {
 // Module-level trait
 trait SoftDeletes {
     protected $deleted_at = null;
-    
+
     public function delete() {
         $this->deleted_at = new DateTime();
     }
-    
+
     public function restore() {
         $this->deleted_at = null;
     }
-    
+
     public function isDeleted() {
         return $this->deleted_at !== null;
     }
@@ -132,7 +132,7 @@ trait SoftDeletes {
 abstract class Model {
     abstract public function save();
     abstract public function load($id);
-    
+
     public function toArray() {
         return get_object_vars($this);
     }
@@ -141,21 +141,21 @@ abstract class Model {
 // Class extending abstract and using trait
 class Product extends Model {
     use SoftDeletes;
-    
+
     private $sku;
     private $price;
-    
+
     public function __construct($sku, $price) {
         $this->sku = $sku;
         $this->price = $price;
     }
-    
+
     public function save() {
         // Implementation
         $timestamp = time();
         return true;
     }
-    
+
     public function load($id) {
         // Implementation
         $data = ['sku' => 'TEST', 'price' => 99.99];
@@ -401,11 +401,11 @@ use App\Services\AuthService;
 
 class UserController {
     private AuthService $authService;
-    
+
     public function __construct(AuthService $service) {
         $this->authService = $service;
     }
-    
+
     public function index() {
         $users = User::all();
         return view('users.index', compact('users'));
@@ -416,7 +416,7 @@ namespace App\Models;
 
 class User {
     protected $fillable = ['name', 'email'];
-    
+
     public static function all() {
         return [];
     }
@@ -427,7 +427,7 @@ namespace {
     function globalFunction() {
         return 'global';
     }
-    
+
     class GlobalClass {
         public function method() {
             return 'method';
@@ -500,25 +500,25 @@ fn verify_php_closure_and_anonymous_scope() {
 // Top-level closure
 $globalClosure = function($x) {
     $closureLocal = $x * 2;
-    
+
     // Nested closure
     $nestedClosure = function($y) use ($closureLocal) {
         return $y + $closureLocal;
     };
-    
+
     return $nestedClosure($x);
 };
 
 class Container {
     private $bindings = [];
-    
+
     public function bind($key, $resolver) {
         // Closure as parameter
         $this->bindings[$key] = function() use ($resolver) {
             return $resolver();
         };
     }
-    
+
     public function resolve($key) {
         $resolver = $this->bindings[$key];
         return $resolver();
@@ -531,16 +531,16 @@ $multiply = fn($x, $y) => $x * $y;
 // Anonymous class with closure
 $service = new class {
     private $handler;
-    
+
     public function setHandler($handler) {
         $this->handler = $handler;
     }
-    
+
     public function process($data) {
         $processor = function($item) {
             return strtoupper($item);
         };
-        
+
         return array_map($processor, $data);
     }
 };

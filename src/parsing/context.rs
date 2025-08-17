@@ -4,6 +4,7 @@
 //! can use to communicate proper scope information to resolvers.
 
 use crate::symbol::ScopeContext;
+use crate::types::SymbolKind;
 
 /// Scope types that parsers track during AST traversal
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -104,11 +105,39 @@ impl ParserContext {
         for scope in self.scope_stack.iter().rev() {
             match scope {
                 ScopeType::Function { hoisting } => {
-                    return ScopeContext::Local { hoisted: *hoisting };
+                    // Determine parent info
+                    let (parent_name, parent_kind) = if let Some(func_name) = &self.current_function
+                    {
+                        (Some(func_name.clone().into()), Some(SymbolKind::Function))
+                    } else if let Some(class_name) = &self.current_class {
+                        (Some(class_name.clone().into()), Some(SymbolKind::Class))
+                    } else {
+                        (None, None)
+                    };
+
+                    return ScopeContext::Local {
+                        hoisted: *hoisting,
+                        parent_name,
+                        parent_kind,
+                    };
                 }
                 ScopeType::Block => {
                     // Block scope is still local
-                    return ScopeContext::Local { hoisted: false };
+                    // Determine parent info
+                    let (parent_name, parent_kind) = if let Some(func_name) = &self.current_function
+                    {
+                        (Some(func_name.clone().into()), Some(SymbolKind::Function))
+                    } else if let Some(class_name) = &self.current_class {
+                        (Some(class_name.clone().into()), Some(SymbolKind::Class))
+                    } else {
+                        (None, None)
+                    };
+
+                    return ScopeContext::Local {
+                        hoisted: false,
+                        parent_name,
+                        parent_kind,
+                    };
                 }
                 ScopeType::Class => {
                     return ScopeContext::ClassMember;
@@ -218,7 +247,11 @@ mod tests {
 
         assert_eq!(
             ctx.current_scope_context(),
-            ScopeContext::Local { hoisted: false }
+            ScopeContext::Local {
+                hoisted: false,
+                parent_name: Some("my_func".to_string().into()),
+                parent_kind: Some(SymbolKind::Function),
+            }
         );
         assert!(ctx.is_in_function());
         assert!(!ctx.is_module_level());
@@ -237,9 +270,14 @@ mod tests {
 
         // Enter method within class
         ctx.enter_scope(ScopeType::Function { hoisting: false });
+        // Since we didn't set current_function, parent info will be None
         assert_eq!(
             ctx.current_scope_context(),
-            ScopeContext::Local { hoisted: false }
+            ScopeContext::Local {
+                hoisted: false,
+                parent_name: None,
+                parent_kind: None,
+            }
         );
         assert!(ctx.is_in_class());
         assert!(ctx.is_in_function());
@@ -260,7 +298,11 @@ mod tests {
 
         assert_eq!(
             ctx.current_scope_context(),
-            ScopeContext::Local { hoisted: true }
+            ScopeContext::Local {
+                hoisted: true,
+                parent_name: None,
+                parent_kind: None,
+            }
         );
     }
 }

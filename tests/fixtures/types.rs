@@ -19,7 +19,7 @@ impl Operation for Addition {
     fn execute(&self, value: i32) -> i32 {
         value + self.amount
     }
-    
+
     fn name(&self) -> &str {
         "addition"
     }
@@ -39,7 +39,7 @@ impl Operation for Multiplication {
     fn execute(&self, value: i32) -> i32 {
         value * self.factor
     }
-    
+
     fn name(&self) -> &str {
         "multiplication"
     }

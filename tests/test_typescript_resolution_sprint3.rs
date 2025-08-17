@@ -146,11 +146,11 @@ const arrowFunction = () => "not hoisted";
 function outer() {
     // Can call before declaration due to hoisting
     inner();
-    
+
     function inner() {
         return "hoisted in function scope";
     }
-    
+
     // Arrow function - not hoisted
     const innerArrow = () => "not hoisted";
 }
@@ -179,7 +179,7 @@ class MyClass {
         let name = symbol.name.as_ref();
         let old_heuristic = name.starts_with("function");
         let actual_hoisting = match &symbol.scope_context {
-            Some(codanna::symbol::ScopeContext::Local { hoisted }) => *hoisted,
+            Some(codanna::symbol::ScopeContext::Local { hoisted, .. }) => *hoisted,
             _ => false,
         };
 

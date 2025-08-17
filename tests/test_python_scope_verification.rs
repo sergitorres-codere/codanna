@@ -15,30 +15,30 @@ MAX_SIZE = 100
 def module_func():
     """Module function"""
     local_var = 42
-    
+
     def nested_func():
         """Nested function"""
         nested_var = 10
         return nested_var
-    
+
     return nested_func()
 
 class MyClass:
     """Module class"""
     CLASS_ATTR = "shared"
-    
+
     def __init__(self):
         """Constructor"""
         self.instance_var = 0
-    
+
     def method(self):
         """Instance method"""
         method_local = 5
-        
+
         class InnerClass:
             """Class inside method"""
             pass
-            
+
         return method_local
 "#;
 
@@ -53,8 +53,8 @@ class MyClass:
     for symbol in &symbols {
         let scope_str = match &symbol.scope_context {
             Some(ScopeContext::Module) => "MODULE",
-            Some(ScopeContext::Local { hoisted: false }) => "LOCAL (not hoisted)",
-            Some(ScopeContext::Local { hoisted: true }) => "LOCAL (hoisted)",
+            Some(ScopeContext::Local { hoisted: false, .. }) => "LOCAL (not hoisted)",
+            Some(ScopeContext::Local { hoisted: true, .. }) => "LOCAL (hoisted)",
             Some(ScopeContext::ClassMember) => "CLASS_MEMBER",
             Some(ScopeContext::Parameter) => "PARAMETER",
             Some(ScopeContext::Package) => "PACKAGE",
@@ -105,7 +105,11 @@ class MyClass:
     );
     assert_eq!(
         nested_func.scope_context,
-        Some(ScopeContext::Local { hoisted: false })
+        Some(ScopeContext::Local {
+            hoisted: false,
+            parent_name: None,
+            parent_kind: None
+        })
     );
 
     // Verify class (should be Module)
@@ -151,7 +155,11 @@ class MyClass:
     );
     assert_eq!(
         inner_class.scope_context,
-        Some(ScopeContext::Local { hoisted: false })
+        Some(ScopeContext::Local {
+            hoisted: false,
+            parent_name: None,
+            parent_kind: None
+        })
     );
 
     println!("\n=== ALL SCOPE VERIFICATIONS PASSED ===\n");
@@ -170,16 +178,16 @@ global_var = "module level"
 def outer():
     outer_local = 10
     OUTER_CONST = 100  # Should be local constant
-    
+
     def inner():
         inner_var = 20
         return inner_var + outer_local
-    
+
     return inner
 
 class TestClass:
     class_var = "shared"
-    
+
     def method(self):
         method_var = 30
         return method_var
@@ -291,7 +299,11 @@ class A:
         );
         assert_eq!(
             func4.scope_context,
-            Some(ScopeContext::Local { hoisted: false })
+            Some(ScopeContext::Local {
+                hoisted: false,
+                parent_name: None,
+                parent_kind: None
+            })
         );
     }
 

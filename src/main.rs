@@ -3431,7 +3431,7 @@ impl Struct{i} {{
     fn new(value: i32) -> Self {{
         Self {{ value }}
     }}
-    
+
     fn method_a(&self) -> i32 {{
         self.value * 2
     }}
@@ -3464,10 +3464,10 @@ fn generate_python_benchmark_code() -> String {
         code.push_str(&format!(
             r#"class Class_{i}:
     """Class {i} documentation."""
-    
+
     def __init__(self, value: int):
         self.value = value
-    
+
     def method_a(self) -> int:
         return self.value * 2
 
@@ -3504,15 +3504,15 @@ function function_{i}(int $param1, string $param2 = 'default'): bool {{
  */
 class Class_{i} {{
     private int $value;
-    
+
     public function __construct(int $value) {{
         $this->value = $value;
     }}
-    
+
     public function methodA(): int {{
         return $this->value * 2;
     }}
-    
+
     public function methodB(string $param): string {{
         return strtoupper($param);
     }}

@@ -54,7 +54,7 @@
 //! pub fn commit_tantivy_batch(&self) -> IndexResult<()> {
 //!     // First commit Tantivy changes
 //!     self.document_index.commit_batch()?;
-//!     
+//!
 //!     // Then process pending vectors if enabled
 //!     if let (Some(engine), Some(generator)) = (&self.vector_engine, &self.embedding_generator) {
 //!         if !self.pending_symbols.is_empty() {
@@ -76,11 +76,11 @@
 //!     let texts: Vec<&str> = self.pending_symbols.iter()
 //!         .map(|(_, text)| text.as_str())
 //!         .collect();
-//!     
+//!
 //!     // Generate embeddings in batch
 //!     let embeddings = generator.generate_embeddings(&texts)
 //!         .map_err(|e| IndexError::General(format!("Embedding generation failed: {}", e)))?;
-//!     
+//!
 //!     // Create (VectorId, Vec<f32>) pairs
 //!     let mut vector_pairs = Vec::new();
 //!     for ((symbol_id, _), embedding) in self.pending_symbols.iter().zip(embeddings.iter()) {
@@ -88,14 +88,14 @@
 //!         let vector_id = VectorId::new(symbol_id.0)?;
 //!         vector_pairs.push((vector_id, embedding.clone()));
 //!     }
-//!     
+//!
 //!     // Index vectors with clustering
 //!     engine.index_vectors(&vector_pairs)
 //!         .map_err(|e| IndexError::General(format!("Vector indexing failed: {}", e)))?;
-//!     
+//!
 //!     // Clear pending symbols
 //!     self.pending_symbols.clear();
-//!     
+//!
 //!     Ok(())
 //! }
 //! ```
@@ -122,7 +122,7 @@
 //! ```rust,ignore
 //! fn remove_file_symbols(&mut self, file_id: FileId) -> IndexResult<()> {
 //!     let symbols = self.document_index.find_symbols_by_file(file_id)?;
-//!     
+//!
 //!     // Remove vectors if engine is enabled
 //!     if let Some(engine) = &self.vector_engine {
 //!         let vector_ids: Vec<VectorId> = symbols.iter()
@@ -130,7 +130,7 @@
 //!             .collect();
 //!         // TODO: Add remove_vectors method to VectorSearchEngine
 //!     }
-//!     
+//!
 //!     // ... existing symbol removal code ...
 //! }
 //! ```

@@ -248,7 +248,7 @@ impl LanguageBehavior for TypeScriptBehavior {
         }
 
         // Check scope_context for non-hoisted symbols
-        if let Some(scope_context) = symbol.scope_context {
+        if let Some(ref scope_context) = symbol.scope_context {
             match scope_context {
                 ScopeContext::Module | ScopeContext::Global | ScopeContext::Package => true,
                 ScopeContext::Local { .. } | ScopeContext::Parameter => false,

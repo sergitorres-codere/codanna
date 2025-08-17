@@ -1250,7 +1250,7 @@ mod tests {
 class Calculator:
     def __init__(self):
         self.value = 0
-    
+
     def add(self, n):
         self.value += n
 "#;
@@ -1348,10 +1348,10 @@ def outer():
         let code = r#"
 def calculate_area(radius):
     """Calculate the area of a circle.
-    
+
     Args:
         radius: The radius of the circle.
-    
+
     Returns:
         The area of the circle.
     """
@@ -1389,7 +1389,7 @@ def calculate_area(radius):
         let code = r#"
 class DatabaseConnection:
     """Manages database connections.
-    
+
     This class provides a high-level interface for database operations.
     """
     def __init__(self, host, port):
@@ -1488,7 +1488,7 @@ def no_doc():
 class TestClass:
     '''
     This is a class with single quotes.
-    
+
     Multiple lines here.
     '''
     pass
@@ -1925,7 +1925,7 @@ async def fetch_data(url: str, timeout: float = 5.0) -> Dict[str, Any]:
 class Config:
     timeout: int = 30
     endpoints: List[str] = []
-    
+
 def setup():
     connection: DatabaseConnection = connect()
     retry_count: int = 3
@@ -2150,7 +2150,7 @@ class APIClient:
     async def fetch(self, url: str) -> dict:
         response = await self.http_client.get(url)
         return response.json()
-    
+
     def sync_method(self):
         return "sync"
 "#;
@@ -2197,8 +2197,8 @@ class APIClient:
 
         // Async function with complex signature
         let code2 = r#"async def process(
-    data: List[Dict[str, Any]], 
-    *args: Any, 
+    data: List[Dict[str, Any]],
+    *args: Any,
     **kwargs: Dict[str, Any]
 ) -> Optional[Result]: pass"#;
         let symbols2 = parser.parse(
@@ -2258,13 +2258,13 @@ def another_regular(): pass
         let code = r#"
 class AsyncWebService:
     """An async web service for handling HTTP requests."""
-    
+
     async def fetch_user(self, user_id: int) -> Optional[User]:
         """Fetch a user by ID from the API.
-        
+
         Args:
             user_id: The ID of the user to fetch.
-            
+
         Returns:
             The user object if found, None otherwise.
         """
@@ -2272,7 +2272,7 @@ class AsyncWebService:
         if response.status == 200:
             return User.from_dict(response.json())
         return None
-    
+
     def get_cache_key(self, user_id: int) -> str:
         """Generate cache key for user data."""
         return f"user:{user_id}"
@@ -2410,7 +2410,7 @@ class Complex(SimpleBase, module.QualifiedBase, another.pkg.DeepBase):
 class Outer:
     class Inner(OuterBase):
         pass
-    
+
     class AnotherInner(Outer.Inner):
         pass
 "#;

@@ -86,12 +86,12 @@ fn test_typescript_find_calls_simple() {
 function outer() {
     inner();           // Function call
     helper(123);       // Function call with args
-    
+
     const x = process(); // Function call in assignment
-    
+
     // Nested calls
     transform(getData());
-    
+
     // Should NOT find these (method calls):
     console.log("test");
     array.push(1);

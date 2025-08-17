@@ -2,6 +2,7 @@
 .codanna/
 .codanna/index/
 .fastembed_cache/
+.logs/
 
 # Build artifacts
 *.rcgu.o

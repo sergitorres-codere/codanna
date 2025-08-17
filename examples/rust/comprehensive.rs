@@ -69,15 +69,15 @@ pub trait Parser {
     type Input;
     type Output;
     type Error: std::error::Error;
-    
+
     const MAX_DEPTH: usize = 100;
-    
+
     fn parse(&self, input: Self::Input) -> Result<Self::Output>;
-    
+
     fn validate(&self, input: &Self::Input) -> bool {
         true
     }
-    
+
     // Associated function (no self)
     fn new() -> Self where Self: Sized;
 }
@@ -99,7 +99,7 @@ pub trait Lifecycle<'a> {
 impl Config {
     // Associated constant
     pub const DEFAULT_PORT: u16 = 8080;
-    
+
     // Associated function (constructor)
     pub fn new(name: String) -> Self {
         Self {
@@ -109,35 +109,35 @@ impl Config {
             phantom: PhantomData,
         }
     }
-    
+
     // Method with self
     pub fn port(&self) -> u16 {
         self.port
     }
-    
+
     // Method with mut self
     pub fn set_port(&mut self, port: u16) {
         self.port = port;
     }
-    
+
     // Method consuming self
     pub fn into_name(self) -> String {
         self.name
     }
-    
+
     // Generic method
-    pub fn with_data<T>(&self, data: T) -> (Self, T) 
-    where 
+    pub fn with_data<T>(&self, data: T) -> (Self, T)
+    where
         T: Clone,
     {
         (self.clone(), data)
     }
-    
+
     // Async method
     pub async fn connect(&self) -> Result<()> {
         Ok(())
     }
-    
+
     // Unsafe method
     pub unsafe fn get_raw_ptr(&self) -> *const u8 {
         &self.port as *const u16 as *const u8
@@ -149,18 +149,18 @@ impl Parser for Config {
     type Input = String;
     type Output = Config;
     type Error = std::io::Error;
-    
+
     fn parse(&self, input: Self::Input) -> Result<Self::Output> {
         Ok(Config::new(input))
     }
-    
+
     fn new() -> Self {
         Config::new(String::new())
     }
 }
 
 // Generic struct
-pub struct GenericContainer<T, U = String> 
+pub struct GenericContainer<T, U = String>
 where
     T: Clone,
 {
@@ -180,7 +180,7 @@ where
             metadata: U::default(),
         }
     }
-    
+
     pub fn add(&mut self, item: T) {
         self.items.push(item);
     }
@@ -194,11 +194,11 @@ where
     fn add(&mut self, item: T) {
         self.items.push(item);
     }
-    
+
     fn get(&self, index: usize) -> Option<&T> {
         self.items.get(index)
     }
-    
+
     fn iter(&self) -> impl Iterator<Item = &T> {
         self.items.iter()
     }
@@ -295,13 +295,13 @@ impl std::error::Error for Error {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_config() {
         let config = Config::new("test".to_string());
         assert_eq!(config.port(), Config::DEFAULT_PORT);
     }
-    
+
     #[test]
     #[ignore]
     fn ignored_test() {
@@ -313,7 +313,7 @@ mod tests {
 #[cfg(all(test, feature = "unstable"))]
 mod benches {
     use test::Bencher;
-    
+
     #[bench]
     fn bench_create(b: &mut Bencher) {
         b.iter(|| Config::new("bench".to_string()));

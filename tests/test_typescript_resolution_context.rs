@@ -22,14 +22,22 @@ fn test_typescript_resolution_hoisting() {
     context.add_symbol_with_context(
         "myFunction".to_string(),
         codanna::SymbolId::new(1).unwrap(),
-        Some(&ScopeContext::Local { hoisted: true }),
+        Some(&ScopeContext::Local {
+            hoisted: true,
+            parent_name: None,
+            parent_kind: None,
+        }),
     );
 
     // Add block-scoped const (should go to local_scope)
     context.add_symbol_with_context(
         "myConst".to_string(),
         codanna::SymbolId::new(2).unwrap(),
-        Some(&ScopeContext::Local { hoisted: false }),
+        Some(&ScopeContext::Local {
+            hoisted: false,
+            parent_name: None,
+            parent_kind: None,
+        }),
     );
 
     // Add module-level export
@@ -120,24 +128,24 @@ const MODULE_CONST = 42;
 function hoistedFunction() {
     // Block-scoped variable
     const blockVar = 10;
-    
+
     // Nested hoisted function
     function nestedHoisted() {
         return blockVar;
     }
-    
+
     // Arrow function (not hoisted)
     const arrowFunc = () => {
         console.log("arrow");
     };
-    
+
     return nestedHoisted();
 }
 
 // Module-level class
 export class ExportedClass {
     private field: number = 0;
-    
+
     public method(): void {
         // Method-local variable
         const methodLocal = 20;
@@ -173,13 +181,17 @@ const moduleArrow = (x: number) => x * 2;
             "nestedHoisted" => {
                 assert_eq!(
                     symbol.scope_context,
-                    Some(ScopeContext::Local { hoisted: true }),
+                    Some(ScopeContext::Local {
+                        hoisted: true,
+                        parent_name: None,
+                        parent_kind: None
+                    }),
                     "Nested function should be hoisted"
                 );
             }
             "arrowFunc" => {
                 // Arrow functions are not hoisted
-                if let Some(ScopeContext::Local { hoisted }) = &symbol.scope_context {
+                if let Some(ScopeContext::Local { hoisted, .. }) = &symbol.scope_context {
                     assert!(!hoisted, "Arrow function should not be hoisted");
                 }
             }
@@ -215,7 +227,7 @@ class MyClass {
             const localBlock = 10;
             return localBlock;
         }
-        
+
         const methodLocal = localHoisted();
         return methodLocal;
     }

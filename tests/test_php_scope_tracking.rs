@@ -29,19 +29,19 @@ define('VERSION', '1.0.0');
 // Global function
 function moduleFunction() {
     $localVar = 42;
-    
+
     // Nested function (not common in PHP but possible via closures)
     $closure = function($x) use ($localVar) {
         return $x + $localVar;
     };
-    
+
     // Local class (PHP 7+)
     class LocalClass {
         public function localMethod() {
             echo "local";
         }
     }
-    
+
     return $closure(10);
 }
 
@@ -49,31 +49,31 @@ function moduleFunction() {
 class MyClass {
     private $field = 0;
     public $name;
-    
+
     // Class constant
     const CLASS_CONST = 'constant';
-    
+
     public function __construct($name) {
         $this->name = $name;
     }
-    
+
     public function method() {
         $methodLocal = 10;
-        
+
         // Inner class (rare but valid in PHP)
         class InnerClass {
             public function innerMethod() {
                 return "inner";
             }
         }
-        
+
         return new InnerClass();
     }
-    
+
     protected function protectedMethod() {
         return "protected";
     }
-    
+
     private static function staticMethod() {
         return "static";
     }
@@ -89,14 +89,14 @@ trait MyTrait {
     public function traitMethod() {
         echo "trait";
     }
-    
+
     abstract public function abstractTraitMethod();
 }
 
 // Class using trait
 class TraitUser {
     use MyTrait;
-    
+
     public function abstractTraitMethod() {
         echo "implemented";
     }
@@ -123,8 +123,10 @@ namespace MyNamespace {
     for symbol in &symbols {
         let scope_str = match &symbol.scope_context {
             Some(ScopeContext::Module) => "MODULE",
-            Some(ScopeContext::Local { hoisted: false }) => "LOCAL (not hoisted)",
-            Some(ScopeContext::Local { hoisted: true }) => "LOCAL (hoisted - unexpected for PHP!)",
+            Some(ScopeContext::Local { hoisted: false, .. }) => "LOCAL (not hoisted)",
+            Some(ScopeContext::Local { hoisted: true, .. }) => {
+                "LOCAL (hoisted - unexpected for PHP!)"
+            }
             Some(ScopeContext::ClassMember) => "CLASS_MEMBER",
             Some(ScopeContext::Parameter) => "PARAMETER",
             Some(ScopeContext::Package) => "PACKAGE",
@@ -174,7 +176,11 @@ namespace MyNamespace {
         println!("LocalClass scope: {:?} (expected: Local)", lc.scope_context);
         assert_eq!(
             lc.scope_context,
-            Some(ScopeContext::Local { hoisted: false })
+            Some(ScopeContext::Local {
+                hoisted: false,
+                parent_name: None,
+                parent_kind: None
+            })
         );
     } else {
         println!("WARNING: LocalClass not found in symbols!");
@@ -246,12 +252,12 @@ function outerFunction() {
     $add = function($a, $b) {
         return $a + $b;
     };
-    
+
     // Named function inside function (not common)
     function innerFunction() {
         echo "inner";
     }
-    
+
     // Class inside function
     class FunctionClass {
         public function classMethod() {
@@ -263,7 +269,7 @@ function outerFunction() {
 // Test namespace scoping
 namespace Outer {
     function namespacedFunction() {}
-    
+
     namespace Inner {
         function deepFunction() {}
     }

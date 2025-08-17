@@ -15,37 +15,37 @@ const MAX_SIZE = 100;
 // Module-level function (hoisted)
 function moduleFunction() {
     const localVar = 42;
-    
+
     // Nested function
     function nestedFunction() {
         return localVar;
     }
-    
+
     // Arrow function (not hoisted)
     const arrowFunc = () => {
         console.log("arrow");
     };
-    
+
     return nestedFunction();
 }
 
 // Module-level class
 class MyClass {
     private field: number = 0;
-    
+
     constructor() {
         this.field = 1;
     }
-    
+
     public method(): void {
         const methodLocal = 10;
-        
+
         // Inner class
         class InnerClass {
             innerMethod() {}
         }
     }
-    
+
     static staticMethod() {
         return "static";
     }
@@ -82,8 +82,8 @@ const moduleArrow = (x: number) => x * 2;
     for symbol in &symbols {
         let scope_str = match &symbol.scope_context {
             Some(ScopeContext::Module) => "MODULE",
-            Some(ScopeContext::Local { hoisted: false }) => "LOCAL (not hoisted)",
-            Some(ScopeContext::Local { hoisted: true }) => "LOCAL (hoisted)",
+            Some(ScopeContext::Local { hoisted: false, .. }) => "LOCAL (not hoisted)",
+            Some(ScopeContext::Local { hoisted: true, .. }) => "LOCAL (hoisted)",
             Some(ScopeContext::ClassMember) => "CLASS_MEMBER",
             Some(ScopeContext::Parameter) => "PARAMETER",
             Some(ScopeContext::Package) => "PACKAGE",
@@ -121,7 +121,11 @@ const moduleArrow = (x: number) => x * 2;
         // Function declarations are hoisted even when nested
         assert_eq!(
             nf.scope_context,
-            Some(ScopeContext::Local { hoisted: true })
+            Some(ScopeContext::Local {
+                hoisted: true,
+                parent_name: None,
+                parent_kind: None
+            })
         );
     }
 
@@ -193,7 +197,7 @@ class TestClass {
     method1() {
         this.method2(); // Can call other methods
     }
-    
+
     method2() {
         return "method2";
     }

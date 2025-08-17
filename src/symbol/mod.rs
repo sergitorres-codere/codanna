@@ -21,12 +21,16 @@ pub enum Visibility {
 ///
 /// This enum represents where a symbol is defined in the code structure,
 /// enabling proper resolution without heuristics.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum ScopeContext {
     /// Local to function/method/block
     Local {
         /// For JS/TS: is this hoisted to function scope?
         hoisted: bool,
+        /// Name of the parent function/class this is local to
+        parent_name: Option<CompactString>,
+        /// Kind of the parent (Function, Class, etc.)
+        parent_kind: Option<SymbolKind>,
     },
     /// Parameter of function/method
     Parameter,

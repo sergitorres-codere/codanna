@@ -12,11 +12,11 @@ class UserService {
         this.checkAuth();           // Method call on this
         this.logger.info("test");   // Chained method call
     }
-    
+
     async process(data: any) {
         data.transform();           // Method call on parameter
         await data.save();          // Async method call
-        
+
         // Chained calls
         data
             .filter(x => x > 0)     // Method call
@@ -28,12 +28,12 @@ class UserService {
 function standalone() {
     const arr = [1, 2, 3];
     arr.map(x => x * 2);           // Array method
-    
+
     console.log("test");            // Console method
-    
+
     // Optional chaining
     obj?.method?.();                // Optional method call
-    
+
     // Regular function calls (should NOT find)
     regularFunction();
     helperFunction(123);
