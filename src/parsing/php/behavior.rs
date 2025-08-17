@@ -37,6 +37,16 @@ impl Default for PhpBehavior {
 }
 
 impl LanguageBehavior for PhpBehavior {
+    fn create_resolution_context(
+        &self,
+        file_id: FileId,
+    ) -> Box<dyn crate::parsing::ResolutionScope> {
+        Box::new(crate::parsing::php::PhpResolutionContext::new(file_id))
+    }
+
+    fn create_inheritance_resolver(&self) -> Box<dyn crate::parsing::InheritanceResolver> {
+        Box::new(crate::parsing::php::PhpInheritanceResolver::new())
+    }
     fn format_module_path(&self, base_path: &str, _symbol_name: &str) -> String {
         // PHP typically uses file paths as module paths, not including the symbol name
         // PHP parsers should set more specific paths for methods in the parser itself
@@ -129,6 +139,102 @@ impl LanguageBehavior for PhpBehavior {
         self.get_imports_from_state(file_id)
     }
 
+    // ========== Resolution API Required Methods ==========
+
+    fn get_module_path_for_file(&self, file_id: FileId) -> Option<String> {
+        // Use the BehaviorState to get module path (O(1) lookup)
+        self.state.get_module_path(file_id)
+    }
+
+    fn import_matches_symbol(
+        &self,
+        import_path: &str,
+        symbol_module_path: &str,
+        importing_module: Option<&str>,
+    ) -> bool {
+        // 1. Always check exact match first (performance)
+        if import_path == symbol_module_path {
+            return true;
+        }
+
+        // 2. Normalize by removing leading backslash for comparison
+        let import_normalized = import_path.trim_start_matches('\\');
+        let symbol_normalized = symbol_module_path.trim_start_matches('\\');
+
+        // Check if normalized versions match (handles Symfony\Component vs \Symfony\Component)
+        if import_normalized == symbol_normalized {
+            return true;
+        }
+
+        // 3. Handle relative namespace resolution when we have context
+        if let Some(importing_ns) = importing_module {
+            let importing_normalized = importing_ns.trim_start_matches('\\');
+
+            // Check if it's a relative namespace (no leading \)
+            if !import_path.starts_with('\\') {
+                // For namespaced imports (contains \), try relative resolution
+                if import_path.contains('\\') {
+                    // Try as sibling namespace
+                    // e.g., from App\Controllers, "Services\AuthService" -> "App\Services\AuthService"
+                    if let Some(parent_ns) = importing_normalized.rsplit_once('\\') {
+                        let candidate = format!("{}\\{}", parent_ns.0, import_normalized);
+                        if candidate == symbol_normalized {
+                            return true;
+                        }
+                    }
+
+                    // Try as child of current namespace
+                    let candidate = format!("{importing_normalized}\\{import_normalized}");
+                    if candidate == symbol_normalized {
+                        return true;
+                    }
+                } else {
+                    // Single name import - only match in same namespace
+                    // e.g., "User" should match "App\Models\User" only when in App\Models
+                    if let Some((symbol_ns, symbol_name)) = symbol_normalized.rsplit_once('\\') {
+                        if symbol_ns == importing_normalized && symbol_name == import_normalized {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+
+        false
+    }
+
+    fn resolve_import_path_with_context(
+        &self,
+        import_path: &str,
+        importing_module: Option<&str>,
+        document_index: &DocumentIndex,
+    ) -> Option<SymbolId> {
+        // Split the path using PHP's namespace separator
+        let separator = self.module_separator();
+        let segments: Vec<&str> = import_path.split(separator).collect();
+
+        if segments.is_empty() {
+            return None;
+        }
+
+        // The symbol name is the last segment
+        let symbol_name = segments.last()?;
+
+        // Find symbols with this name (using index for performance)
+        let candidates = document_index.find_symbols_by_name(symbol_name).ok()?;
+
+        // Find the one with matching module path using PHP-specific rules
+        for candidate in &candidates {
+            if let Some(module_path) = &candidate.module_path {
+                if self.import_matches_symbol(import_path, module_path.as_ref(), importing_module) {
+                    return Some(candidate.id);
+                }
+            }
+        }
+
+        None
+    }
+
     // PHP-specific: Handle PHP use statements and namespace imports
     fn resolve_import(
         &self,
@@ -141,9 +247,16 @@ impl LanguageBehavior for PhpBehavior {
         // 3. Function/const imports: use function array_map;
         // 4. Grouped imports: use App\{Model, Controller};
 
-        // For now, use basic resolution
-        // TODO: Implement full PHP namespace resolution with PSR-4 autoloading
-        self.resolve_import_path(&import.path, document_index)
+        // Get the importing module path for context
+        let importing_module = self.get_module_path_for_file(import.file_id);
+
+        // Use enhanced resolution with module context
+        // This will use our import_matches_symbol method for PHP-specific matching
+        self.resolve_import_path_with_context(
+            &import.path,
+            importing_module.as_deref(),
+            document_index,
+        )
     }
 
     // PHP-specific: Check visibility based on access modifiers
