@@ -242,6 +242,11 @@ impl LanguageBehavior for TypeScriptBehavior {
             return true;
         }
 
+        // Methods are always resolvable within their file
+        if matches!(symbol.kind, SymbolKind::Method) {
+            return true;
+        }
+
         // Check scope_context for non-hoisted symbols
         if let Some(scope_context) = symbol.scope_context {
             match scope_context {
