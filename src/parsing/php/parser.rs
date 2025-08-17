@@ -71,6 +71,30 @@ impl PhpParser {
         })
     }
 
+    /// Extract function name from function_definition node
+    fn extract_function_name<'a>(&self, node: Node, code: &'a str) -> Option<&'a str> {
+        node.child_by_field_name("name")
+            .map(|n| &code[n.byte_range()])
+    }
+
+    /// Extract method name from method_declaration node
+    fn extract_method_name<'a>(&self, node: Node, code: &'a str) -> Option<&'a str> {
+        node.child_by_field_name("name")
+            .map(|n| &code[n.byte_range()])
+    }
+
+    /// Extract class name from class_declaration node
+    fn extract_class_name<'a>(&self, node: Node, code: &'a str) -> Option<&'a str> {
+        node.child_by_field_name("name")
+            .map(|n| &code[n.byte_range()])
+    }
+
+    /// Extract trait name from trait_declaration node
+    fn extract_trait_name<'a>(&self, node: Node, code: &'a str) -> Option<&'a str> {
+        node.child_by_field_name("name")
+            .map(|n| &code[n.byte_range()])
+    }
+
     #[cfg(test)]
     fn debug_parse(&mut self, code: &str) {
         let tree = self.parser.parse(code, None).unwrap();
@@ -138,32 +162,96 @@ impl PhpParser {
     ) {
         match node.kind() {
             "function_definition" => {
+                // Extract function name for parent tracking
+                let func_name = self.extract_function_name(node, code);
+
                 if let Some(symbol) = self.process_function(node, code, file_id, counter) {
                     symbols.push(symbol);
                 }
+
                 // Enter function scope for nested items
                 self.context
                     .enter_scope(ScopeType::Function { hoisting: false });
+
+                // Save the current parent context before setting new one
+                let saved_function = self.context.current_function().map(|s| s.to_string());
+                let saved_class = self.context.current_class().map(|s| s.to_string());
+
+                // Set current function for parent tracking
+                if let Some(name) = func_name {
+                    self.context.set_current_function(Some(name.to_string()));
+                }
+
                 // Process children to find nested functions
                 self.process_children(node, code, file_id, symbols, counter);
+
+                // CRITICAL: Exit scope first (this clears the current context)
                 self.context.exit_scope();
+
+                // Then restore the previous parent context
+                self.context.set_current_function(saved_function);
+                self.context.set_current_class(saved_class);
             }
             "method_declaration" => {
+                // Extract method name for parent tracking
+                let method_name = self.extract_method_name(node, code);
+
                 if let Some(symbol) = self.process_method(node, code, file_id, counter) {
                     symbols.push(symbol);
                 }
+
+                // Enter function scope for method body
+                self.context
+                    .enter_scope(ScopeType::Function { hoisting: false });
+
+                // Save the current parent context before setting new one
+                let saved_function = self.context.current_function().map(|s| s.to_string());
+                let saved_class = self.context.current_class().map(|s| s.to_string());
+
+                // Set current function to the method name
+                if let Some(name) = method_name {
+                    self.context.set_current_function(Some(name.to_string()));
+                }
+
                 // Process children for nested elements
                 self.process_children(node, code, file_id, symbols, counter);
+
+                // CRITICAL: Exit scope first (this clears the current context)
+                self.context.exit_scope();
+
+                // Then restore the previous parent context
+                self.context.set_current_function(saved_function);
+                self.context.set_current_class(saved_class);
             }
             "class_declaration" => {
+                // Extract class name for parent tracking
+                let class_name = self.extract_class_name(node, code);
+
                 if let Some(symbol) = self.process_class(node, code, file_id, counter) {
                     symbols.push(symbol);
                 }
+
                 // Enter class scope for methods and properties
                 self.context.enter_scope(ScopeType::Class);
+
+                // Save the current parent context before setting new one
+                let saved_function = self.context.current_function().map(|s| s.to_string());
+                let saved_class = self.context.current_class().map(|s| s.to_string());
+
+                // Set current class for parent tracking
+                if let Some(name) = class_name {
+                    self.context.set_current_class(Some(name.to_string()));
+                }
+
                 // Continue processing children to find methods inside the class
                 self.process_children(node, code, file_id, symbols, counter);
+
+                // CRITICAL: Exit scope first (this clears the current context)
                 self.context.exit_scope();
+
+                // Then restore the previous parent context
+                self.context.set_current_function(saved_function);
+                self.context.set_current_class(saved_class);
             }
             "interface_declaration" => {
                 if let Some(symbol) = self.process_interface(node, code, file_id, counter) {
@@ -176,14 +264,34 @@ impl PhpParser {
                 self.context.exit_scope();
             }
             "trait_declaration" => {
+                // Extract trait name for parent tracking
+                let trait_name = self.extract_trait_name(node, code);
+
                 if let Some(symbol) = self.process_trait(node, code, file_id, counter) {
                     symbols.push(symbol);
                 }
+
                 // Enter trait scope (like class)
                 self.context.enter_scope(ScopeType::Class);
+
+                // Save the current parent context before setting new one
+                let saved_function = self.context.current_function().map(|s| s.to_string());
+                let saved_class = self.context.current_class().map(|s| s.to_string());
+
+                // Set current class to the trait name for parent tracking
+                if let Some(name) = trait_name {
+                    self.context.set_current_class(Some(name.to_string()));
+                }
+
                 // Process children for trait methods
                 self.process_children(node, code, file_id, symbols, counter);
+
+                // CRITICAL: Exit scope first (this clears the current context)
                 self.context.exit_scope();
+
+                // Then restore the previous parent context
+                self.context.set_current_function(saved_function);
+                self.context.set_current_class(saved_class);
             }
             "property_declaration" => {
                 if let Some(symbol) = self.process_property(node, code, file_id, counter) {

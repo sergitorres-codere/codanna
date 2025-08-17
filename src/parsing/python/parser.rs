@@ -81,26 +81,64 @@ impl PythonParser {
     ) {
         match node.kind() {
             "function_definition" => {
+                // Extract function name for parent tracking
+                let func_name = self.extract_function_name(node, code);
+
                 if let Some(symbol) = self.process_function(node, code, file_id, counter, context) {
                     symbols.push(symbol);
                 }
+
                 // Enter function scope for processing children
                 context.enter_scope(ScopeType::function());
+
+                // Save the current parent context before setting new one
+                let saved_function = context.current_function().map(|s| s.to_string());
+                let saved_class = context.current_class().map(|s| s.to_string());
+
+                // Set current function for parent tracking
+                if let Some(name) = func_name {
+                    context.set_current_function(Some(name.to_string()));
+                }
+
                 // Process children to find nested functions
                 self.process_children(node, code, file_id, symbols, counter, context);
-                // Exit function scope
+
+                // CRITICAL: Exit scope first (this clears the current context)
                 context.exit_scope();
+
+                // Then restore the previous parent context
+                context.set_current_function(saved_function);
+                context.set_current_class(saved_class);
             }
             "class_definition" => {
+                // Extract class name for parent tracking
+                let class_name = self.extract_class_name(node, code);
+
                 if let Some(symbol) = self.process_class(node, code, file_id, counter, context) {
                     symbols.push(symbol);
                 }
+
                 // Enter class scope for processing children
                 context.enter_scope(ScopeType::Class);
+
+                // Save the current parent context before setting new one
+                let saved_function = context.current_function().map(|s| s.to_string());
+                let saved_class = context.current_class().map(|s| s.to_string());
+
+                // Set current class for parent tracking
+                if let Some(name) = class_name {
+                    context.set_current_class(Some(name.to_string()));
+                }
+
                 // Continue processing children to find methods inside the class
                 self.process_children(node, code, file_id, symbols, counter, context);
-                // Exit class scope
+
+                // CRITICAL: Exit scope first (this clears the current context)
                 context.exit_scope();
+
+                // Then restore the previous parent context
+                context.set_current_function(saved_function);
+                context.set_current_class(saved_class);
             }
             "expression_statement" => {
                 // Check for assignments at module level

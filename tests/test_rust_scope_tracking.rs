@@ -201,15 +201,16 @@ mod submodule {
     let inner_struct = symbols.iter().find(|s| s.name.as_ref() == "InnerStruct");
     if let Some(is) = inner_struct {
         println!(
-            "InnerStruct scope: {:?} (expected: Local)",
+            "InnerStruct scope: {:?} (expected: Local with parent context)",
             is.scope_context
         );
+        // Rust parser now correctly tracks parent context!
         assert_eq!(
             is.scope_context,
             Some(ScopeContext::Local {
                 hoisted: false,
-                parent_name: None,
-                parent_kind: None
+                parent_name: Some("module_function".into()),
+                parent_kind: Some(codanna::SymbolKind::Function)
             })
         );
     } else {

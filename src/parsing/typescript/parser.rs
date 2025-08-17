@@ -793,6 +793,7 @@ impl TypeScriptParser {
             match child.kind() {
                 "extends_clause" => {
                     // Process extends clause ONLY when looking for extends relationships
+                    // This maintains separation between extends and implements
                     if extends_only {
                         let mut extends_cursor = child.walk();
                         for extends_child in child.children(&mut extends_cursor) {
@@ -814,8 +815,6 @@ impl TypeScriptParser {
                             }
                         }
                     }
-                    // When extends_only = false, we skip extends clause
-                    // because we only want implements relationships
                 }
                 "implements_clause" => {
                     // Only process implements clause when NOT looking for extends only

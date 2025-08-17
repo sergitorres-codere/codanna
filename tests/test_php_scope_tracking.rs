@@ -173,13 +173,17 @@ namespace MyNamespace {
     // CRITICAL: Check for LocalClass inside function
     let local_class = symbols.iter().find(|s| s.name.as_ref() == "LocalClass");
     if let Some(lc) = local_class {
-        println!("LocalClass scope: {:?} (expected: Local)", lc.scope_context);
+        println!(
+            "LocalClass scope: {:?} (expected: Local with parent context)",
+            lc.scope_context
+        );
+        // PHP parser now correctly tracks parent context!
         assert_eq!(
             lc.scope_context,
             Some(ScopeContext::Local {
                 hoisted: false,
-                parent_name: None,
-                parent_kind: None
+                parent_name: Some("moduleFunction".into()),
+                parent_kind: Some(codanna::SymbolKind::Function)
             })
         );
     } else {
@@ -199,10 +203,18 @@ namespace MyNamespace {
     let inner_class = symbols.iter().find(|s| s.name.as_ref() == "InnerClass");
     if let Some(ic) = inner_class {
         println!(
-            "InnerClass scope: {:?} (expected: ClassMember since in method)",
+            "InnerClass scope: {:?} (expected: Local since it's defined inside a method)",
             ic.scope_context
         );
-        assert_eq!(ic.scope_context, Some(ScopeContext::ClassMember));
+        // InnerClass is defined inside the method function, so it's Local to that method
+        assert_eq!(
+            ic.scope_context,
+            Some(ScopeContext::Local {
+                hoisted: false,
+                parent_name: Some("method".into()),
+                parent_kind: Some(codanna::SymbolKind::Function)
+            })
+        );
     } else {
         println!("WARNING: InnerClass not found in symbols!");
         println!("All symbols found:");

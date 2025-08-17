@@ -298,6 +298,11 @@ impl RustParser {
 
         match node.kind() {
             "function_item" => {
+                // Extract function name for parent tracking
+                let func_name = node
+                    .child_by_field_name("name")
+                    .map(|n| code[n.byte_range()].to_string());
+
                 // Check if this function is inside an impl block
                 let mut parent = node.parent();
                 let mut is_method = false;
@@ -329,16 +334,36 @@ impl RustParser {
                 // Rust doesn't have hoisting like JS/TS
                 self.context
                     .enter_scope(ScopeType::Function { hoisting: false });
+
+                // Save the current parent context before setting new one
+                let saved_function = self.context.current_function().map(|s| s.to_string());
+                let saved_class = self.context.current_class().map(|s| s.to_string());
+
+                // Set current function for parent tracking
+                self.context.set_current_function(func_name.clone());
+
                 // Process children for nested functions/types
                 for child in node.children(&mut node.walk()) {
                     if child.kind() != "identifier" && child.kind() != "parameters" {
                         self.extract_symbols_from_node(child, code, file_id, symbols, counter);
                     }
                 }
+
+                // CRITICAL: Exit scope first (this clears the current context)
                 self.context.exit_scope();
+
+                // Then restore the previous parent context
+                self.context.set_current_function(saved_function);
+                self.context.set_current_class(saved_class);
+
                 return; // Don't process children again
             }
             "struct_item" => {
+                // Extract struct name for parent tracking
+                let struct_name = node
+                    .child_by_field_name("name")
+                    .map(|n| code[n.byte_range()].to_string());
+
                 if let Some(name_node) = node.child_by_field_name("name") {
                     let symbol =
                         self.create_symbol(counter, name_node, SymbolKind::Struct, file_id, code);
@@ -354,6 +379,31 @@ impl RustParser {
                         symbols.push(sym);
                     }
                 }
+
+                // Structs can have nested items in Rust (though rare)
+                // Enter struct scope for potential nested items
+                self.context.enter_scope(ScopeType::Class);
+
+                // Save the current parent context before setting new one
+                let saved_function = self.context.current_function().map(|s| s.to_string());
+                let saved_class = self.context.current_class().map(|s| s.to_string());
+
+                // Set current class for parent tracking
+                self.context.set_current_class(struct_name);
+
+                // Process children for potential nested items
+                for child in node.children(&mut node.walk()) {
+                    if child.kind() != "identifier" && child.kind() != "field_declaration_list" {
+                        self.extract_symbols_from_node(child, code, file_id, symbols, counter);
+                    }
+                }
+
+                // CRITICAL: Exit scope first (this clears the current context)
+                self.context.exit_scope();
+
+                // Then restore the previous parent context
+                self.context.set_current_function(saved_function);
+                self.context.set_current_class(saved_class);
             }
             "enum_item" => {
                 if let Some(name_node) = node.child_by_field_name("name") {
@@ -452,13 +502,35 @@ impl RustParser {
                 return;
             }
             "impl_item" => {
+                // Extract the type being implemented for parent tracking
+                let impl_type_name = node
+                    .child_by_field_name("type")
+                    .and_then(|type_node| self.extract_type_name(type_node, code));
+
                 // Enter impl block scope for methods
                 self.context.enter_scope(ScopeType::Class); // Use Class scope for impl blocks
+
+                // Save the current parent context before setting new one
+                let saved_function = self.context.current_function().map(|s| s.to_string());
+                let saved_class = self.context.current_class().map(|s| s.to_string());
+
+                // Set current class to the impl type for parent tracking
+                if let Some(type_name) = impl_type_name {
+                    self.context.set_current_class(Some(type_name.to_string()));
+                }
+
                 // Process children
                 for child in node.children(&mut node.walk()) {
                     self.extract_symbols_from_node(child, code, file_id, symbols, counter);
                 }
+
+                // CRITICAL: Exit scope first (this clears the current context)
                 self.context.exit_scope();
+
+                // Then restore the previous parent context
+                self.context.set_current_function(saved_function);
+                self.context.set_current_class(saved_class);
+
                 return; // Don't process children again
             }
             _ => {}

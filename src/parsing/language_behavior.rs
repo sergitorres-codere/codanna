@@ -16,19 +16,36 @@
 //!
 //! # Example Usage
 //!
-//! ```rust,ignore
+//! ```rust
 //! use codanna::parsing::{ParserFactory, Language};
+//! use codanna::types::{FileId, SymbolCounter};
+//! use codanna::Settings;
+//! use std::sync::Arc;
 //!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! // Create settings
+//! let settings = Arc::new(Settings::default());
+//!
+//! // Create factory and get parser-behavior pair
 //! let factory = ParserFactory::new(settings);
-//! let pair = factory.create_parser_with_behavior(Language::Rust)?;
+//! let mut pair = factory.create_parser_with_behavior(Language::Rust)?;
+//!
+//! // Prepare parsing context
+//! let code = "fn main() { println!(\"Hello\"); }";
+//! let file_id = FileId::new(1).ok_or("Invalid file ID")?;
+//! let mut counter = SymbolCounter::new();
 //!
 //! // Parse code with the parser
-//! let symbols = pair.parser.parse(path, content, &mut counter)?;
+//! let mut symbols = pair.parser.parse(code, file_id, &mut counter);
 //!
 //! // Process symbols with the behavior
-//! for mut symbol in symbols {
-//!     pair.behavior.configure_symbol(&mut symbol, Some("crate::module"));
+//! for symbol in &mut symbols {
+//!     pair.behavior.configure_symbol(symbol, Some("crate::module"));
 //! }
+//!
+//! println!("Parsed {} symbols", symbols.len());
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! # Implementing a New Language

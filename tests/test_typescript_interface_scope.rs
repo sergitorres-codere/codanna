@@ -189,10 +189,10 @@ enum Status {
             li.scope_context,
             Some(ScopeContext::Local {
                 hoisted: true,
-                parent_name: None,
-                parent_kind: None
+                parent_name: Some("moduleFunction".into()),
+                parent_kind: Some(SymbolKind::Function)
             }),
-            "Interface inside function should have Local scope"
+            "Interface inside function should have Local scope with parent context"
         );
     }
 
@@ -208,10 +208,10 @@ enum Status {
             lt.scope_context,
             Some(ScopeContext::Local {
                 hoisted: true,
-                parent_name: None,
-                parent_kind: None
+                parent_name: Some("moduleFunction".into()),
+                parent_kind: Some(SymbolKind::Function)
             }),
-            "Type alias inside function should have Local scope"
+            "Type alias inside function should have Local scope with parent context"
         );
     }
 

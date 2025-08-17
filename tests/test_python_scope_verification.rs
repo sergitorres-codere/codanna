@@ -107,8 +107,8 @@ class MyClass:
         nested_func.scope_context,
         Some(ScopeContext::Local {
             hoisted: false,
-            parent_name: None,
-            parent_kind: None
+            parent_name: Some("module_func".into()),
+            parent_kind: Some(SymbolKind::Function)
         })
     );
 
@@ -150,15 +150,15 @@ class MyClass:
         .find(|s| s.name.as_ref() == "InnerClass")
         .unwrap();
     println!(
-        "InnerClass scope: {:?} (expected: Local)",
+        "InnerClass scope: {:?} (expected: Local with parent context)",
         inner_class.scope_context
     );
     assert_eq!(
         inner_class.scope_context,
         Some(ScopeContext::Local {
             hoisted: false,
-            parent_name: None,
-            parent_kind: None
+            parent_name: Some("method".into()),
+            parent_kind: Some(SymbolKind::Function)
         })
     );
 
@@ -301,8 +301,8 @@ class A:
             func4.scope_context,
             Some(ScopeContext::Local {
                 hoisted: false,
-                parent_name: None,
-                parent_kind: None
+                parent_name: Some("func3".into()),
+                parent_kind: Some(SymbolKind::Function)
             })
         );
     }

@@ -115,7 +115,7 @@ const moduleArrow = (x: number) => x * 2;
     let nested_func = symbols.iter().find(|s| s.name.as_ref() == "nestedFunction");
     if let Some(nf) = nested_func {
         println!(
-            "nestedFunction scope: {:?} (expected: Local with hoisting)",
+            "nestedFunction scope: {:?} (expected: Local with hoisting and parent context)",
             nf.scope_context
         );
         // Function declarations are hoisted even when nested
@@ -123,8 +123,8 @@ const moduleArrow = (x: number) => x * 2;
             nf.scope_context,
             Some(ScopeContext::Local {
                 hoisted: true,
-                parent_name: None,
-                parent_kind: None
+                parent_name: Some("moduleFunction".into()),
+                parent_kind: Some(SymbolKind::Function)
             })
         );
     }
@@ -147,11 +147,18 @@ const moduleArrow = (x: number) => x * 2;
     let inner_class = symbols.iter().find(|s| s.name.as_ref() == "InnerClass");
     if let Some(ic) = inner_class {
         println!(
-            "InnerClass scope: {:?} (expected: ClassMember since in method)",
+            "InnerClass scope: {:?} (expected: Local since it's defined inside a method)",
             ic.scope_context
         );
-        // InnerClass is inside a method, which is inside a class
-        assert_eq!(ic.scope_context, Some(ScopeContext::ClassMember));
+        // InnerClass is defined inside the method function, so it's Local to that method
+        assert_eq!(
+            ic.scope_context,
+            Some(ScopeContext::Local {
+                hoisted: false,
+                parent_name: Some("method".into()),
+                parent_kind: Some(SymbolKind::Function)
+            })
+        );
     } else {
         println!("WARNING: InnerClass not found in symbols!");
         println!("All symbols found:");

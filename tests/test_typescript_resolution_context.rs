@@ -6,6 +6,7 @@
 //! - Import resolution
 //! - Type space vs value space
 
+use codanna::SymbolKind;
 use codanna::parsing::ResolutionScope;
 use codanna::parsing::typescript::TypeScriptResolutionContext;
 use codanna::parsing::{LanguageParser, TypeScriptParser};
@@ -183,10 +184,10 @@ const moduleArrow = (x: number) => x * 2;
                     symbol.scope_context,
                     Some(ScopeContext::Local {
                         hoisted: true,
-                        parent_name: None,
-                        parent_kind: None
+                        parent_name: Some("hoistedFunction".into()),
+                        parent_kind: Some(SymbolKind::Function)
                     }),
-                    "Nested function should be hoisted"
+                    "Nested function should be hoisted with parent context"
                 );
             }
             "arrowFunc" => {

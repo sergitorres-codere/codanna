@@ -136,8 +136,8 @@ def outer():
         inner.unwrap().scope_context,
         Some(ScopeContext::Local {
             hoisted: false,
-            parent_name: None,
-            parent_kind: None
+            parent_name: Some("outer".into()),
+            parent_kind: Some(SymbolKind::Function)
         })
     );
 
@@ -148,8 +148,8 @@ def outer():
         deeply.unwrap().scope_context,
         Some(ScopeContext::Local {
             hoisted: false,
-            parent_name: None,
-            parent_kind: None
+            parent_name: Some("inner".into()),
+            parent_kind: Some(SymbolKind::Function)
         })
     );
 }
@@ -201,8 +201,8 @@ class GlobalClass:
         local_class.unwrap().scope_context,
         Some(ScopeContext::Local {
             hoisted: false,
-            parent_name: None,
-            parent_kind: None
+            parent_name: Some("process_data".into()),
+            parent_kind: Some(SymbolKind::Function)
         })
     );
 
