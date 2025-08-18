@@ -3,6 +3,7 @@
 use crate::{Symbol, SymbolKind, Visibility};
 use bitflags::bitflags;
 use serde::Serialize;
+use std::fmt;
 
 /// Comprehensive context for a symbol including all relationships
 #[derive(Debug, Clone, Serialize)]
@@ -41,25 +42,33 @@ bitflags! {
     }
 }
 
+impl fmt::Display for SymbolContext {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Use the existing format_location_with_type method
+        // This provides: "Function calculate_similarity at src/vector/similarity.rs:101"
+        write!(f, "{}", self.format_location_with_type())
+    }
+}
+
 impl SymbolContext {
     /// Format just the location line
     pub fn format_location(&self) -> String {
+        // Note: file_path already includes line number (e.g., "src/file.rs:123")
         format!(
-            "{} at {}:{}",
+            "{} at {}",
             self.symbol.name,
-            self.file_path,
-            self.symbol.range.start_line + 1
+            self.file_path
         )
     }
 
     /// Format location with type info
     pub fn format_location_with_type(&self) -> String {
+        // Note: file_path already includes line number (e.g., "src/file.rs:123")
         format!(
-            "{:?} {} at {}:{}",
+            "{:?} {} at {}",
             self.symbol.kind,
             self.symbol.name,
-            self.file_path,
-            self.symbol.range.start_line + 1
+            self.file_path
         )
     }
 
@@ -73,13 +82,13 @@ impl SymbolContext {
     }
 
     fn append_header(&self, output: &mut String, indent: &str) {
+        // Note: file_path already includes line number (e.g., "src/file.rs:123")
         output.push_str(&format!(
-            "{}{} ({:?}) at {}:{}\n",
+            "{}{} ({:?}) at {}\n",
             indent,
             self.symbol.name,
             self.symbol.kind,
-            self.file_path,
-            self.symbol.range.start_line + 1
+            self.file_path
         ));
     }
 
