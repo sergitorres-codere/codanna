@@ -72,6 +72,7 @@ rustls = { version = "0.23.31", default-features = false, features = ["ring"], o
 rcgen = { version = "0.14.3", optional = true }
 
 [dev-dependencies]
+criterion = "0.7.0"
 tempfile = "3.20.0"
 testcontainers = "0.15"
 
@@ -91,3 +92,8 @@ rcgen = ["dep:rcgen"]
 # See clippy.toml for behavior configuration (thresholds, etc.)
 uninlined_format_args = "warn"
 
+
+
+[[bench]]
+name = "unified_output_bench"
+harness = false

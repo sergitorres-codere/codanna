@@ -11,10 +11,12 @@ pub mod guidance;
 pub mod guidance_engine;
 pub mod input;
 pub mod output;
+pub mod schema;
 #[cfg(test)]
 mod test;
 
 pub use exit_code::ExitCode;
 pub use format::{ErrorDetails, JsonResponse, OutputFormat, ResponseMeta};
 pub use output::OutputManager;
+pub use schema::{EntityType, OutputData, OutputStatus, UnifiedOutput, UnifiedOutputBuilder};
 // Future: pub use input::{JsonRpcRequest, JsonRpcResponse};
