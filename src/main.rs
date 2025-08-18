@@ -12,9 +12,27 @@ use codanna::parsing::{LanguageParser, PhpParser, PythonParser, RustParser, Type
 use codanna::types::SymbolCounter;
 use codanna::{IndexPersistence, RelationKind, Settings, SimpleIndexer, Symbol, SymbolKind};
 use serde::Serialize;
+use std::io::{self, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
+
+/// Helper function to print JSON output, handling broken pipe errors gracefully
+///
+/// FIXME: This is a temporary solution to handle broken pipe errors when piping to commands like `head`.
+/// We should refactor all retrieve commands to use the proper OutputManager from src/io/output.rs
+/// which already handles this correctly along with proper exit codes and error handling.
+/// See OutputManager::success() and OutputManager::not_found() for the proper pattern.
+fn print_json<T: serde::Serialize>(data: &T) {
+    let json_str = serde_json::to_string_pretty(data).unwrap();
+    // Use writeln! with stdout and handle broken pipe errors
+    if let Err(e) = writeln!(io::stdout(), "{json_str}") {
+        // Silently ignore broken pipe errors (e.g., when piping to head)
+        if e.kind() != io::ErrorKind::BrokenPipe {
+            eprintln!("Error writing output: {e}");
+        }
+    }
+}
 
 // MCP tool JSON output structures
 #[derive(Debug, Serialize)]
@@ -1059,16 +1077,35 @@ async fn main() {
                     let symbols = indexer.find_symbols_by_name(&name);
 
                     if json {
-                        // JSON output mode - use simple JsonResponse directly
+                        // JSON output mode - use SymbolContext to include file paths
                         use codanna::io::format::JsonResponse;
+                        use codanna::symbol::context::SymbolContext;
 
                         if symbols.is_empty() {
                             let response = JsonResponse::not_found("Symbol", &name);
-                            println!("{}", serde_json::to_string_pretty(&response).unwrap());
+                            print_json(&response);
                             std::process::exit(3); // NOT_FOUND exit code
                         } else {
-                            let response = JsonResponse::success(symbols);
-                            println!("{}", serde_json::to_string_pretty(&response).unwrap());
+                            // Transform symbols to include file_path with line number
+                            let symbols_with_path: Vec<SymbolContext> = symbols
+                                .into_iter()
+                                .map(|symbol| {
+                                    let base_path = indexer
+                                        .get_file_path(symbol.file_id)
+                                        .unwrap_or_else(|| "unknown".to_string());
+                                    // Include line number for actionable paths
+                                    let file_path =
+                                        format!("{}:{}", base_path, symbol.range.start_line + 1);
+                                    SymbolContext {
+                                        symbol,
+                                        file_path,
+                                        relationships: Default::default(),
+                                    }
+                                })
+                                .collect();
+
+                            let response = JsonResponse::success(symbols_with_path);
+                            print_json(&response);
                         }
                     } else {
                         // Text output mode (existing behavior - keep it exactly as it was)
@@ -1115,7 +1152,7 @@ async fn main() {
                         if json {
                             use codanna::io::format::JsonResponse;
                             let response = JsonResponse::not_found("Function", &function);
-                            println!("{}", serde_json::to_string_pretty(&response).unwrap());
+                            print_json(&response);
                             std::process::exit(3);
                         } else {
                             println!("Function not found: {function}");
@@ -1139,20 +1176,37 @@ async fn main() {
                         }
 
                         if json {
-                            // JSON output - return just the called symbols
+                            // JSON output - return called symbols with file paths
                             use codanna::io::format::JsonResponse;
-                            let called_symbols: Vec<_> = all_called_with_metadata
-                                .into_iter()
-                                .map(|(s, _)| s)
-                                .collect();
+                            use codanna::symbol::context::SymbolContext;
 
-                            if called_symbols.is_empty() {
+                            let called_symbols_with_path: Vec<SymbolContext> =
+                                all_called_with_metadata
+                                    .into_iter()
+                                    .map(|(symbol, _metadata)| {
+                                        let base_path = indexer
+                                            .get_file_path(symbol.file_id)
+                                            .unwrap_or_else(|| "unknown".to_string());
+                                        let file_path = format!(
+                                            "{}:{}",
+                                            base_path,
+                                            symbol.range.start_line + 1
+                                        );
+                                        SymbolContext {
+                                            symbol,
+                                            file_path,
+                                            relationships: Default::default(),
+                                        }
+                                    })
+                                    .collect();
+
+                            if called_symbols_with_path.is_empty() {
                                 // Return empty array with success status
-                                let response = JsonResponse::success(Vec::<codanna::Symbol>::new());
-                                println!("{}", serde_json::to_string_pretty(&response).unwrap());
+                                let response = JsonResponse::success(Vec::<SymbolContext>::new());
+                                print_json(&response);
                             } else {
-                                let response = JsonResponse::success(called_symbols);
-                                println!("{}", serde_json::to_string_pretty(&response).unwrap());
+                                let response = JsonResponse::success(called_symbols_with_path);
+                                print_json(&response);
                             }
                         } else {
                             // Text output (existing behavior)
@@ -1212,7 +1266,7 @@ async fn main() {
                         if json {
                             use codanna::io::format::JsonResponse;
                             let response = JsonResponse::not_found("Function", &function);
-                            println!("{}", serde_json::to_string_pretty(&response).unwrap());
+                            print_json(&response);
                             std::process::exit(3);
                         } else {
                             println!("Function not found: {function}");
@@ -1236,20 +1290,37 @@ async fn main() {
                         }
 
                         if json {
-                            // JSON output - return just the calling symbols
+                            // JSON output - return calling symbols with file paths
                             use codanna::io::format::JsonResponse;
-                            let calling_symbols: Vec<_> = all_callers_with_metadata
-                                .into_iter()
-                                .map(|(s, _)| s)
-                                .collect();
+                            use codanna::symbol::context::SymbolContext;
 
-                            if calling_symbols.is_empty() {
+                            let calling_symbols_with_path: Vec<SymbolContext> =
+                                all_callers_with_metadata
+                                    .into_iter()
+                                    .map(|(symbol, _metadata)| {
+                                        let base_path = indexer
+                                            .get_file_path(symbol.file_id)
+                                            .unwrap_or_else(|| "unknown".to_string());
+                                        let file_path = format!(
+                                            "{}:{}",
+                                            base_path,
+                                            symbol.range.start_line + 1
+                                        );
+                                        SymbolContext {
+                                            symbol,
+                                            file_path,
+                                            relationships: Default::default(),
+                                        }
+                                    })
+                                    .collect();
+
+                            if calling_symbols_with_path.is_empty() {
                                 // Return empty array with success status
-                                let response = JsonResponse::success(Vec::<codanna::Symbol>::new());
-                                println!("{}", serde_json::to_string_pretty(&response).unwrap());
+                                let response = JsonResponse::success(Vec::<SymbolContext>::new());
+                                print_json(&response);
                             } else {
-                                let response = JsonResponse::success(calling_symbols);
-                                println!("{}", serde_json::to_string_pretty(&response).unwrap());
+                                let response = JsonResponse::success(calling_symbols_with_path);
+                                print_json(&response);
                             }
                         } else {
                             // Text output (existing behavior)
@@ -1333,13 +1404,31 @@ async fn main() {
                             if let Some(ctx) = ctx {
                                 if let Some(impls) = &ctx.relationships.implemented_by {
                                     if json {
-                                        // JSON output - return implementing types
+                                        // JSON output - return implementing types with file paths
                                         use codanna::io::format::JsonResponse;
-                                        let response = JsonResponse::success(impls.clone());
-                                        println!(
-                                            "{}",
-                                            serde_json::to_string_pretty(&response).unwrap()
-                                        );
+                                        use codanna::symbol::context::SymbolContext;
+
+                                        let impls_with_path: Vec<SymbolContext> = impls
+                                            .iter()
+                                            .map(|symbol| {
+                                                let base_path = indexer
+                                                    .get_file_path(symbol.file_id)
+                                                    .unwrap_or_else(|| "unknown".to_string());
+                                                let file_path = format!(
+                                                    "{}:{}",
+                                                    base_path,
+                                                    symbol.range.start_line + 1
+                                                );
+                                                SymbolContext {
+                                                    symbol: symbol.clone(),
+                                                    file_path,
+                                                    relationships: Default::default(),
+                                                }
+                                            })
+                                            .collect();
+
+                                        let response = JsonResponse::success(impls_with_path);
+                                        print_json(&response);
                                     } else if impls.is_empty() {
                                         println!("No types implement {trait_name}");
                                     } else {
@@ -1417,12 +1506,10 @@ async fn main() {
                                 } else if json {
                                     // JSON output - empty array
                                     use codanna::io::format::JsonResponse;
+                                    use codanna::symbol::context::SymbolContext;
                                     let response =
-                                        JsonResponse::success(Vec::<codanna::Symbol>::new());
-                                    println!(
-                                        "{}",
-                                        serde_json::to_string_pretty(&response).unwrap()
-                                    );
+                                        JsonResponse::success(Vec::<SymbolContext>::new());
+                                    print_json(&response);
                                 } else {
                                     let kind_name = if symbol.kind == SymbolKind::Interface {
                                         "interface"
@@ -1436,11 +1523,29 @@ async fn main() {
                                 let implementations = indexer.get_implementations(symbol.id);
                                 if json {
                                     use codanna::io::format::JsonResponse;
-                                    let response = JsonResponse::success(implementations);
-                                    println!(
-                                        "{}",
-                                        serde_json::to_string_pretty(&response).unwrap()
-                                    );
+                                    use codanna::symbol::context::SymbolContext;
+
+                                    let impls_with_path: Vec<SymbolContext> = implementations
+                                        .into_iter()
+                                        .map(|symbol| {
+                                            let base_path = indexer
+                                                .get_file_path(symbol.file_id)
+                                                .unwrap_or_else(|| "unknown".to_string());
+                                            let file_path = format!(
+                                                "{}:{}",
+                                                base_path,
+                                                symbol.range.start_line + 1
+                                            );
+                                            SymbolContext {
+                                                symbol,
+                                                file_path,
+                                                relationships: Default::default(),
+                                            }
+                                        })
+                                        .collect();
+
+                                    let response = JsonResponse::success(impls_with_path);
+                                    print_json(&response);
                                 } else if implementations.is_empty() {
                                     println!("No types implement {trait_name}");
                                 } else {
@@ -1460,7 +1565,7 @@ async fn main() {
                                 use codanna::io::format::JsonResponse;
                                 let response =
                                     JsonResponse::not_found("Trait/Interface", &trait_name);
-                                println!("{}", serde_json::to_string_pretty(&response).unwrap());
+                                print_json(&response);
                                 std::process::exit(3);
                             } else {
                                 println!("Trait or interface not found: {trait_name}");
@@ -1501,10 +1606,33 @@ async fn main() {
                             let impacted = indexer.get_impact_radius(symbol_id, depth);
 
                             if json {
-                                // JSON output - return impacted symbols
+                                // JSON output - return impacted symbols with file paths
                                 use codanna::io::format::JsonResponse;
-                                let response = JsonResponse::success(impacted);
-                                println!("{}", serde_json::to_string_pretty(&response).unwrap());
+                                use codanna::symbol::context::SymbolContext;
+
+                                let impacted_with_path: Vec<SymbolContext> = impacted
+                                    .into_iter()
+                                    .filter_map(|id| {
+                                        indexer.get_symbol(id).map(|symbol| {
+                                            let base_path = indexer
+                                                .get_file_path(symbol.file_id)
+                                                .unwrap_or_else(|| "unknown".to_string());
+                                            let file_path = format!(
+                                                "{}:{}",
+                                                base_path,
+                                                symbol.range.start_line + 1
+                                            );
+                                            SymbolContext {
+                                                symbol,
+                                                file_path,
+                                                relationships: Default::default(),
+                                            }
+                                        })
+                                    })
+                                    .collect();
+
+                                let response = JsonResponse::success(impacted_with_path);
+                                print_json(&response);
                             } else if impacted.is_empty() {
                                 println!("No symbols would be impacted by changing {symbol}");
                             } else {
@@ -1543,7 +1671,7 @@ async fn main() {
                             if json {
                                 use codanna::io::format::JsonResponse;
                                 let response = JsonResponse::not_found("Symbol", &symbol);
-                                println!("{}", serde_json::to_string_pretty(&response).unwrap());
+                                print_json(&response);
                                 std::process::exit(3);
                             } else {
                                 println!("Symbol not found: {symbol}");
@@ -1894,18 +2022,23 @@ async fn main() {
                                 use codanna::io::format::JsonResponse;
                                 if let Some(ctx) = ctx {
                                     let response = JsonResponse::success(ctx);
-                                    println!(
-                                        "{}",
-                                        serde_json::to_string_pretty(&response).unwrap()
-                                    );
+                                    print_json(&response);
                                 } else {
-                                    // Fallback: just get the basic symbol
+                                    // Fallback: create minimal context with file path
                                     if let Some(sym) = indexer.get_symbol(symbol_id) {
-                                        let response = JsonResponse::success(sym);
-                                        println!(
-                                            "{}",
-                                            serde_json::to_string_pretty(&response).unwrap()
-                                        );
+                                        let base_path = indexer
+                                            .get_file_path(sym.file_id)
+                                            .unwrap_or_else(|| "unknown".to_string());
+                                        let file_path =
+                                            format!("{}:{}", base_path, sym.range.start_line + 1);
+                                        let minimal_context =
+                                            codanna::symbol::context::SymbolContext {
+                                                symbol: sym,
+                                                file_path,
+                                                relationships: Default::default(),
+                                            };
+                                        let response = JsonResponse::success(minimal_context);
+                                        print_json(&response);
                                     }
                                 }
                             } else if let Some(ctx) = ctx {
@@ -1990,7 +2123,7 @@ async fn main() {
                             if json {
                                 use codanna::io::format::JsonResponse;
                                 let response = JsonResponse::not_found("Symbol", &symbol);
-                                println!("{}", serde_json::to_string_pretty(&response).unwrap());
+                                print_json(&response);
                                 std::process::exit(3);
                             } else {
                                 println!("Symbol not found: {symbol}");

@@ -105,7 +105,7 @@ Drop codanna in as an MCP server, point Claude at it, and watch it stop hand-wav
 
 ### MCP Plug-In
 
-```bash
+```json
 # Add this to your .mcp.json:
 {
   "mcpServers": {

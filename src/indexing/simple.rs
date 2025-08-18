@@ -1486,9 +1486,11 @@ impl SimpleIndexer {
         use crate::symbol::context::{SymbolContext, SymbolRelationships};
 
         let symbol = self.get_symbol(symbol_id)?;
-        let file_path = self
+        let base_path = self
             .get_file_path(symbol.file_id)
             .unwrap_or_else(|| "<unknown>".to_string());
+        // Include line number for actionable paths
+        let file_path = format!("{}:{}", base_path, symbol.range.start_line + 1);
 
         let mut relationships = SymbolRelationships::default();
 
