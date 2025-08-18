@@ -297,20 +297,25 @@ enum Commands {
 enum RetrieveQuery {
     /// Find a symbol by name
     #[command(
-        after_help = "Examples:\n  codanna retrieve symbol main\n  codanna retrieve symbol Parser --json\n  codanna retrieve symbol MyStruct --json | jq '.file'"
+        after_help = "Examples:\n  codanna retrieve symbol main\n  codanna retrieve symbol name:main --json\n  codanna retrieve symbol MyStruct --json | jq '.file'"
     )]
     Symbol {
-        /// Name of the symbol to find
-        name: String,
+        /// Positional arguments (symbol name and/or key:value pairs)
+        #[arg(num_args = 0..)]
+        args: Vec<String>,
         /// Output in JSON format
         #[arg(long)]
         json: bool,
     },
 
     /// Show what functions a given function calls
+    #[command(
+        after_help = "Examples:\n  codanna retrieve calls process_file\n  codanna retrieve calls function:process_file --json"
+    )]
     Calls {
-        /// Name of the function
-        function: String,
+        /// Positional arguments (function name and/or key:value pairs)
+        #[arg(num_args = 0..)]
+        args: Vec<String>,
         /// Output in JSON format
         #[arg(long)]
         json: bool,
@@ -318,11 +323,12 @@ enum RetrieveQuery {
 
     /// Show what functions call a given function
     #[command(
-        after_help = "Examples:\n  codanna retrieve callers main\n  codanna retrieve callers process_file --json\n  codanna retrieve callers init --json | jq -r '.[].name'"
+        after_help = "Examples:\n  codanna retrieve callers main\n  codanna retrieve callers function:main --json\n  codanna retrieve callers init --json | jq -r '.[].name'"
     )]
     Callers {
-        /// Name of the function
-        function: String,
+        /// Positional arguments (function name and/or key:value pairs)
+        #[arg(num_args = 0..)]
+        args: Vec<String>,
         /// Output in JSON format
         #[arg(long)]
         json: bool,
@@ -349,12 +355,13 @@ enum RetrieveQuery {
 
     /// Show the impact radius of changing a symbol
     #[command(
-        after_help = "Examples:\n  codanna retrieve impact MyStruct\n  codanna retrieve impact Parser --depth 3\n  codanna retrieve impact main --json --depth 2"
+        after_help = "Examples:\n  codanna retrieve impact MyStruct\n  codanna retrieve impact symbol:MyStruct depth:3\n  codanna retrieve impact main --depth 2 --json"
     )]
     Impact {
-        /// Name of the symbol
-        symbol: String,
-        /// Maximum depth to search (default: 5)
+        /// Positional arguments (symbol name and/or key:value pairs)
+        #[arg(num_args = 0..)]
+        args: Vec<String>,
+        /// Maximum depth to search (flag format)
         #[arg(short, long)]
         depth: Option<usize>,
         /// Output in JSON format
@@ -1067,17 +1074,62 @@ async fn main() {
             use codanna::retrieve;
 
             let exit_code = match query {
-                RetrieveQuery::Symbol { name, json } => {
+                RetrieveQuery::Symbol { args, json } => {
+                    use codanna::io::args::parse_positional_args;
+
+                    // Parse positional arguments for symbol name and key:value pairs
+                    let (positional_name, params) = parse_positional_args(&args);
+
+                    // Determine symbol name (priority: positional > key:value)
+                    let final_name = positional_name
+                        .or_else(|| params.get("name").cloned())
+                        .unwrap_or_else(|| {
+                            eprintln!("Error: symbol requires a name");
+                            eprintln!("Usage: codanna retrieve symbol main");
+                            eprintln!("   or: codanna retrieve symbol name:main");
+                            std::process::exit(1);
+                        });
+
                     let format = OutputFormat::from_json_flag(json);
-                    retrieve::retrieve_symbol(&indexer, &name, format)
+                    retrieve::retrieve_symbol(&indexer, &final_name, format)
                 }
-                RetrieveQuery::Callers { function, json } => {
+                RetrieveQuery::Callers { args, json } => {
+                    use codanna::io::args::parse_positional_args;
+
+                    // Parse positional arguments for function name and key:value pairs
+                    let (positional_function, params) = parse_positional_args(&args);
+
+                    // Determine function name (priority: positional > key:value)
+                    let final_function = positional_function
+                        .or_else(|| params.get("function").cloned())
+                        .unwrap_or_else(|| {
+                            eprintln!("Error: callers requires a function name");
+                            eprintln!("Usage: codanna retrieve callers main");
+                            eprintln!("   or: codanna retrieve callers function:main");
+                            std::process::exit(1);
+                        });
+
                     let format = OutputFormat::from_json_flag(json);
-                    retrieve::retrieve_callers(&indexer, &function, format)
+                    retrieve::retrieve_callers(&indexer, &final_function, format)
                 }
-                RetrieveQuery::Calls { function, json } => {
+                RetrieveQuery::Calls { args, json } => {
+                    use codanna::io::args::parse_positional_args;
+
+                    // Parse positional arguments for function name and key:value pairs
+                    let (positional_function, params) = parse_positional_args(&args);
+
+                    // Determine function name (priority: positional > key:value)
+                    let final_function = positional_function
+                        .or_else(|| params.get("function").cloned())
+                        .unwrap_or_else(|| {
+                            eprintln!("Error: calls requires a function name");
+                            eprintln!("Usage: codanna retrieve calls process_file");
+                            eprintln!("   or: codanna retrieve calls function:process_file");
+                            std::process::exit(1);
+                        });
+
                     let format = OutputFormat::from_json_flag(json);
-                    retrieve::retrieve_calls(&indexer, &function, format)
+                    retrieve::retrieve_calls(&indexer, &final_function, format)
                 }
                 RetrieveQuery::Implementations { args, json } => {
                     use codanna::io::args::parse_positional_args;
@@ -1144,13 +1196,32 @@ async fn main() {
                         format,
                     )
                 }
-                RetrieveQuery::Impact {
-                    symbol,
-                    depth,
-                    json,
-                } => {
+                RetrieveQuery::Impact { args, depth, json } => {
+                    use codanna::io::args::parse_positional_args;
+
+                    // Parse positional arguments for symbol name and key:value pairs
+                    let (positional_symbol, params) = parse_positional_args(&args);
+
+                    // Determine symbol name (priority: positional > key:value)
+                    let final_symbol = positional_symbol
+                        .or_else(|| params.get("symbol").cloned())
+                        .unwrap_or_else(|| {
+                            eprintln!("Error: impact requires a symbol name");
+                            eprintln!("Usage: codanna retrieve impact MyStruct");
+                            eprintln!("   or: codanna retrieve impact symbol:MyStruct depth:3");
+                            std::process::exit(1);
+                        });
+
+                    // Merge depth parameter (flags take precedence over key:value)
+                    let final_depth = depth.unwrap_or_else(|| {
+                        params
+                            .get("depth")
+                            .and_then(|s| s.parse::<usize>().ok())
+                            .unwrap_or(5)
+                    });
+
                     let format = OutputFormat::from_json_flag(json);
-                    retrieve::retrieve_impact(&indexer, &symbol, depth.unwrap_or(5), format)
+                    retrieve::retrieve_impact(&indexer, &final_symbol, final_depth, format)
                 }
                 RetrieveQuery::Describe { args, json } => {
                     use codanna::io::args::parse_positional_args;
