@@ -323,9 +323,12 @@ impl RustParser {
                 };
 
                 if let Some(name_node) = node.child_by_field_name("name") {
-                    if let Some(symbol) =
+                    if let Some(mut symbol) =
                         self.create_symbol(counter, name_node, kind, file_id, code)
                     {
+                        // Extract and add function signature
+                        let signature = self.extract_signature(node, code);
+                        symbol = symbol.with_signature(signature);
                         symbols.push(symbol);
                     }
                 }
@@ -369,6 +372,10 @@ impl RustParser {
                         self.create_symbol(counter, name_node, SymbolKind::Struct, file_id, code);
 
                     if let Some(mut sym) = symbol {
+                        // Extract and add struct signature
+                        let signature = self.extract_struct_signature(node, code);
+                        sym = sym.with_signature(signature);
+
                         // Update the range to include the entire struct body
                         sym.range = Range::new(
                             node.start_position().row as u32,
@@ -411,6 +418,10 @@ impl RustParser {
                         self.create_symbol(counter, name_node, SymbolKind::Enum, file_id, code);
 
                     if let Some(mut sym) = symbol {
+                        // Extract and add enum signature
+                        let signature = self.extract_enum_signature(node, code);
+                        sym = sym.with_signature(signature);
+
                         // Update the range to include the entire enum body
                         sym.range = Range::new(
                             node.start_position().row as u32,
@@ -432,7 +443,10 @@ impl RustParser {
                         code,
                     );
 
-                    if let Some(sym) = symbol {
+                    if let Some(mut sym) = symbol {
+                        // Extract and add type alias signature
+                        let signature = self.extract_type_alias_signature(node, code);
+                        sym = sym.with_signature(signature);
                         symbols.push(sym);
                     }
                 }
@@ -442,7 +456,10 @@ impl RustParser {
                     let symbol =
                         self.create_symbol(counter, name_node, SymbolKind::Constant, file_id, code);
 
-                    if let Some(sym) = symbol {
+                    if let Some(mut sym) = symbol {
+                        // Extract and add constant signature
+                        let signature = self.extract_const_signature(node, code);
+                        sym = sym.with_signature(signature);
                         symbols.push(sym);
                     }
                 }
@@ -452,7 +469,10 @@ impl RustParser {
                     let symbol =
                         self.create_symbol(counter, name_node, SymbolKind::Constant, file_id, code);
 
-                    if let Some(sym) = symbol {
+                    if let Some(mut sym) = symbol {
+                        // Extract and add static signature (using const signature for statics)
+                        let signature = self.extract_const_signature(node, code);
+                        sym = sym.with_signature(signature);
                         symbols.push(sym);
                     }
                 }
@@ -464,6 +484,10 @@ impl RustParser {
                         self.create_symbol(counter, name_node, SymbolKind::Trait, file_id, code);
 
                     if let Some(mut sym) = symbol {
+                        // Extract and add trait signature
+                        let signature = self.extract_trait_signature(node, code);
+                        sym = sym.with_signature(signature);
+
                         // Update the range to include the entire trait body
                         sym.range = Range::new(
                             node.start_position().row as u32,
@@ -483,13 +507,16 @@ impl RustParser {
                                 || child.kind() == "function_item"
                             {
                                 if let Some(method_name_node) = child.child_by_field_name("name") {
-                                    if let Some(method_symbol) = self.create_symbol(
+                                    if let Some(mut method_symbol) = self.create_symbol(
                                         counter,
                                         method_name_node,
                                         SymbolKind::Method,
                                         file_id,
                                         code,
                                     ) {
+                                        // Extract and add method signature
+                                        let signature = self.extract_signature(child, code);
+                                        method_symbol = method_symbol.with_signature(signature);
                                         symbols.push(method_symbol);
                                     }
                                 }
@@ -1056,6 +1083,70 @@ impl RustParser {
                 code[node.byte_range()].to_string()
             }
         }
+    }
+
+    /// Extract function/method signature from a node, excluding the body
+    fn extract_signature(&self, node: Node, code: &str) -> String {
+        let start = node.start_byte();
+        let mut end = node.end_byte();
+
+        // Find the body and exclude it (similar to TypeScript implementation)
+        if let Some(body) = node.child_by_field_name("body") {
+            end = body.start_byte();
+        }
+
+        code[start..end].trim().to_string()
+    }
+
+    /// Extract struct signature including generics and visibility
+    fn extract_struct_signature(&self, node: Node, code: &str) -> String {
+        let start = node.start_byte();
+        let mut end = node.end_byte();
+
+        // Find the body and exclude it
+        if let Some(body) = node.child_by_field_name("body") {
+            end = body.start_byte();
+        }
+
+        code[start..end].trim().to_string()
+    }
+
+    /// Extract trait signature including generics and bounds
+    fn extract_trait_signature(&self, node: Node, code: &str) -> String {
+        let start = node.start_byte();
+        let mut end = node.end_byte();
+
+        // Find the body and exclude it
+        if let Some(body) = node.child_by_field_name("body") {
+            end = body.start_byte();
+        }
+
+        code[start..end].trim().to_string()
+    }
+
+    /// Extract enum signature including generics
+    fn extract_enum_signature(&self, node: Node, code: &str) -> String {
+        let start = node.start_byte();
+        let mut end = node.end_byte();
+
+        // Find the body and exclude it
+        if let Some(body) = node.child_by_field_name("body") {
+            end = body.start_byte();
+        }
+
+        code[start..end].trim().to_string()
+    }
+
+    /// Extract type alias signature
+    fn extract_type_alias_signature(&self, node: Node, code: &str) -> String {
+        // For type aliases, we want the entire definition including the assignment
+        code[node.byte_range()].trim().to_string()
+    }
+
+    /// Extract constant signature
+    fn extract_const_signature(&self, node: Node, code: &str) -> String {
+        // For constants, we want the entire definition including the value
+        code[node.byte_range()].trim().to_string()
     }
 
     /// Recursive type extraction from AST nodes requires &self for traversal context

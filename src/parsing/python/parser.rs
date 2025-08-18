@@ -197,6 +197,22 @@ impl PythonParser {
         Some(symbol)
     }
 
+    /// Extract class signature including inheritance
+    fn extract_class_signature(&self, node: Node, code: &str) -> String {
+        let start = node.start_byte();
+        let mut end = node.end_byte();
+
+        // Find the body and exclude it (colon + indented content)
+        for child in node.children(&mut node.walk()) {
+            if child.kind() == ":" {
+                end = child.end_byte();
+                break;
+            }
+        }
+
+        code[start..end].trim().to_string()
+    }
+
     /// Process a class definition node
     fn process_class(
         &self,
@@ -219,6 +235,11 @@ impl PythonParser {
         symbol.doc_comment = doc_comment;
         // Classes are typically module-level in Python
         symbol.scope_context = Some(context.current_scope_context());
+
+        // Extract and add class signature
+        let signature = self.extract_class_signature(node, code);
+        symbol.signature = Some(signature.into());
+
         Some(symbol)
     }
 

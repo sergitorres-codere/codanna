@@ -381,6 +381,71 @@ impl PhpParser {
         }
     }
 
+    /// Extract function signature from a node, excluding the body
+    fn extract_function_signature(&self, node: Node, code: &str) -> String {
+        let start = node.start_byte();
+        let mut end = node.end_byte();
+
+        // Find the body and exclude it
+        if let Some(body) = node.child_by_field_name("body") {
+            end = body.start_byte();
+        }
+
+        code[start..end].trim().to_string()
+    }
+
+    /// Extract method signature from a node, excluding the body
+    fn extract_method_signature(&self, node: Node, code: &str) -> String {
+        let start = node.start_byte();
+        let mut end = node.end_byte();
+
+        // Find the body and exclude it
+        if let Some(body) = node.child_by_field_name("body") {
+            end = body.start_byte();
+        }
+
+        code[start..end].trim().to_string()
+    }
+
+    /// Extract class signature including extends/implements
+    fn extract_class_signature(&self, node: Node, code: &str) -> String {
+        let start = node.start_byte();
+        let mut end = node.end_byte();
+
+        // Find the body and exclude it
+        if let Some(body) = node.child_by_field_name("body") {
+            end = body.start_byte();
+        }
+
+        code[start..end].trim().to_string()
+    }
+
+    /// Extract trait signature
+    fn extract_trait_signature(&self, node: Node, code: &str) -> String {
+        let start = node.start_byte();
+        let mut end = node.end_byte();
+
+        // Find the body and exclude it
+        if let Some(body) = node.child_by_field_name("body") {
+            end = body.start_byte();
+        }
+
+        code[start..end].trim().to_string()
+    }
+
+    /// Extract interface signature
+    fn extract_interface_signature(&self, node: Node, code: &str) -> String {
+        let start = node.start_byte();
+        let mut end = node.end_byte();
+
+        // Find the body and exclude it
+        if let Some(body) = node.child_by_field_name("body") {
+            end = body.start_byte();
+        }
+
+        code[start..end].trim().to_string()
+    }
+
     /// Process a function definition node
     fn process_function(
         &mut self,
@@ -404,6 +469,11 @@ impl PhpParser {
         // Set scope context
         symbol.scope_context = Some(self.context.current_scope_context());
         symbol.doc_comment = self.extract_doc_comment(&node, code).map(Into::into);
+
+        // Extract and add function signature
+        let signature = self.extract_function_signature(node, code);
+        symbol.signature = Some(signature.into());
+
         Some(symbol)
     }
 
@@ -430,6 +500,11 @@ impl PhpParser {
         // Set scope context
         symbol.scope_context = Some(self.context.current_scope_context());
         symbol.doc_comment = self.extract_doc_comment(&node, code).map(Into::into);
+
+        // Extract and add method signature
+        let signature = self.extract_method_signature(node, code);
+        symbol.signature = Some(signature.into());
+
         Some(symbol)
     }
 
@@ -457,6 +532,11 @@ impl PhpParser {
         // Set scope context
         symbol.scope_context = Some(self.context.current_scope_context());
         symbol.doc_comment = self.extract_doc_comment(&node, code).map(Into::into);
+
+        // Extract and add class signature
+        let signature = self.extract_class_signature(node, code);
+        symbol.signature = Some(signature.into());
+
         Some(symbol)
     }
 
@@ -484,6 +564,11 @@ impl PhpParser {
         // Set scope context
         symbol.scope_context = Some(self.context.current_scope_context());
         symbol.doc_comment = self.extract_doc_comment(&node, code).map(Into::into);
+
+        // Extract and add interface signature
+        let signature = self.extract_interface_signature(node, code);
+        symbol.signature = Some(signature.into());
+
         Some(symbol)
     }
 
@@ -510,6 +595,11 @@ impl PhpParser {
         // Set scope context
         symbol.scope_context = Some(self.context.current_scope_context());
         symbol.doc_comment = self.extract_doc_comment(&node, code).map(Into::into);
+
+        // Extract and add trait signature
+        let signature = self.extract_trait_signature(node, code);
+        symbol.signature = Some(signature.into());
+
         Some(symbol)
     }
 

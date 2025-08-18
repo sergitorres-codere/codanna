@@ -1,6 +1,6 @@
 [package]
 name = "codanna"
-version = "0.4.0"
+version = "0.5.1"
 authors = ["Angel Bartolli <bartolli@gmail.com>"]
 edition = "2024"
 description = "Code Intelligence for Large Language Models"
@@ -13,10 +13,10 @@ keywords = ["mcp-server", "context-engineering", "agentic-coding", "code-embeddi
 categories = ["development-tools", "command-line-utilities", "parsing", "text-processing", "compilers"]
 
 [profile.release]
-# opt-level = 3
-# lto = true
-# codegen-units = 1
-# strip = true
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
 
 [dependencies]
 anyhow = "1.0.98"

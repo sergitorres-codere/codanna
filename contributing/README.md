@@ -1,32 +1,19 @@
 # Contributing to Codanna
 
-Thank you for your interest in contributing to Codanna! This guide will help you get started with development, testing, and submitting changes.
+Thank you for your interest in contributing to Codanna! This guide focuses on the development workflow and contributor-specific requirements.
 
 ## Quick Links
 
-- [Development Setup](#development-setup)
-- [Development Guidelines](./development/guidelines.md) - Rust coding principles (MUST READ)
-- [Adding Language Support](./development/language-support.md) - How to add new language parsers **(⚠️ Breaking changes coming in v0.4.1)**
-- [Testing Your Changes](#testing-your-changes)
-- [Submitting Pull Requests](#submitting-pull-requests)
+- **[Development Guidelines](./development/guidelines.md)** - Rust coding principles (MUST READ)
+- **[Adding Language Support](./development/language-support.md)** - Complete language implementation guide
+- **[Development Setup](#development-setup)** - Local environment setup
+- **[Testing Workflow](#testing-your-changes)** - Pre-commit and CI/CD scripts
 
-## ⚠️ Important Notice for Contributors
+## Current Status (v0.5.0)
 
-**Major refactoring in progress (v0.4.1)**
-
-We are refactoring the language behavior system to eliminate hardcoded Rust-specific assumptions. This will significantly improve the architecture for adding new languages.
-
-**What's changing:**
-- Language-specific resolution logic moving to behavior modules
-- SimpleIndexer becoming truly language-agnostic
-- Each language will handle its own scoping rules and inheritance models
-
-**If you're planning to contribute:**
-- **Adding a new language?** Please wait for v0.4.1 (expected August 17, 2025, TypeScript is included)
-- **Bug fixes?** Continue as normal
-- **Feature additions?** Check if they touch resolution/indexing logic first
-
-This refactoring will make the codebase much cleaner and easier to extend.
+✅ **Stable Architecture** - Language registry, resolution API, and signature extraction are production-ready
+✅ **4 Languages Supported** - Rust, TypeScript, Python, PHP with comprehensive feature parity
+✅ **Ready for New Languages** - Mature, well-tested architecture for easy expansion
 
 ## Development Setup
 
@@ -66,17 +53,14 @@ This refactoring will make the codebase much cleaner and easier to extend.
 ## Project Structure
 
 ```
-codebase-intelligence/
+codanna/
 ├── src/
-│   ├── parsing/         # Language parsers
-│   ├── indexing/        # Indexing and file processing
-│   ├── storage/         # Tantivy and cache storage
-│   ├── mcp/            # MCP server implementation
-│   └── main.rs         # CLI entry point
-├── contributing/
-│   ├── scripts/        # Local CI/CD scripts
-│   └── development/    # Development documentation
-└── tests/             # Integration tests
+│   ├── parsing/         # Language parsers (rust/, typescript/, python/, php/)
+│   ├── indexing/        # Symbol indexing and resolution
+│   ├── storage/         # Tantivy and memory-mapped caches
+│   └── mcp/            # MCP server and HTTP/HTTPS endpoints
+├── contributing/        # Development tools and documentation
+└── tests/              # Language parser and integration tests
 ```
 
 ## Testing Your Changes
@@ -141,16 +125,15 @@ This replicates the complete GitHub Actions workflow.
 
 ### Language Support
 
-> **⚠️ Note:** Language support architecture is being refactored in v0.4.1. If you're planning to add a new language, please wait for this release or coordinate with maintainers.
+> **✅ Ready for New Languages (v0.5.0):** The language registry architecture is stable and production-ready. All four existing languages demonstrate the complete implementation pattern.
 
-See [Adding Language Support](./development/language-support.md) for the complete guide. Critical checklist:
+See [Adding Language Support](./development/language-support.md) for the complete guide. Critical requirements:
 
-- [ ] Language enum and methods
-- [ ] Parser implementation
-- [ ] Factory registration
-- [ ] **File walker registration** (often missed!)
-- [ ] CLI benchmark support
-- [ ] Configuration updates
+- [ ] **5 required files** in `src/parsing/{language}/` directory
+- [ ] **Complete signature extraction** for all symbol types
+- [ ] **Language-specific resolution logic** in resolution.rs
+- [ ] **Registry registration** and tree-sitter dependency
+- [ ] **Comprehensive test coverage** with ABI-15 exploration
 
 ### New Commands
 
@@ -179,10 +162,10 @@ See [Adding Language Support](./development/language-support.md) for the complet
    ```
    feat: Add Go language parser support
    
-   - Implement LanguageParser trait for Go
-   - Add tree-sitter-python grammar
-   - Support classes, functions, and imports
-   - Parse >75,000 symbols/second
+   - Implement LanguageParser and LanguageBehavior traits
+   - Add complete signature extraction for all symbol types
+   - Support structs, interfaces, functions, and packages
+   - Parse >75,000 symbols/second with scope tracking
    ```
 
 ### PR Guidelines

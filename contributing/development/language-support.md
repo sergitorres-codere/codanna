@@ -1,21 +1,27 @@
 # Adding Language Support
 
-> ⚠️ **IMPORTANT NOTICE - Breaking Changes Coming in v0.4.1** ⚠️
+> **📝 Note: This guide is currently under development**
 > 
-> We are currently refactoring the language behavior system to be truly language-agnostic.
-> This will make adding new languages significantly easier and more maintainable.
-> 
-> **If you're planning to add a new language:**
-> - Please wait for the v0.4.1 release (expected August 17, 2025, TypeScript included)
-> - The new architecture will eliminate many manual steps
-> - Language-specific resolution logic will be self-contained
-> 
-> **Current limitations being addressed:**
-> - Hardcoded Rust-specific resolution logic in `SimpleIndexer`
-> - Language-specific traits/interfaces handled incorrectly
-> - Module path resolution assumes Rust conventions
+> We're actively updating this documentation to reflect the latest v0.5.0 architecture improvements. 
+> Some sections may be incomplete or subject to change as we refine the language implementation process.
 
-Languages self-register via the registry system. Each language lives in its own subdirectory for clean organization.
+Languages self-register via the modular registry system. Each language lives in its own subdirectory with complete isolation and language-specific resolution capabilities.
+
+## Current Status (v0.5.0)
+
+**✅ Production Ready:**
+- Language registry architecture with self-registration
+- Language-specific resolution API with full type tracking
+- Complete signature extraction for all symbol types
+- Comprehensive scope context tracking with parent relationships
+
+**✅ Supported Languages:**
+- **Rust** - Traits, generics, lifetimes, comprehensive type system
+- **TypeScript** - Interfaces, type aliases, generics, inheritance tracking
+- **Python** - Classes, functions, type hints, inheritance
+- **PHP** - Classes, traits, interfaces, namespaces
+
+**🎯 Ready for new languages** - The architecture is mature and well-tested.
 
 ## Architecture
 
@@ -24,49 +30,123 @@ Each language needs:
 1. `definition.rs` - implements `LanguageDefinition`
 2. `parser.rs` - implements `LanguageParser`
 3. `behavior.rs` - implements `LanguageBehavior`
-4. `mod.rs` - module re-exports
+4. `resolution.rs` - language-specific symbol resolution
+5. `mod.rs` - module re-exports
 
 ## File Structure
 
+Each language requires exactly 5 files in its own subdirectory:
+
 ```
-src/parsing/
-├── {language}/
-│   ├── mod.rs        # Module re-exports
-│   ├── parser.rs     # LanguageParser trait
-│   ├── behavior.rs   # LanguageBehavior trait
-│   └── definition.rs # LanguageDefinition trait
-├── registry.rs       # Add registration call
-└── [shared infrastructure files]
+src/parsing/{language}/
+├── mod.rs        # Module re-exports and public API
+├── parser.rs     # Symbol extraction, calls, implementations, imports
+├── behavior.rs   # Module paths, visibility, basic language behaviors
+├── resolution.rs # Language-specific symbol resolution logic
+└── definition.rs # Language ID, extensions, factory methods
 ```
 
-## Key Trait Signatures
+**Complete example (TypeScript):**
+```
+src/parsing/typescript/
+├── mod.rs        # pub use TypeScriptParser, TypeScriptBehavior, register
+├── parser.rs     # Extracts functions, classes, interfaces, types + signatures
+├── behavior.rs   # Handles :: vs . separators, basic language behaviors
+├── resolution.rs # TypeScript-specific symbol resolution and scoping
+└── definition.rs # Language::TypeScript, [".ts", ".tsx"], create_parser()
+```
 
-### LanguageDefinition
+## Key APIs for Language Implementation
+
+### 1. LanguageDefinition (Registry Integration)
 
 ```rust
-fn id(&self) -> LanguageId
-fn extensions(&self) -> &'static [&'static str]
-fn create_parser(&self, settings: &Settings) -> IndexResult<Box<dyn LanguageParser>>
-fn create_behavior(&self) -> Box<dyn LanguageBehavior>
+pub trait LanguageDefinition: Send + Sync {
+    fn id(&self) -> LanguageId;                    // "rust", "typescript", etc.
+    fn name(&self) -> &'static str;                // "Rust", "TypeScript", etc.
+    fn extensions(&self) -> &'static [&'static str]; // ["rs"], ["ts", "tsx"], etc.
+    fn create_parser(&self, settings: &Settings) -> IndexResult<Box<dyn LanguageParser>>;
+    fn create_behavior(&self) -> Box<dyn LanguageBehavior>;
+    fn default_enabled(&self) -> bool { true }     // Default config state
+}
 ```
 
-### LanguageParser
+### 2. LanguageParser (Symbol Extraction)
 
 ```rust
-fn parse(&mut self, code: &str, file_id: FileId, counter: &mut SymbolCounter) -> Vec<Symbol>
-fn find_calls(&mut self, code: &str) -> Vec<SimpleCall>
-fn find_implementations(&mut self, code: &str) -> Vec<(&str, &str, Range)>
-fn find_imports(&mut self, code: &str, file_id: FileId) -> Vec<Import>
+pub trait LanguageParser: Send + Sync {
+    // Core symbol extraction
+    fn parse(&mut self, code: &str, file_id: FileId, counter: &mut SymbolCounter) -> Vec<Symbol>;
+    
+    // Relationship extraction  
+    fn find_calls<'a>(&mut self, code: &'a str) -> Vec<(&'a str, &'a str, Range)>;
+    fn find_method_calls(&mut self, code: &str) -> Vec<MethodCall>;
+    fn find_implementations<'a>(&mut self, code: &'a str) -> Vec<(&'a str, &'a str, Range)>;
+    fn find_imports(&mut self, code: &str, file_id: FileId) -> Vec<Import>;
+    
+    // Documentation extraction
+    fn extract_doc_comment(&self, node: &Node, code: &str) -> Option<String>;
+    
+    // Type erasure for dynamic dispatch
+    fn as_any(&self) -> &dyn Any;
+}
 ```
 
-### LanguageBehavior
+**Signature Extraction (Required in v0.5.0):**
+All parsers must extract complete signatures for all symbol types:
+```rust
+// Common pattern: exclude body, include full declaration
+fn extract_signature(&self, node: Node, code: &str) -> String {
+    let start = node.start_byte();
+    let mut end = node.end_byte();
+    if let Some(body) = node.child_by_field_name("body") {
+        end = body.start_byte();
+    }
+    code[start..end].trim().to_string()
+}
+```
+
+### 3. LanguageBehavior (Language-Specific Logic)
 
 ```rust
-fn module_separator(&self) -> &'static str
-fn module_path_from_file(&self, file_path: &Path) -> Option<String>
-fn parse_visibility(&self, signature: &str) -> Visibility
-fn supports_traits(&self) -> bool
-fn supports_inherent_methods(&self) -> bool
+pub trait LanguageBehavior: Send + Sync {
+    // Module path formatting
+    fn format_module_path(&self, base_path: &str, symbol_name: &str) -> String;
+    fn module_separator(&self) -> &'static str;     // "::" vs "." vs "\\"
+    
+    // Visibility parsing
+    fn parse_visibility(&self, signature: &str) -> Visibility;
+    
+    // Language capabilities
+    fn supports_traits(&self) -> bool { false }
+    fn supports_inherent_methods(&self) -> bool { false }
+    
+    // Symbol resolution (v0.5.0)
+    fn resolve_symbol(&self, name: &str, context: &dyn ResolutionScope, 
+                     document_index: &DocumentIndex) -> Option<SymbolId>;
+    fn is_resolvable_symbol(&self, symbol: &Symbol) -> bool;
+    
+    // Module configuration
+    fn configure_symbol(&self, symbol: &mut Symbol, module_path: Option<&str>);
+}
+```
+
+### 4. Key Data Types
+
+```rust
+pub struct Import {
+    pub path: String,           // "std::collections::HashMap"
+    pub alias: Option<String>,  // "as HashMap"
+    pub file_id: FileId,
+    pub is_glob: bool,          // "use foo::*"
+    pub is_type_only: bool,     // TypeScript "import type"
+}
+
+pub enum MethodCall {
+    Simple { receiver: String, method: String, range: Range },
+    Chained { chain: Vec<String>, range: Range },
+    Unknown { target: String, range: Range },
+}
 ```
 
 ## Step 1: ABI-15 Node Discovery (Required)
@@ -76,14 +156,14 @@ Create a comprehensive ABI-15 exploration test before implementing any parser fu
 ### Creating the Node Discovery Test
 
 1. Add a comprehensive test to `tests/abi15_exploration.rs` that covers all language constructs
-2. Document findings in `docs/enhancements/{language}/NODE_MAPPING.md`
+2. Document findings in `contributing/parsers/{language}/NODE_MAPPING.md`
 3. Reference the node mapping document during implementation
 
 ### Running the Explorer
 
 ```bash
 # Run your comprehensive language test
-cargo test explore_{language}_abi15_comprehensive -- --nocapture > docs/enhancements/{language}/node_discovery.txt
+cargo test explore_{language}_abi15_comprehensive -- --nocapture > contributing/parsers/{language}/node_discovery.txt
 ```
 
 ### What to Discover
@@ -123,27 +203,23 @@ Every language test should explore:
 
 ## Implementation Checklist
 
-1. Run ABI-15 node discovery test and document findings
-2. Create directory: `src/parsing/{language}/`
-3. Implement the four required files:
-   - `parser.rs` - Main parsing logic
-   - `behavior.rs` - Language-specific behaviors
+1. **ABI-15 Node Discovery** - Run comprehensive tree-sitter exploration and document findings
+2. **Create Language Directory** - `src/parsing/{language}/` with five required files:
+   - `parser.rs` - Main parsing logic with signature extraction
+   - `behavior.rs` - Language-specific behaviors 
+   - `resolution.rs` - Language-specific symbol resolution logic
    - `definition.rs` - Registry definition with `register()` function
    - `mod.rs` - Module re-exports
-4. Add to `src/parsing/registry.rs`: `super::{language}::register(registry);`
-5. Update `src/parsing/mod.rs`: 
-   - Add `pub mod {language};`
-   - Add `pub use {language}::{LanguageParser, LanguageBehavior};`
-6. Add to `Cargo.toml`: `tree-sitter-{language} = "0.x"`
-
-## Quick Verification
-
-```bash
-cargo build --release
-./target/release/codanna init  # Should see your language
-./target/release/codanna index test.ext --progress
-./target/release/codanna retrieve symbol YourSymbol
-```
+3. **Registry Integration**:
+   - Add to `src/parsing/registry.rs`: `super::{language}::register(registry);`
+   - Update `src/parsing/mod.rs` with public module and re-exports
+4. **Dependencies** - Add to `Cargo.toml`: `tree-sitter-{language} = "0.x"`
+5. **Required Features (v0.5.0)**:
+   - ✅ Symbol extraction with scope context
+   - ✅ Complete signature extraction for all symbol types
+   - ✅ Parent context tracking for nested symbols
+   - ✅ Language-specific resolution logic
+   - ✅ Comprehensive test coverage
 
 ## Performance Requirements
 
@@ -153,9 +229,12 @@ cargo build --release
 
 ## Example Implementations
 
-- `src/parsing/rust/` - Full Rust implementation with traits and inherent methods
-- `src/parsing/python/` - Python with naming convention visibility
-- `src/parsing/php/` - PHP with namespace handling
+- **`src/parsing/rust/`** - Complete implementation with traits, generics, lifetimes, and signature extraction
+- **`src/parsing/typescript/`** - Full TypeScript with interfaces, type aliases, inheritance tracking, and complex type resolution
+- **`src/parsing/python/`** - Python with class inheritance, type hints, scope tracking, and parent context
+- **`src/parsing/php/`** - PHP with namespaces, traits, interfaces, and complete signature support
+
+All parsers follow the same patterns for signature extraction, scope tracking, and resolution API integration.
 
 ## mod.rs Template
 
