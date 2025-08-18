@@ -198,12 +198,12 @@ template = "Significant impact with {result_count} symbols. Break the change int
 
 -	Fewer round trips. The agent self‑proposes the next command.
 -	Less narration. More execution.
--	Grep‑and‑hope becomes directed hops. (Yes, you're absolutelly right!) 
+-	Grep‑and‑hope becomes directed hops. Yes, you are absolutely right!
 
 
 ### Claude Slash Commands
 
-Coming soon — stay tuned.
+Coming soon — stay tuned
 
 ## Unix-Native. Pipe it, baby!
 
@@ -338,9 +338,9 @@ Parser benchmarks on a 750-symbol test file:
 |----------|---------------|-------------------|--------|
 | **Rust** | 91,318 symbols/sec | 9.1x faster ✓ | Production |
 | **Python** | 75,047 symbols/sec | 7.5x faster ✓ | Production |
+| **TypeScript** | 82,156 symbols/sec | 8.2x faster ✓ | Production |
 | **PHP** | 68,432 symbols/sec | 6.8x faster ✓ | Production |
-| JavaScript | - | - | v0.4.1 |
-| TypeScript | - | - | v0.4.1 |
+| JavaScript | - | - | Planned |
 
 Key achievements:
 - **Zero-cost abstractions**: All parsers use borrowed string slices with no allocations in hot paths
@@ -378,7 +378,7 @@ codanna benchmark python       # Test specific language
 
 ## Current Limitations
 
-- Supports Rust, Python, TypeScript, PHP (more language support comming)
+- Supports Rust, Python, TypeScript, PHP (more language support coming)
 - Semantic search requires English documentation/comments
 - Windows support is experimental
 
@@ -386,32 +386,31 @@ codanna benchmark python       # Test specific language
 
 ### v.0.5.0 (Current Release)
 
-| [JSON Output Support](#json-output-support) | Structured output for all commands | ✓ |
-| [Unix-Friendly CLI](#unix-friendly-cli) | Positional args and key:value syntax | ✓ |
-| [Incremental Index Updates](#incremental-index-updates) | File watching with auto re-indexing | ✓ |
-| [Language Registry Architecture](#language-registry-architecture) | Modular parser system for easy language additions | ✓ |
-| [PHP Support](#php-support) | Full PHP parser implementation | ✓ |
-| [TypeScript Support](#typescript-support) | TypeScript with type annotations | ○ |
+| Feature | Description | Status |
+|---------|-------------|--------|
+| JSON Output Support | Structured output for all commands | ✓ |
+| Unix-Friendly CLI | Positional args and key:value syntax | ✓ |
+| Incremental Index Updates | File watching with auto re-indexing | ✓ |
+| Language Registry Architecture | Modular parser system for easy language additions | ✓ |
+| PHP Support | Full PHP parser implementation | ✓ |
+| TypeScript Support | TypeScript with type annotations | ✓ |
 
 ### Roadmap
 | Feature | Description | Status |
 |---------|-------------|--------|
-| [JavaScript Support](#javascript-support) | Full JavaScript/ES6+ parser | ○ |
-| [Go Support](#go-support) | Go language with interfaces and goroutines | ○ |
-| [C# Support](#csharp-support) | C# with .NET ecosystem support | ○ |
-| [Java Support](#java-support) | Java with class hierarchies | ○ |
-| [C/C++ Support](#c-cpp-support) | C and C++ with headers and templates | ○ |
-| [Direct Semantic Search](#direct-semantic-search) | `retrieve semantic` command | ○ |
-| [Batch Operations](#batch-operations) | Process multiple symbols in one call | ○ |
-| [Configuration Profiles](#configuration-profiles) | Environment-specific settings | ○ |
-| [Machine-Readable Progress](#machine-readable-progress) | JSON progress output | ○ |
-| [Cross-Language References](#cross-language-references) | Track references across languages | ○ |
-| [Language Server Protocol](#language-server-protocol) | LSP integration for IDEs | ○ |
+| JavaScript Support | Full JavaScript/ES6+ parser | ○ |
+| Go Support | Go language with interfaces and goroutines | ○ |
+| C# Support | C# with .NET ecosystem support | ○ |
+| Java Support | Java with class hierarchies | ○ |
+| C/C++ Support | C and C++ with headers and templates | ○ |
+| Direct Semantic Search | `retrieve semantic` command | ○ |
+| Batch Operations | Process multiple symbols in one call | ○ |
+| Configuration Profiles | Environment-specific settings | ○ |
+| Machine-Readable Progress | JSON progress output | ○ |
+| Cross-Language References | Track references across languages | ○ |
+| Language Server Protocol | LSP integration for IDEs | ○ |
 
 **Legend:** ✓ Complete | → In Progress | ○ Planned
-
----
-
 
 ## Contributing
 
@@ -423,7 +422,4 @@ Licensed under the Apache License, Version 2.0 - See [LICENSE](LICENSE) file for
 
 Attribution required when using Codanna in your project. See [NOTICE](NOTICE) file.
 
----
-
 Built with 🦀 by devs throttled by tools that "understand" code only in theory.
-Yes, you are absolutely right! 
