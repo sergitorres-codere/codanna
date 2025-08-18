@@ -10,29 +10,11 @@ use clap::{
 use codanna::FileId;
 use codanna::parsing::{LanguageParser, PhpParser, PythonParser, RustParser, TypeScriptParser};
 use codanna::types::SymbolCounter;
-use codanna::{IndexPersistence, RelationKind, Settings, SimpleIndexer, Symbol, SymbolKind};
+use codanna::{IndexPersistence, Settings, SimpleIndexer, Symbol, SymbolKind};
 use serde::Serialize;
-use std::io::{self, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
-
-/// Helper function to print JSON output, handling broken pipe errors gracefully
-///
-/// FIXME: This is a temporary solution to handle broken pipe errors when piping to commands like `head`.
-/// We should refactor all retrieve commands to use the proper OutputManager from src/io/output.rs
-/// which already handles this correctly along with proper exit codes and error handling.
-/// See OutputManager::success() and OutputManager::not_found() for the proper pattern.
-fn print_json<T: serde::Serialize>(data: &T) {
-    let json_str = serde_json::to_string_pretty(data).unwrap();
-    // Use writeln! with stdout and handle broken pipe errors
-    if let Err(e) = writeln!(io::stdout(), "{json_str}") {
-        // Silently ignore broken pipe errors (e.g., when piping to head)
-        if e.kind() != io::ErrorKind::BrokenPipe {
-            eprintln!("Error writing output: {e}");
-        }
-    }
-}
 
 // MCP tool JSON output structures
 #[derive(Debug, Serialize)]
@@ -347,9 +329,13 @@ enum RetrieveQuery {
     },
 
     /// Show what types implement a given trait
+    #[command(
+        after_help = "Examples:\n  codanna retrieve implementations Parser\n  codanna retrieve implementations trait:Parser --json"
+    )]
     Implementations {
-        /// Name of the trait
-        trait_name: String,
+        /// Positional arguments (trait name and/or key:value pairs)
+        #[arg(num_args = 0..)]
+        args: Vec<String>,
         /// Output in JSON format
         #[arg(long)]
         json: bool,
@@ -378,21 +364,22 @@ enum RetrieveQuery {
 
     /// Search for symbols using full-text search
     #[command(
-        after_help = "Examples:\n  codanna retrieve search \"parse\"\n  codanna retrieve search \"error handling\" --limit 5\n  codanna retrieve search parser --json | jq '.[].name'"
+        after_help = "Examples:\n  # Traditional flag format\n  codanna retrieve search \"parse\" --limit 5 --kind function\n  \n  # Key:value format (Unix-style)\n  codanna retrieve search query:parse limit:5 kind:function\n  \n  # Mixed format\n  codanna retrieve search \"parse\" limit:5 --json"
     )]
     Search {
-        /// Search query
-        query: String,
+        /// Positional arguments (query and/or key:value pairs)
+        #[arg(num_args = 0..)]
+        args: Vec<String>,
 
-        /// Maximum number of results
-        #[arg(short, long, default_value = "10")]
-        limit: usize,
+        /// Maximum number of results (flag format)
+        #[arg(short, long)]
+        limit: Option<usize>,
 
-        /// Filter by symbol kind (e.g., Function, Struct, Trait)
+        /// Filter by symbol kind (flag format)
         #[arg(short, long)]
         kind: Option<String>,
 
-        /// Filter by module path
+        /// Filter by module path (flag format)
         #[arg(short, long)]
         module: Option<String>,
 
@@ -414,9 +401,13 @@ enum RetrieveQuery {
     },
 
     /// Show information about a symbol
+    #[command(
+        after_help = "Examples:\n  codanna retrieve describe SimpleIndexer\n  codanna retrieve describe symbol:SimpleIndexer --json"
+    )]
     Describe {
-        /// Name of the symbol
-        symbol: String,
+        /// Positional arguments (symbol name and/or key:value pairs)
+        #[arg(num_args = 0..)]
+        args: Vec<String>,
         /// Output as JSON
         #[arg(long)]
         json: bool,
@@ -1072,1172 +1063,129 @@ async fn main() {
         }
 
         Commands::Retrieve { query } => {
-            match query {
+            use codanna::io::OutputFormat;
+            use codanna::retrieve;
+
+            let exit_code = match query {
                 RetrieveQuery::Symbol { name, json } => {
-                    use codanna::io::{OutputFormat, OutputManager};
-                    use codanna::symbol::context::SymbolContext;
-
-                    let symbols = indexer.find_symbols_by_name(&name);
-
-                    // Create OutputManager with format based on json flag
                     let format = OutputFormat::from_json_flag(json);
-                    let mut output = OutputManager::new(format);
-
-                    // Transform symbols to SymbolContext with file paths
-                    let symbols_with_path: Vec<SymbolContext> = symbols
-                        .into_iter()
-                        .map(|symbol| {
-                            let base_path = indexer
-                                .get_file_path(symbol.file_id)
-                                .unwrap_or_else(|| "unknown".to_string());
-                            // Include line number for actionable paths
-                            let file_path =
-                                format!("{}:{}", base_path, symbol.range.start_line + 1);
-                            SymbolContext {
-                                symbol,
-                                file_path,
-                                relationships: Default::default(),
-                            }
-                        })
-                        .collect();
-
-                    // Use OutputManager to handle output and exit codes
-                    let exit_code = if symbols_with_path.is_empty() {
-                        match output.not_found("Symbol", &name) {
-                            Ok(code) => code,
-                            Err(e) => {
-                                eprintln!("Error writing output: {e}");
-                                codanna::io::ExitCode::GeneralError
-                            }
-                        }
-                    } else {
-                        // For text mode, we need special formatting with docs and signatures
-                        if !json {
-                            // Print header
-                            println!(
-                                "Found {} symbol(s) named '{}':",
-                                symbols_with_path.len(),
-                                name
-                            );
-
-                            // Print each symbol with details
-                            for ctx in &symbols_with_path {
-                                println!("  {ctx}"); // Uses Display trait
-
-                                // Show documentation if available
-                                if let Some(ref doc) = ctx.symbol.doc_comment {
-                                    // Show first 3 lines or less
-                                    let lines: Vec<&str> = doc.lines().take(3).collect();
-                                    let preview = if doc.lines().count() > 3 {
-                                        format!("{}...", lines.join(" "))
-                                    } else {
-                                        lines.join(" ")
-                                    };
-                                    println!("    Documentation: {preview}");
-                                }
-
-                                // Show signature if available
-                                if let Some(ref sig) = ctx.symbol.signature {
-                                    println!("    Signature: {sig}");
-                                }
-                            }
-                            codanna::io::ExitCode::Success
-                        } else {
-                            // JSON mode - use OutputManager's collection method
-                            match output.symbol_contexts(symbols_with_path, "symbol") {
-                                Ok(code) => code,
-                                Err(e) => {
-                                    eprintln!("Error writing output: {e}");
-                                    codanna::io::ExitCode::GeneralError
-                                }
-                            }
-                        }
-                    };
-
-                    std::process::exit(exit_code as i32);
+                    retrieve::retrieve_symbol(&indexer, &name, format)
                 }
-
-                RetrieveQuery::Calls { function, json } => {
-                    use codanna::io::{OutputFormat, OutputManager};
-                    use codanna::symbol::context::SymbolContext;
-
-                    let symbols = indexer.find_symbols_by_name(&function);
-                    let format = OutputFormat::from_json_flag(json);
-                    let mut output = OutputManager::new(format);
-
-                    if symbols.is_empty() {
-                        let exit_code = match output.not_found("Function", &function) {
-                            Ok(code) => code,
-                            Err(e) => {
-                                eprintln!("Error writing output: {e}");
-                                codanna::io::ExitCode::GeneralError
-                            }
-                        };
-                        std::process::exit(exit_code as i32);
-                    } else {
-                        let mut all_called_with_metadata = Vec::new();
-                        let mut checked_symbols = 0;
-
-                        // Check all symbols with this name
-                        for symbol in &symbols {
-                            checked_symbols += 1;
-                            let called = indexer.get_called_functions_with_metadata(symbol.id);
-                            for (callee, metadata) in called {
-                                if !all_called_with_metadata
-                                    .iter()
-                                    .any(|(c, _): &(Symbol, _)| c.id == callee.id)
-                                {
-                                    all_called_with_metadata.push((callee, metadata));
-                                }
-                            }
-                        }
-
-                        if json {
-                            // JSON output - use OutputManager
-                            let called_symbols_with_path: Vec<SymbolContext> =
-                                all_called_with_metadata
-                                    .into_iter()
-                                    .map(|(symbol, _metadata)| {
-                                        let base_path = indexer
-                                            .get_file_path(symbol.file_id)
-                                            .unwrap_or_else(|| "unknown".to_string());
-                                        let file_path = format!(
-                                            "{}:{}",
-                                            base_path,
-                                            symbol.range.start_line + 1
-                                        );
-                                        SymbolContext {
-                                            symbol,
-                                            file_path,
-                                            relationships: Default::default(),
-                                        }
-                                    })
-                                    .collect();
-
-                            let exit_code = match output
-                                .symbol_contexts(called_symbols_with_path, "functions")
-                            {
-                                Ok(code) => code,
-                                Err(e) => {
-                                    eprintln!("Error writing output: {e}");
-                                    codanna::io::ExitCode::GeneralError
-                                }
-                            };
-                            std::process::exit(exit_code as i32);
-                        } else {
-                            // Text output (existing behavior)
-                            if all_called_with_metadata.is_empty() {
-                                println!(
-                                    "{function} doesn't call any functions (checked {checked_symbols} symbol(s) with this name)"
-                                );
-                            } else {
-                                println!(
-                                    "{function} calls {} function(s):",
-                                    all_called_with_metadata.len()
-                                );
-                                for (callee, metadata) in all_called_with_metadata {
-                                    // Parse metadata to extract receiver info
-                                    let call_display = if let Some(meta) = metadata {
-                                        if meta.contains("receiver:") && meta.contains("static:") {
-                                            // Parse "receiver:{receiver},static:{is_static}"
-                                            let parts: Vec<&str> = meta.split(',').collect();
-                                            let mut receiver = "";
-                                            let mut is_static = false;
-
-                                            for part in parts {
-                                                if let Some(r) = part.strip_prefix("receiver:") {
-                                                    receiver = r;
-                                                } else if let Some(s) = part.strip_prefix("static:")
-                                                {
-                                                    is_static = s == "true";
-                                                }
-                                            }
-
-                                            if !receiver.is_empty() {
-                                                if is_static {
-                                                    format!("{}::{}", receiver, callee.name)
-                                                } else {
-                                                    format!("{}.{}", receiver, callee.name)
-                                                }
-                                            } else {
-                                                callee.name.to_string()
-                                            }
-                                        } else {
-                                            callee.name.to_string()
-                                        }
-                                    } else {
-                                        callee.name.to_string()
-                                    };
-                                    println!("  -> {call_display}");
-                                }
-                            }
-                        }
-                    }
-                }
-
                 RetrieveQuery::Callers { function, json } => {
-                    use codanna::io::{OutputFormat, OutputManager};
-                    use codanna::symbol::context::SymbolContext;
-
-                    let symbols = indexer.find_symbols_by_name(&function);
                     let format = OutputFormat::from_json_flag(json);
-                    let mut output = OutputManager::new(format);
-
-                    if symbols.is_empty() {
-                        let exit_code = match output.not_found("Function", &function) {
-                            Ok(code) => code,
-                            Err(e) => {
-                                eprintln!("Error writing output: {e}");
-                                codanna::io::ExitCode::GeneralError
-                            }
-                        };
-                        std::process::exit(exit_code as i32);
-                    } else {
-                        let mut all_callers_with_metadata = Vec::new();
-                        let mut checked_symbols = 0;
-
-                        // Check all symbols with this name
-                        for symbol in &symbols {
-                            checked_symbols += 1;
-                            let callers = indexer.get_calling_functions_with_metadata(symbol.id);
-                            for (caller, metadata) in callers {
-                                if !all_callers_with_metadata
-                                    .iter()
-                                    .any(|(c, _): &(Symbol, _)| c.id == caller.id)
-                                {
-                                    all_callers_with_metadata.push((caller, metadata));
-                                }
-                            }
-                        }
-
-                        if json {
-                            // JSON output - use OutputManager
-                            let calling_symbols_with_path: Vec<SymbolContext> =
-                                all_callers_with_metadata
-                                    .into_iter()
-                                    .map(|(symbol, _metadata)| {
-                                        let base_path = indexer
-                                            .get_file_path(symbol.file_id)
-                                            .unwrap_or_else(|| "unknown".to_string());
-                                        let file_path = format!(
-                                            "{}:{}",
-                                            base_path,
-                                            symbol.range.start_line + 1
-                                        );
-                                        SymbolContext {
-                                            symbol,
-                                            file_path,
-                                            relationships: Default::default(),
-                                        }
-                                    })
-                                    .collect();
-
-                            let exit_code = match output
-                                .symbol_contexts(calling_symbols_with_path, "callers")
-                            {
-                                Ok(code) => code,
-                                Err(e) => {
-                                    eprintln!("Error writing output: {e}");
-                                    codanna::io::ExitCode::GeneralError
-                                }
-                            };
-                            std::process::exit(exit_code as i32);
-                        } else {
-                            // Text output (existing behavior)
-                            if all_callers_with_metadata.is_empty() {
-                                println!(
-                                    "No functions call {function} (checked {checked_symbols} symbol(s) with this name)"
-                                );
-                            } else {
-                                println!(
-                                    "{} function(s) call {function}:",
-                                    all_callers_with_metadata.len()
-                                );
-                                for (caller, metadata) in all_callers_with_metadata {
-                                    let file_path = indexer
-                                        .get_file_path(caller.file_id)
-                                        .unwrap_or_else(|| "<unknown>".to_string());
-
-                                    // Parse metadata to extract receiver info
-                                    let call_display = if let Some(meta) = metadata {
-                                        if meta.contains("receiver:") && meta.contains("static:") {
-                                            // Parse "receiver:{receiver},static:{is_static}"
-                                            let parts: Vec<&str> = meta.split(',').collect();
-                                            let mut receiver = "";
-                                            let mut is_static = false;
-
-                                            for part in parts {
-                                                if let Some(r) = part.strip_prefix("receiver:") {
-                                                    receiver = r;
-                                                } else if let Some(s) = part.strip_prefix("static:")
-                                                {
-                                                    is_static = s == "true";
-                                                }
-                                            }
-
-                                            let call_str = if !receiver.is_empty() {
-                                                if is_static {
-                                                    format!("{receiver}::{function}")
-                                                } else {
-                                                    format!("{receiver}.{function}")
-                                                }
-                                            } else {
-                                                function.to_string()
-                                            };
-
-                                            format!("{} calls {}", caller.name, call_str)
-                                        } else {
-                                            caller.name.to_string()
-                                        }
-                                    } else {
-                                        caller.name.to_string()
-                                    };
-
-                                    println!(
-                                        "  <- {} ({}:{})",
-                                        call_display,
-                                        file_path,
-                                        caller.range.start_line + 1
-                                    );
-                                }
-                            }
-                        }
-                    }
+                    retrieve::retrieve_callers(&indexer, &function, format)
                 }
+                RetrieveQuery::Calls { function, json } => {
+                    let format = OutputFormat::from_json_flag(json);
+                    retrieve::retrieve_calls(&indexer, &function, format)
+                }
+                RetrieveQuery::Implementations { args, json } => {
+                    use codanna::io::args::parse_positional_args;
 
-                RetrieveQuery::Implementations { trait_name, json } => {
-                    use codanna::io::{OutputFormat, OutputManager};
-                    use codanna::symbol::context::ContextIncludes;
-                    use codanna::symbol::context::SymbolContext;
+                    // Parse positional arguments for trait name and key:value pairs
+                    let (positional_trait, params) = parse_positional_args(&args);
 
-                    // Find all symbols with this name and look for the trait or interface
-                    let symbols = indexer.find_symbols_by_name(&trait_name);
-                    let trait_or_interface = symbols
-                        .iter()
-                        .find(|s| s.kind == SymbolKind::Trait || s.kind == SymbolKind::Interface);
+                    // Determine trait name (priority: positional > key:value)
+                    let final_trait = positional_trait
+                        .or_else(|| params.get("trait").cloned())
+                        .unwrap_or_else(|| {
+                            eprintln!("Error: implementations requires a trait name");
+                            eprintln!("Usage: codanna retrieve implementations Parser");
+                            eprintln!("   or: codanna retrieve implementations trait:Parser");
+                            std::process::exit(1);
+                        });
 
                     let format = OutputFormat::from_json_flag(json);
-                    let mut output = OutputManager::new(format);
+                    retrieve::retrieve_implementations(&indexer, &final_trait, format)
+                }
+                RetrieveQuery::Search {
+                    args,
+                    limit,
+                    json,
+                    kind,
+                    module,
+                } => {
+                    use codanna::io::args::parse_positional_args;
 
-                    match trait_or_interface {
-                        Some(symbol) => {
-                            let ctx = indexer.get_symbol_context(
-                                symbol.id,
-                                ContextIncludes::IMPLEMENTATIONS | ContextIncludes::DEFINITIONS,
+                    // Parse positional arguments for query and key:value pairs
+                    let (positional_query, params) = parse_positional_args(&args);
+
+                    // Determine query source (priority: positional > key:value)
+                    let final_query = positional_query
+                        .or_else(|| params.get("query").cloned())
+                        .unwrap_or_else(|| {
+                            eprintln!("Error: search requires a query");
+                            eprintln!("Usage: codanna retrieve search \"query\" [options]");
+                            eprintln!(
+                                "   or: codanna retrieve search query:\"search text\" [options]"
                             );
+                            std::process::exit(1);
+                        });
 
-                            if let Some(ctx) = ctx {
-                                if let Some(impls) = &ctx.relationships.implemented_by {
-                                    if json {
-                                        // JSON output - use OutputManager
-                                        let impls_with_path: Vec<SymbolContext> = impls
-                                            .iter()
-                                            .map(|symbol| {
-                                                let base_path = indexer
-                                                    .get_file_path(symbol.file_id)
-                                                    .unwrap_or_else(|| "unknown".to_string());
-                                                let file_path = format!(
-                                                    "{}:{}",
-                                                    base_path,
-                                                    symbol.range.start_line + 1
-                                                );
-                                                SymbolContext {
-                                                    symbol: symbol.clone(),
-                                                    file_path,
-                                                    relationships: Default::default(),
-                                                }
-                                            })
-                                            .collect();
+                    // Merge parameters (flags take precedence over key:value)
+                    let final_limit = limit.unwrap_or_else(|| {
+                        params
+                            .get("limit")
+                            .and_then(|s| s.parse::<usize>().ok())
+                            .unwrap_or(10)
+                    });
 
-                                        let exit_code = match output
-                                            .symbol_contexts(impls_with_path, "implementations")
-                                        {
-                                            Ok(code) => code,
-                                            Err(e) => {
-                                                eprintln!("Error writing output: {e}");
-                                                codanna::io::ExitCode::GeneralError
-                                            }
-                                        };
-                                        std::process::exit(exit_code as i32);
-                                    } else if impls.is_empty() {
-                                        // TODO: Consider extending Display trait or creating a RichTextFormatter
-                                        // for complex nested output like trait implementations with methods
-                                        println!("No types implement {trait_name}");
-                                    } else {
-                                        println!(
-                                            "{} type(s) implement {}:",
-                                            impls.len(),
-                                            trait_name
-                                        );
+                    let final_kind = kind.or_else(|| params.get("kind").cloned());
+                    let final_module = module.or_else(|| params.get("module").cloned());
 
-                                        // Show trait/interface methods first
-                                        if let Some(defines) = &ctx.relationships.defines {
-                                            let methods: Vec<_> = defines
-                                                .iter()
-                                                .filter(|s| s.kind == SymbolKind::Method)
-                                                .map(|s| s.as_name())
-                                                .collect();
-                                            if !methods.is_empty() {
-                                                let kind_name =
-                                                    if symbol.kind == SymbolKind::Interface {
-                                                        "Interface"
-                                                    } else {
-                                                        "Trait"
-                                                    };
-                                                println!(
-                                                    "{} methods: {}",
-                                                    kind_name,
-                                                    methods.join(", ")
-                                                );
-                                                println!();
-                                            }
-                                        }
-
-                                        // Show each implementation with context
-                                        for impl_type in impls {
-                                            let impl_ctx = indexer.get_symbol_context(
-                                                impl_type.id,
-                                                ContextIncludes::DEFINITIONS,
-                                            );
-
-                                            println!("  - {}", impl_type.name);
-                                            println!("    Type: {:?}", impl_type.kind);
-
-                                            if let Some(impl_ctx) = impl_ctx {
-                                                println!(
-                                                    "    Location: {}:{}",
-                                                    impl_ctx.file_path,
-                                                    impl_type.range.start_line + 1
-                                                );
-
-                                                if let Some(module) = impl_type.as_module_path() {
-                                                    println!("    Module: {module}");
-                                                }
-
-                                                // Check for test annotation
-                                                if impl_type.name.contains("Mock")
-                                                    || impl_type.name.contains("Test")
-                                                {
-                                                    println!(
-                                                        "    Note: Likely test implementation"
-                                                    );
-                                                }
-                                            } else {
-                                                // Fallback if we can't get context
-                                                let file_path = indexer
-                                                    .get_file_path(impl_type.file_id)
-                                                    .unwrap_or_else(|| "<unknown>".to_string());
-                                                println!(
-                                                    "    Location: {}:{}",
-                                                    file_path,
-                                                    impl_type.range.start_line + 1
-                                                );
-                                            }
-                                        }
-                                    }
-                                } else if json {
-                                    // JSON output - empty array using OutputManager
-                                    let exit_code = match output.symbol_contexts(
-                                        Vec::<SymbolContext>::new(),
-                                        "implementations",
-                                    ) {
-                                        Ok(code) => code,
-                                        Err(e) => {
-                                            eprintln!("Error writing output: {e}");
-                                            codanna::io::ExitCode::GeneralError
-                                        }
-                                    };
-                                    std::process::exit(exit_code as i32);
-                                } else {
-                                    let kind_name = if symbol.kind == SymbolKind::Interface {
-                                        "interface"
-                                    } else {
-                                        "trait"
-                                    };
-                                    println!("No types implement {kind_name} {trait_name}");
-                                }
-                            } else {
-                                // Fallback to original behavior if context fails
-                                let implementations = indexer.get_implementations(symbol.id);
-                                if json {
-                                    let impls_with_path: Vec<SymbolContext> = implementations
-                                        .into_iter()
-                                        .map(|symbol| {
-                                            let base_path = indexer
-                                                .get_file_path(symbol.file_id)
-                                                .unwrap_or_else(|| "unknown".to_string());
-                                            let file_path = format!(
-                                                "{}:{}",
-                                                base_path,
-                                                symbol.range.start_line + 1
-                                            );
-                                            SymbolContext {
-                                                symbol,
-                                                file_path,
-                                                relationships: Default::default(),
-                                            }
-                                        })
-                                        .collect();
-
-                                    let exit_code = match output
-                                        .symbol_contexts(impls_with_path, "implementations")
-                                    {
-                                        Ok(code) => code,
-                                        Err(e) => {
-                                            eprintln!("Error writing output: {e}");
-                                            codanna::io::ExitCode::GeneralError
-                                        }
-                                    };
-                                    std::process::exit(exit_code as i32);
-                                } else if implementations.is_empty() {
-                                    println!("No types implement {trait_name}");
-                                } else {
-                                    println!(
-                                        "{} type(s) implement {}:",
-                                        implementations.len(),
-                                        trait_name
-                                    );
-                                    for impl_type in implementations {
-                                        println!("  - {}", impl_type.name);
-                                    }
-                                }
-                            }
-                        }
-                        None => {
-                            if json {
-                                let exit_code =
-                                    match output.not_found("Trait/Interface", &trait_name) {
-                                        Ok(code) => code,
-                                        Err(e) => {
-                                            eprintln!("Error writing output: {e}");
-                                            codanna::io::ExitCode::GeneralError
-                                        }
-                                    };
-                                std::process::exit(exit_code as i32);
-                            } else {
-                                println!("Trait or interface not found: {trait_name}");
-                            }
-                        }
-                    }
+                    // Call retrieve function with merged parameters
+                    let format = OutputFormat::from_json_flag(json);
+                    retrieve::retrieve_search(
+                        &indexer,
+                        &final_query,
+                        final_limit,
+                        final_kind.as_deref(),
+                        final_module.as_deref(),
+                        format,
+                    )
                 }
-
-                RetrieveQuery::Uses { symbol } => match indexer.find_symbol(&symbol) {
-                    Some(symbol_id) => {
-                        let dependencies = indexer.get_dependencies(symbol_id);
-                        let used_types = dependencies
-                            .get(&RelationKind::Uses)
-                            .cloned()
-                            .unwrap_or_default();
-
-                        if used_types.is_empty() {
-                            println!("{symbol} doesn't use any types");
-                        } else {
-                            println!("{} uses {} type(s):", symbol, used_types.len());
-                            for used in used_types {
-                                println!("  - {}", used.name);
-                            }
-                        }
-                    }
-                    None => {
-                        println!("Symbol not found: {symbol}");
-                    }
-                },
-
                 RetrieveQuery::Impact {
                     symbol,
                     depth,
                     json,
                 } => {
-                    use codanna::io::{OutputFormat, OutputManager};
-                    use codanna::symbol::context::SymbolContext;
+                    let format = OutputFormat::from_json_flag(json);
+                    retrieve::retrieve_impact(&indexer, &symbol, depth.unwrap_or(5), format)
+                }
+                RetrieveQuery::Describe { args, json } => {
+                    use codanna::io::args::parse_positional_args;
+
+                    // Parse positional arguments for symbol name and key:value pairs
+                    let (positional_symbol, params) = parse_positional_args(&args);
+
+                    // Determine symbol name (priority: positional > key:value)
+                    let final_symbol = positional_symbol
+                        .or_else(|| params.get("symbol").cloned())
+                        .unwrap_or_else(|| {
+                            eprintln!("Error: describe requires a symbol name");
+                            eprintln!("Usage: codanna retrieve describe SimpleIndexer");
+                            eprintln!("   or: codanna retrieve describe symbol:SimpleIndexer");
+                            std::process::exit(1);
+                        });
 
                     let format = OutputFormat::from_json_flag(json);
-                    let mut output = OutputManager::new(format);
-
-                    match indexer.find_symbol(&symbol) {
-                        Some(symbol_id) => {
-                            let impacted = indexer.get_impact_radius(symbol_id, depth);
-
-                            if json {
-                                // JSON output - use OutputManager
-                                let impacted_with_path: Vec<SymbolContext> = impacted
-                                    .into_iter()
-                                    .filter_map(|id| {
-                                        indexer.get_symbol(id).map(|symbol| {
-                                            let base_path = indexer
-                                                .get_file_path(symbol.file_id)
-                                                .unwrap_or_else(|| "unknown".to_string());
-                                            let file_path = format!(
-                                                "{}:{}",
-                                                base_path,
-                                                symbol.range.start_line + 1
-                                            );
-                                            SymbolContext {
-                                                symbol,
-                                                file_path,
-                                                relationships: Default::default(),
-                                            }
-                                        })
-                                    })
-                                    .collect();
-
-                                let exit_code = match output
-                                    .symbol_contexts(impacted_with_path, "impacted symbols")
-                                {
-                                    Ok(code) => code,
-                                    Err(e) => {
-                                        eprintln!("Error writing output: {e}");
-                                        codanna::io::ExitCode::GeneralError
-                                    }
-                                };
-                                std::process::exit(exit_code as i32);
-                            } else if impacted.is_empty() {
-                                // TODO: Consider extending Display trait or creating a RichTextFormatter
-                                // for complex nested output like impact analysis grouped by symbol kind
-                                println!("No symbols would be impacted by changing {symbol}");
-                            } else {
-                                println!(
-                                    "Changing {symbol} would impact {} symbol(s):",
-                                    impacted.len()
-                                );
-
-                                // Group by symbol kind for better readability
-                                let mut by_kind: std::collections::HashMap<SymbolKind, Vec<_>> =
-                                    std::collections::HashMap::new();
-                                for id in impacted {
-                                    if let Some(sym) = indexer.get_symbol(id) {
-                                        by_kind.entry(sym.kind).or_default().push(sym);
-                                    }
-                                }
-
-                                // Display grouped by kind
-                                for (kind, symbols) in by_kind {
-                                    println!("\n  {}s:", format!("{kind:?}").to_lowercase());
-                                    for sym in symbols {
-                                        let file_path = indexer
-                                            .get_file_path(sym.file_id)
-                                            .unwrap_or_else(|| "<unknown>".to_string());
-                                        println!(
-                                            "    - {} ({}:{})",
-                                            sym.name,
-                                            file_path,
-                                            sym.range.start_line + 1
-                                        );
-                                    }
-                                }
-                            }
-                        }
-                        None => {
-                            if json {
-                                let exit_code = match output.not_found("Symbol", &symbol) {
-                                    Ok(code) => code,
-                                    Err(e) => {
-                                        eprintln!("Error writing output: {e}");
-                                        codanna::io::ExitCode::GeneralError
-                                    }
-                                };
-                                std::process::exit(exit_code as i32);
-                            } else {
-                                println!("Symbol not found: {symbol}");
-                            }
-                        }
-                    }
+                    retrieve::retrieve_describe(&indexer, &final_symbol, format)
                 }
-
-                RetrieveQuery::Search {
-                    query,
-                    limit,
-                    kind,
-                    module,
-                    json,
-                } => {
-                    // Parse the kind filter if provided
-                    let kind_filter = kind.as_ref().and_then(|k| match k.to_lowercase().as_str() {
-                        "function" => Some(SymbolKind::Function),
-                        "struct" => Some(SymbolKind::Struct),
-                        "trait" => Some(SymbolKind::Trait),
-                        "method" => Some(SymbolKind::Method),
-                        "field" => Some(SymbolKind::Field),
-                        "module" => Some(SymbolKind::Module),
-                        "constant" => Some(SymbolKind::Constant),
-                        _ => {
-                            eprintln!("Warning: Unknown symbol kind '{k}', ignoring filter");
-                            None
-                        }
-                    });
-
-                    use codanna::io::{OutputFormat, OutputManager};
-
-                    let format = OutputFormat::from_json_flag(json);
-                    let mut output = OutputManager::new(format);
-
-                    match indexer.search(&query, limit, kind_filter, module.as_deref()) {
-                        Ok(results) => {
-                            if json {
-                                // JSON output - SearchResult has its own structure
-                                // TODO: Implement Display for SearchResult to use OutputManager fully
-                                if results.is_empty() {
-                                    let exit_code = match output.not_found("Search results", &query)
-                                    {
-                                        Ok(code) => code,
-                                        Err(e) => {
-                                            eprintln!("Error writing output: {e}");
-                                            codanna::io::ExitCode::GeneralError
-                                        }
-                                    };
-                                    std::process::exit(exit_code as i32);
-                                } else {
-                                    // For now, use direct JSON output for SearchResult
-                                    use codanna::io::format::JsonResponse;
-                                    let response = JsonResponse::success(results);
-                                    print_json(&response);
-                                    std::process::exit(0);
-                                }
-                            } else if results.is_empty() {
-                                // TODO: Consider using OutputManager for text mode once we support
-                                // custom formatters for SearchResult
-                                println!("No results found for query: {query}");
-                            } else {
-                                println!(
-                                    "Found {} result(s) for query '{}':\n",
-                                    results.len(),
-                                    query
-                                );
-
-                                for (i, result) in results.iter().enumerate() {
-                                    println!("{}. {} ({:?})", i + 1, result.name, result.kind);
-                                    println!("   File: {}:{}", result.file_path, result.line);
-                                    if !result.module_path.is_empty() {
-                                        println!("   Module: {}", result.module_path);
-                                    }
-                                    if let Some(ref doc) = result.doc_comment {
-                                        println!("   Doc: {}", doc.lines().next().unwrap_or(""));
-                                    }
-                                    println!("   Score: {:.2}", result.score);
-                                    println!();
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            eprintln!("Search failed: {e}");
-                        }
-                    }
+                RetrieveQuery::Uses { symbol } => {
+                    eprintln!("'retrieve uses' command not yet implemented for: {symbol}");
+                    codanna::io::ExitCode::GeneralError
                 }
-
-                RetrieveQuery::Defines { symbol } => match indexer.find_symbol(&symbol) {
-                    Some(symbol_id) => {
-                        use codanna::symbol::context::ContextIncludes;
-
-                        let ctx =
-                            indexer.get_symbol_context(symbol_id, ContextIncludes::DEFINITIONS);
-
-                        if let Some(ctx) = ctx {
-                            if let Some(defines) = &ctx.relationships.defines {
-                                if defines.is_empty() {
-                                    println!("{symbol} doesn't define any symbols");
-                                } else {
-                                    // Group by kind
-                                    let methods: Vec<_> = defines
-                                        .iter()
-                                        .filter(|s| s.kind == SymbolKind::Method)
-                                        .collect();
-                                    let fields: Vec<_> = defines
-                                        .iter()
-                                        .filter(|s| s.kind == SymbolKind::Field)
-                                        .collect();
-                                    let others: Vec<_> = defines
-                                        .iter()
-                                        .filter(|s| {
-                                            !matches!(
-                                                s.kind,
-                                                SymbolKind::Method | SymbolKind::Field
-                                            )
-                                        })
-                                        .collect();
-
-                                    println!(
-                                        "{} ({:?}) defines {} symbol(s):",
-                                        ctx.symbol.name,
-                                        ctx.symbol.kind,
-                                        defines.len()
-                                    );
-                                    println!("Location: {}", ctx.format_location());
-
-                                    if !methods.is_empty() {
-                                        println!("\nMethods ({}):", methods.len());
-                                        for method in methods {
-                                            print!("  - {}", method.name);
-                                            if let Some(sig) = method.as_signature() {
-                                                println!(" :: {sig}");
-                                            } else {
-                                                println!();
-                                            }
-                                        }
-                                    }
-
-                                    if !fields.is_empty() {
-                                        println!("\nFields ({}):", fields.len());
-                                        for field in fields {
-                                            println!("  - {}", field.name);
-                                        }
-                                    }
-
-                                    if !others.is_empty() {
-                                        println!("\nOther ({}):", others.len());
-                                        for other in others {
-                                            println!("  - {} ({:?})", other.name, other.kind);
-                                        }
-                                    }
-                                }
-                            } else {
-                                println!("{symbol} doesn't define any symbols");
-                            }
-                        } else {
-                            // Fallback
-                            let dependencies = indexer.get_dependencies(symbol_id);
-                            let defined = dependencies
-                                .get(&RelationKind::Defines)
-                                .cloned()
-                                .unwrap_or_default();
-
-                            if defined.is_empty() {
-                                println!("{symbol} doesn't define any methods");
-                            } else {
-                                println!("{} defines {} method(s):", symbol, defined.len());
-                                for def in defined {
-                                    println!("  - {}", def.name);
-                                }
-                            }
-                        }
-                    }
-                    None => {
-                        println!("Symbol not found: {symbol}");
-                    }
-                },
-
+                RetrieveQuery::Defines { symbol } => {
+                    eprintln!("'retrieve defines' command not yet implemented for: {symbol}");
+                    codanna::io::ExitCode::GeneralError
+                }
                 RetrieveQuery::Dependencies { symbol } => {
-                    match indexer.find_symbol(&symbol) {
-                        Some(symbol_id) => {
-                            use codanna::symbol::context::ContextIncludes;
-
-                            let ctx = indexer.get_symbol_context(symbol_id, ContextIncludes::ALL);
-
-                            if let Some(ctx) = ctx {
-                                println!(
-                                    "Dependency Analysis for {} ({:?}):",
-                                    ctx.symbol.name, ctx.symbol.kind
-                                );
-                                println!("Location: {}", ctx.format_location());
-                                println!("{}", "=".repeat(60));
-
-                                // Show what this symbol defines
-                                if let Some(defines) = &ctx.relationships.defines {
-                                    if !defines.is_empty() {
-                                        println!("\nDefines ({}):", defines.len());
-                                        for def in defines {
-                                            print!("  → {} ({:?})", def.name, def.kind);
-                                            if let Some(sig) = def.as_signature() {
-                                                print!(" :: {sig}");
-                                            }
-                                            println!();
-                                        }
-                                    }
-                                }
-
-                                // Show what this symbol calls (with metadata)
-                                if let Some(calls) = &ctx.relationships.calls {
-                                    if !calls.is_empty() {
-                                        println!("\nCalls ({}):", calls.len());
-                                        for (called, metadata) in calls {
-                                            print!("  → {} ({:?})", called.name, called.kind);
-                                            if let Some(meta) = metadata {
-                                                // Parse receiver metadata
-                                                if meta.contains("receiver:")
-                                                    && meta.contains("static:")
-                                                {
-                                                    let parts: Vec<&str> =
-                                                        meta.split(',').collect();
-                                                    if parts.len() == 2 {
-                                                        let receiver = parts[0]
-                                                            .trim_start_matches("receiver:");
-                                                        let is_static = parts[1]
-                                                            .trim_start_matches("static:")
-                                                            == "true";
-
-                                                        if is_static {
-                                                            print!(" [static call]");
-                                                        } else if !receiver.is_empty()
-                                                            && receiver != "self"
-                                                        {
-                                                            print!(" [via {receiver}]");
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                            println!();
-                                        }
-                                    }
-                                }
-
-                                // Show who calls this symbol (with metadata)
-                                if let Some(callers) = &ctx.relationships.called_by {
-                                    if !callers.is_empty() {
-                                        println!("\nCalled by ({}):", callers.len());
-                                        for (caller, metadata) in callers {
-                                            print!("  ← {} ({:?})", caller.name, caller.kind);
-                                            if let Some(meta) = metadata {
-                                                // Parse receiver metadata for context
-                                                if meta.contains("receiver:")
-                                                    && meta.contains("static:")
-                                                {
-                                                    let parts: Vec<&str> =
-                                                        meta.split(',').collect();
-                                                    if parts.len() == 2 {
-                                                        let is_static = parts[1]
-                                                            .trim_start_matches("static:")
-                                                            == "true";
-                                                        if is_static {
-                                                            print!(" [as static method]");
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                            println!();
-                                        }
-                                    }
-                                }
-
-                                // Show implementations
-                                if ctx.symbol.kind == SymbolKind::Trait {
-                                    if let Some(impls) = &ctx.relationships.implemented_by {
-                                        if !impls.is_empty() {
-                                            println!("\nImplemented by ({}):", impls.len());
-                                            for impl_type in impls {
-                                                println!(
-                                                    "  ← {} ({:?})",
-                                                    impl_type.name, impl_type.kind
-                                                );
-                                            }
-                                        }
-                                    }
-                                } else if let Some(impls) = &ctx.relationships.implements {
-                                    if !impls.is_empty() {
-                                        println!("\nImplements ({}):", impls.len());
-                                        for trait_type in impls {
-                                            println!("  → {} (Trait)", trait_type.name);
-                                        }
-                                    }
-                                }
-
-                                // Additional outgoing dependencies
-                                let dependencies = indexer.get_dependencies(symbol_id);
-                                let other_deps: Vec<_> = dependencies
-                                    .iter()
-                                    .filter(|(k, _)| {
-                                        !matches!(
-                                            k,
-                                            RelationKind::Calls
-                                                | RelationKind::Defines
-                                                | RelationKind::Implements
-                                        )
-                                    })
-                                    .collect();
-
-                                if !other_deps.is_empty() {
-                                    println!("\nOther Dependencies:");
-                                    for (kind, symbols) in other_deps {
-                                        if !symbols.is_empty() {
-                                            println!("\n  {kind:?}:");
-                                            for sym in symbols {
-                                                println!("    → {} ({:?})", sym.name, sym.kind);
-                                            }
-                                        }
-                                    }
-                                }
-                            } else {
-                                // Fallback to original behavior
-                                let sym = indexer.get_symbol(symbol_id).unwrap();
-                                println!("Dependency Analysis for {} ({:?}):", symbol, sym.kind);
-                                println!("{}", "=".repeat(50));
-
-                                let dependencies = indexer.get_dependencies(symbol_id);
-                                if dependencies.is_empty() {
-                                    println!("\nNo outgoing dependencies");
-                                } else {
-                                    println!("\nOutgoing Dependencies (what {symbol} depends on):");
-                                    for (kind, symbols) in dependencies {
-                                        if !symbols.is_empty() {
-                                            println!("\n  {kind:?}:");
-                                            for sym in symbols {
-                                                println!("    → {} ({:?})", sym.name, sym.kind);
-                                            }
-                                        }
-                                    }
-                                }
-
-                                let dependents = indexer.get_dependents(symbol_id);
-                                if dependents.is_empty() {
-                                    println!("\nNo incoming dependencies");
-                                } else {
-                                    println!("\nIncoming Dependencies (what depends on {symbol}):");
-                                    for (kind, symbols) in dependents {
-                                        if !symbols.is_empty() {
-                                            println!("\n  {kind:?} by:");
-                                            for sym in symbols {
-                                                println!("    ← {} ({:?})", sym.name, sym.kind);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        None => {
-                            println!("Symbol not found: {symbol}");
-                        }
-                    }
+                    eprintln!("'retrieve dependencies' command not yet implemented for: {symbol}");
+                    codanna::io::ExitCode::GeneralError
                 }
+            };
 
-                RetrieveQuery::Describe { symbol, json } => {
-                    use codanna::io::{OutputFormat, OutputManager};
-                    use codanna::symbol::context::ContextIncludes;
-
-                    let format = OutputFormat::from_json_flag(json);
-                    let mut output = OutputManager::new(format);
-
-                    match indexer.find_symbol(&symbol) {
-                        Some(symbol_id) => {
-                            let ctx = indexer.get_symbol_context(symbol_id, ContextIncludes::ALL);
-
-                            if json {
-                                if let Some(ctx) = ctx {
-                                    let exit_code = match output.success(ctx) {
-                                        Ok(code) => code,
-                                        Err(e) => {
-                                            eprintln!("Error writing output: {e}");
-                                            codanna::io::ExitCode::GeneralError
-                                        }
-                                    };
-                                    std::process::exit(exit_code as i32);
-                                } else {
-                                    // Fallback: create minimal context with file path
-                                    if let Some(sym) = indexer.get_symbol(symbol_id) {
-                                        let base_path = indexer
-                                            .get_file_path(sym.file_id)
-                                            .unwrap_or_else(|| "unknown".to_string());
-                                        let file_path =
-                                            format!("{}:{}", base_path, sym.range.start_line + 1);
-                                        let minimal_context =
-                                            codanna::symbol::context::SymbolContext {
-                                                symbol: sym,
-                                                file_path,
-                                                relationships: Default::default(),
-                                            };
-                                        let exit_code = match output.success(minimal_context) {
-                                            Ok(code) => code,
-                                            Err(e) => {
-                                                eprintln!("Error writing output: {e}");
-                                                codanna::io::ExitCode::GeneralError
-                                            }
-                                        };
-                                        std::process::exit(exit_code as i32);
-                                    }
-                                }
-                            } else if let Some(ctx) = ctx {
-                                // TODO: Consider using OutputManager for text mode with rich formatting
-                                // Use the format_full method for comprehensive output
-                                println!("{}", ctx.format_full(""));
-
-                                // Add additional context about relationships
-                                if let Some(calls) = &ctx.relationships.calls {
-                                    if !calls.is_empty() {
-                                        println!("\nCall Details:");
-                                        for (called, metadata) in calls.iter().take(5) {
-                                            print!("  → {} ", called.name);
-                                            if let Some(meta) = metadata {
-                                                if meta.contains("receiver:")
-                                                    && meta.contains("static:")
-                                                {
-                                                    let parts: Vec<&str> =
-                                                        meta.split(',').collect();
-                                                    if parts.len() == 2 {
-                                                        let receiver = parts[0]
-                                                            .trim_start_matches("receiver:");
-                                                        let is_static = parts[1]
-                                                            .trim_start_matches("static:")
-                                                            == "true";
-
-                                                        if is_static {
-                                                            print!("(static call)");
-                                                        } else if !receiver.is_empty()
-                                                            && receiver != "self"
-                                                        {
-                                                            print!("(via {receiver})");
-                                                        } else {
-                                                            print!("(method call)");
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                            println!();
-                                        }
-                                        if calls.len() > 5 {
-                                            println!("  ... and {} more", calls.len() - 5);
-                                        }
-                                    }
-                                }
-
-                                if let Some(callers) = &ctx.relationships.called_by {
-                                    if !callers.is_empty() {
-                                        println!("\nCaller Details:");
-                                        for (caller, metadata) in callers.iter().take(5) {
-                                            print!("  ← {} ", caller.name);
-                                            if let Some(meta) = metadata {
-                                                if meta.contains("static:true") {
-                                                    print!("(as static method)");
-                                                } else {
-                                                    print!("(as instance method)");
-                                                }
-                                            }
-                                            println!();
-                                        }
-                                        if callers.len() > 5 {
-                                            println!("  ... and {} more", callers.len() - 5);
-                                        }
-                                    }
-                                }
-                            } else {
-                                // Fallback: just show basic symbol info
-                                if let Some(sym) = indexer.get_symbol(symbol_id) {
-                                    println!("{} ({:?})", sym.name, sym.kind);
-                                    if let Some(path) = indexer.get_file_path(sym.file_id) {
-                                        println!("Location: {}:{}", path, sym.range.start_line + 1);
-                                    }
-                                    if let Some(sig) = sym.as_signature() {
-                                        println!("Signature: {sig}");
-                                    }
-                                    if let Some(doc) = sym.as_doc_comment() {
-                                        println!("Documentation:\n{doc}");
-                                    }
-                                }
-                            }
-                        }
-                        None => {
-                            if json {
-                                let exit_code = match output.not_found("Symbol", &symbol) {
-                                    Ok(code) => code,
-                                    Err(e) => {
-                                        eprintln!("Error writing output: {e}");
-                                        codanna::io::ExitCode::GeneralError
-                                    }
-                                };
-                                std::process::exit(exit_code as i32);
-                            } else {
-                                println!("Symbol not found: {symbol}");
-                            }
-                        }
-                    }
-                }
-            }
+            std::process::exit(exit_code as i32);
         }
 
         Commands::McpTest {

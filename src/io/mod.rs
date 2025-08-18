@@ -5,6 +5,7 @@
 //! - Consistent error handling and exit codes
 //! - Future: JSON-RPC 2.0 support for IDE integration
 
+pub mod args;
 pub mod exit_code;
 pub mod format;
 pub mod guidance;

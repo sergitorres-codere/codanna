@@ -7,6 +7,7 @@ pub mod io;
 pub mod mcp;
 pub mod parsing;
 pub mod relationship;
+pub mod retrieve;
 pub mod semantic;
 pub mod storage;
 pub mod symbol;

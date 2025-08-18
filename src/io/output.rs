@@ -6,6 +6,7 @@
 use crate::error::IndexError;
 use crate::io::exit_code::ExitCode;
 use crate::io::format::{JsonResponse, OutputFormat};
+use crate::io::schema::{OutputData, UnifiedOutput};
 use serde::Serialize;
 use std::fmt::Display;
 use std::io::{self, Write};
@@ -235,6 +236,68 @@ impl OutputManager {
             }
         }
         Ok(ExitCode::Success)
+    }
+
+    /// Output a UnifiedOutput structure with dynamic data handling.
+    ///
+    /// This method handles all OutputData variants appropriately:
+    /// - Items: Simple list display
+    /// - Grouped: Hierarchical display by category
+    /// - Contextual: Rich nested structure with relationships
+    /// - Ranked: Sorted display with scores
+    /// - Single: Single item display
+    /// - Empty: Not found handling
+    ///
+    /// # Performance
+    /// Uses zero-cost abstractions from UnifiedOutput.
+    /// Display formatting relies on the UnifiedOutput's Display implementation.
+    ///
+    /// # Returns
+    /// The exit code from the UnifiedOutput structure
+    pub fn unified<T>(&mut self, output: UnifiedOutput<'_, T>) -> io::Result<ExitCode>
+    where
+        T: Serialize + Display,
+    {
+        let exit_code = output.exit_code;
+
+        match self.format {
+            OutputFormat::Json => {
+                // For JSON, serialize the UnifiedOutput directly
+                // This preserves the structured data with metadata and guidance
+                let json_str = serde_json::to_string_pretty(&output)?;
+                Self::write_ignoring_broken_pipe(&mut *self.stdout, &json_str)?;
+            }
+            OutputFormat::Text => {
+                // For text, check if we have special handling needs
+                match &output.data {
+                    OutputData::Empty => {
+                        // Handle empty case specially
+                        let entity = format!("{:?}", output.entity_type);
+                        let msg = format!("{} not found", entity.to_lowercase());
+                        Self::write_ignoring_broken_pipe(&mut *self.stderr, &msg)?;
+                    }
+                    OutputData::Items { items } if items.is_empty() => {
+                        // Also handle empty Items variant
+                        let entity = format!("{:?}", output.entity_type);
+                        let msg = format!("{} not found", entity.to_lowercase());
+                        Self::write_ignoring_broken_pipe(&mut *self.stderr, &msg)?;
+                    }
+                    _ => {
+                        // For all other cases, use the Display implementation
+                        let formatted = format!("{output}");
+                        Self::write_ignoring_broken_pipe(&mut *self.stdout, &formatted)?;
+                    }
+                }
+
+                // Add guidance message if present (text mode only, to stderr)
+                if let Some(guidance) = &output.guidance {
+                    Self::write_ignoring_broken_pipe(&mut *self.stderr, "")?;
+                    Self::write_ignoring_broken_pipe(&mut *self.stderr, guidance)?;
+                }
+            }
+        }
+
+        Ok(exit_code)
     }
 }
 
