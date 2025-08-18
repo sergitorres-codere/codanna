@@ -54,11 +54,7 @@ impl SymbolContext {
     /// Format just the location line
     pub fn format_location(&self) -> String {
         // Note: file_path already includes line number (e.g., "src/file.rs:123")
-        format!(
-            "{} at {}",
-            self.symbol.name,
-            self.file_path
-        )
+        format!("{} at {}", self.symbol.name, self.file_path)
     }
 
     /// Format location with type info
@@ -66,9 +62,7 @@ impl SymbolContext {
         // Note: file_path already includes line number (e.g., "src/file.rs:123")
         format!(
             "{:?} {} at {}",
-            self.symbol.kind,
-            self.symbol.name,
-            self.file_path
+            self.symbol.kind, self.symbol.name, self.file_path
         )
     }
 
@@ -85,10 +79,7 @@ impl SymbolContext {
         // Note: file_path already includes line number (e.g., "src/file.rs:123")
         output.push_str(&format!(
             "{}{} ({:?}) at {}\n",
-            indent,
-            self.symbol.name,
-            self.symbol.kind,
-            self.file_path
+            indent, self.symbol.name, self.symbol.kind, self.file_path
         ));
     }
 

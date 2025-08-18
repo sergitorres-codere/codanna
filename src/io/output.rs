@@ -29,15 +29,15 @@ impl OutputManager {
             stderr: Box::new(io::stderr()),
         }
     }
-    
+
     /// Helper to write to a stream, ignoring broken pipe errors.
-    /// 
+    ///
     /// Broken pipes occur when the reader closes before we finish writing
     /// (e.g., when piping to `head`). This is normal behavior and should not
     /// be treated as an error. The exit code should reflect the operation's
     /// success, not the pipe status.
     fn write_ignoring_broken_pipe(stream: &mut dyn Write, content: &str) -> io::Result<()> {
-        if let Err(e) = writeln!(stream, "{}", content) {
+        if let Err(e) = writeln!(stream, "{content}") {
             // Only propagate non-broken-pipe errors
             if e.kind() != io::ErrorKind::BrokenPipe {
                 return Err(e);
@@ -48,7 +48,7 @@ impl OutputManager {
     }
 
     /// Create an output manager for testing with custom writers.
-    #[cfg(test)]
+    #[doc(hidden)]
     pub fn new_with_writers(
         format: OutputFormat,
         stdout: Box<dyn Write>,
@@ -193,30 +193,30 @@ impl OutputManager {
         }
         Ok(())
     }
-    
+
     /// Output a collection of SymbolContext items.
     ///
     /// This method is specifically designed for SymbolContext to ensure
     /// consistent formatting across all retrieve commands.
-    /// 
+    ///
     /// # Returns
     /// - `ExitCode::Success` - When contexts are found and output successfully
     /// - `ExitCode::NotFound` - When the collection is empty
-    /// 
+    ///
     /// # Performance
     /// Collects the iterator once to check for empty and get count.
     /// This is necessary for proper error handling and text formatting.
     pub fn symbol_contexts(
-        &mut self, 
+        &mut self,
         contexts: impl IntoIterator<Item = crate::symbol::context::SymbolContext>,
-        entity_name: &str
+        entity_name: &str,
     ) -> io::Result<ExitCode> {
         let contexts: Vec<_> = contexts.into_iter().collect();
-        
+
         if contexts.is_empty() {
             return self.not_found(entity_name, "any");
         }
-        
+
         match self.format {
             OutputFormat::Json => {
                 let response = JsonResponse::success(&contexts);
@@ -227,9 +227,9 @@ impl OutputManager {
                 let header = format!("Found {} {}:", contexts.len(), entity_name);
                 Self::write_ignoring_broken_pipe(&mut *self.stdout, &header)?;
                 Self::write_ignoring_broken_pipe(&mut *self.stdout, &"=".repeat(40))?;
-                
+
                 for context in contexts {
-                    let formatted = format!("{}", context);
+                    let formatted = format!("{context}");
                     Self::write_ignoring_broken_pipe(&mut *self.stdout, &formatted)?;
                 }
             }
@@ -244,12 +244,12 @@ mod tests {
 
     /// A writer that always returns broken pipe error
     struct BrokenPipeWriter;
-    
+
     impl Write for BrokenPipeWriter {
         fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
             Err(io::Error::new(io::ErrorKind::BrokenPipe, "pipe broken"))
         }
-        
+
         fn flush(&mut self) -> io::Result<()> {
             Err(io::Error::new(io::ErrorKind::BrokenPipe, "pipe broken"))
         }
@@ -266,7 +266,7 @@ mod tests {
         let code = manager.success("Test output").unwrap();
         assert_eq!(code, ExitCode::Success);
     }
-    
+
     #[test]
     fn test_broken_pipe_returns_success_exit_code() {
         let mut manager = OutputManager::new_with_writers(
@@ -274,12 +274,12 @@ mod tests {
             Box::new(BrokenPipeWriter),
             Box::new(Vec::new()),
         );
-        
+
         // Should return Success exit code even with broken pipe
         let code = manager.success("test data").unwrap();
         assert_eq!(code, ExitCode::Success);
     }
-    
+
     #[test]
     fn test_broken_pipe_returns_not_found_exit_code() {
         let mut manager = OutputManager::new_with_writers(
@@ -287,12 +287,12 @@ mod tests {
             Box::new(BrokenPipeWriter),
             Box::new(Vec::new()),
         );
-        
+
         // Should return NotFound exit code even with broken pipe
         let code = manager.not_found("Symbol", "missing").unwrap();
         assert_eq!(code, ExitCode::NotFound);
     }
-    
+
     #[test]
     fn test_broken_pipe_in_text_mode() {
         let mut manager = OutputManager::new_with_writers(
@@ -300,12 +300,12 @@ mod tests {
             Box::new(BrokenPipeWriter),
             Box::new(Vec::new()),
         );
-        
+
         // Should handle broken pipe gracefully in text mode
         let code = manager.success("test output").unwrap();
         assert_eq!(code, ExitCode::Success);
     }
-    
+
     #[test]
     fn test_broken_pipe_stderr() {
         let mut manager = OutputManager::new_with_writers(
@@ -313,11 +313,11 @@ mod tests {
             Box::new(Vec::new()),
             Box::new(BrokenPipeWriter),
         );
-        
+
         // progress writes to stderr
         let result = manager.progress("Processing...");
         assert!(result.is_ok());
-        
+
         // not_found text mode writes to stderr
         let code = manager.not_found("Entity", "name").unwrap();
         assert_eq!(code, ExitCode::NotFound);
@@ -346,13 +346,13 @@ mod tests {
         let code = manager.success(data).unwrap();
         assert_eq!(code, ExitCode::Success);
     }
-    
+
     #[test]
     fn test_symbol_contexts_collection() {
-        use crate::symbol::context::{SymbolContext, SymbolRelationships};
         use crate::symbol::Symbol;
+        use crate::symbol::context::{SymbolContext, SymbolRelationships};
         use crate::types::{FileId, Range, SymbolId, SymbolKind};
-        
+
         // Helper to create test context
         fn create_context(id: u32, name: &str) -> SymbolContext {
             let symbol = Symbol::new(
@@ -362,55 +362,46 @@ mod tests {
                 FileId::new(1).unwrap(),
                 Range::new(10, 0, 20, 0),
             );
-            
+
             SymbolContext {
                 symbol,
-                file_path: format!("src/{}.rs:11", name),
+                file_path: format!("src/{name}.rs:11"),
                 relationships: SymbolRelationships::default(),
             }
         }
-        
+
         // Test with multiple items
         let stdout = Vec::new();
         let stderr = Vec::new();
-        let mut manager = OutputManager::new_with_writers(
-            OutputFormat::Json,
-            Box::new(stdout),
-            Box::new(stderr),
-        );
-        
-        let contexts = vec![
-            create_context(1, "main"),
-            create_context(2, "process"),
-        ];
-        
+        let mut manager =
+            OutputManager::new_with_writers(OutputFormat::Json, Box::new(stdout), Box::new(stderr));
+
+        let contexts = vec![create_context(1, "main"), create_context(2, "process")];
+
         let code = manager.symbol_contexts(contexts, "functions").unwrap();
         assert_eq!(code, ExitCode::Success);
     }
-    
+
     #[test]
     fn test_symbol_contexts_empty() {
         use crate::symbol::context::SymbolContext;
-        
+
         let stdout = Vec::new();
         let stderr = Vec::new();
-        let mut manager = OutputManager::new_with_writers(
-            OutputFormat::Json,
-            Box::new(stdout),
-            Box::new(stderr),
-        );
-        
+        let mut manager =
+            OutputManager::new_with_writers(OutputFormat::Json, Box::new(stdout), Box::new(stderr));
+
         let contexts: Vec<SymbolContext> = vec![];
         let code = manager.symbol_contexts(contexts, "symbols").unwrap();
         assert_eq!(code, ExitCode::NotFound);
     }
-    
+
     #[test]
     fn test_symbol_contexts_text_format() {
-        use crate::symbol::context::{SymbolContext, SymbolRelationships};
         use crate::symbol::Symbol;
+        use crate::symbol::context::{SymbolContext, SymbolRelationships};
         use crate::types::{FileId, Range, SymbolId, SymbolKind};
-        
+
         let symbol = Symbol::new(
             SymbolId::new(1).unwrap(),
             "test_function",
@@ -418,36 +409,33 @@ mod tests {
             FileId::new(1).unwrap(),
             Range::new(42, 0, 50, 0),
         );
-        
+
         let context = SymbolContext {
             symbol,
             file_path: "src/test.rs:43".to_string(),
             relationships: SymbolRelationships::default(),
         };
-        
+
         let stdout = Vec::new();
         let stderr = Vec::new();
-        let mut manager = OutputManager::new_with_writers(
-            OutputFormat::Text,
-            Box::new(stdout),
-            Box::new(stderr),
-        );
-        
+        let mut manager =
+            OutputManager::new_with_writers(OutputFormat::Text, Box::new(stdout), Box::new(stderr));
+
         let code = manager.symbol_contexts(vec![context], "function").unwrap();
         assert_eq!(code, ExitCode::Success);
-        
+
         // Since we can't extract the output easily from a Box<dyn Write>,
         // we'll trust that if the method runs without error and returns Success,
         // it's working correctly. More detailed verification would require
         // a different test approach.
     }
-    
+
     #[test]
     fn test_symbol_contexts_broken_pipe() {
-        use crate::symbol::context::{SymbolContext, SymbolRelationships};
         use crate::symbol::Symbol;
+        use crate::symbol::context::{SymbolContext, SymbolRelationships};
         use crate::types::{FileId, Range, SymbolId, SymbolKind};
-        
+
         let symbol = Symbol::new(
             SymbolId::new(1).unwrap(),
             "test",
@@ -455,26 +443,30 @@ mod tests {
             FileId::new(1).unwrap(),
             Range::new(1, 0, 2, 0),
         );
-        
+
         let context = SymbolContext {
             symbol,
             file_path: "test.rs:1".to_string(),
             relationships: SymbolRelationships::default(),
         };
-        
+
         // Test with broken pipe on stdout
         let mut manager = OutputManager::new_with_writers(
             OutputFormat::Json,
             Box::new(BrokenPipeWriter),
             Box::new(Vec::new()),
         );
-        
+
         // Should succeed despite broken pipe
-        let code = manager.symbol_contexts(vec![context.clone()], "symbols").unwrap();
+        let code = manager
+            .symbol_contexts(vec![context.clone()], "symbols")
+            .unwrap();
         assert_eq!(code, ExitCode::Success);
-        
+
         // Test empty collection with broken pipe
-        let code = manager.symbol_contexts(Vec::<SymbolContext>::new(), "symbols").unwrap();
+        let code = manager
+            .symbol_contexts(Vec::<SymbolContext>::new(), "symbols")
+            .unwrap();
         assert_eq!(code, ExitCode::NotFound);
     }
 }

@@ -20,6 +20,7 @@ echo "✓ Code formatted"
 echo ""
 echo "2️⃣ Auto-fixing clippy issues..."
 cargo clippy --fix --allow-dirty --allow-staged
+cargo clippy --fix --allow-dirty --allow-staged --tests
 echo "✓ Clippy fixes applied (where possible)"
 
 echo ""
