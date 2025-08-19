@@ -2501,6 +2501,7 @@ mod tests {
             signature: None,
             module_path: Some("test".into()),
             scope_context: None,
+            language_id: None,
         };
 
         let struct_symbol = Symbol {
@@ -2514,6 +2515,7 @@ mod tests {
             signature: None,
             module_path: Some("test".into()),
             scope_context: None,
+            language_id: None,
         };
 
         // Store symbols
@@ -3183,6 +3185,7 @@ pub struct Another {
             visibility: Visibility::Private,
             doc_comment: None,
             scope_context: None,
+            language_id: None,
         };
 
         let module_path = Some("crate::module".to_string());
@@ -3225,6 +3228,7 @@ pub struct Another {
             visibility: Visibility::Public,
             doc_comment: None,
             scope_context: None,
+            language_id: None,
         };
 
         let module_path = Some("test_module".to_string());
@@ -3264,6 +3268,7 @@ pub struct Another {
             visibility: Visibility::Public,
             doc_comment: None,
             scope_context: None,
+            language_id: None,
         };
 
         let module_path = Some("App\\Utils".to_string());
@@ -3310,6 +3315,7 @@ pub struct Another {
             visibility: Visibility::Private,
             doc_comment: None,
             scope_context: None,
+            language_id: None,
         };
 
         let mut python_symbol = Symbol {
@@ -3323,6 +3329,7 @@ pub struct Another {
             visibility: Visibility::Private,
             doc_comment: None,
             scope_context: None,
+            language_id: None,
         };
 
         let mut php_symbol = Symbol {
@@ -3336,6 +3343,7 @@ pub struct Another {
             visibility: Visibility::Private,
             doc_comment: None,
             scope_context: None,
+            language_id: None,
         };
 
         // Configure each symbol with its behavior

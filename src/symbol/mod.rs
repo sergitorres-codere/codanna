@@ -1,5 +1,6 @@
 pub mod context;
 
+use crate::parsing::registry::LanguageId;
 use crate::types::{CompactString, FileId, Range, SymbolId, SymbolKind, compact_string};
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -64,6 +65,11 @@ pub struct Symbol {
     /// This field enables proper resolution without heuristics.
     /// It's Optional during migration - will become required in future.
     pub scope_context: Option<ScopeContext>,
+    /// Language identifier for the symbol
+    ///
+    /// This field enables language-specific filtering in searches.
+    /// It's Optional for backward compatibility - existing indexes will have None.
+    pub language_id: Option<LanguageId>,
 }
 
 #[repr(C, align(32))]
@@ -100,6 +106,7 @@ impl Symbol {
             module_path: None,
             visibility: Visibility::Private,
             scope_context: None, // Default to None for backward compatibility
+            language_id: None,   // Default to None for backward compatibility
         }
     }
 
@@ -139,6 +146,11 @@ impl Symbol {
 
     pub fn with_scope(mut self, scope: ScopeContext) -> Self {
         self.scope_context = Some(scope);
+        self
+    }
+
+    pub fn with_language_id(mut self, language_id: LanguageId) -> Self {
+        self.language_id = Some(language_id);
         self
     }
 
@@ -317,6 +329,7 @@ impl CompactSymbol {
             module_path: None,
             visibility: Visibility::Private,
             scope_context: None, // CompactSymbol doesn't store scope info yet
+            language_id: None,   // CompactSymbol doesn't store language info yet
         })
     }
 }

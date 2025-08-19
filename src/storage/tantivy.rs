@@ -1316,6 +1316,7 @@ impl DocumentIndex {
             module_path: module_path.map(|s| s.into()),
             visibility,
             scope_context,
+            language_id: None, // TODO: Read from document once schema is updated
         })
     }
 
