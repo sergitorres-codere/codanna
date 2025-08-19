@@ -30,18 +30,18 @@ Transform the current TypeScript-based implementation into a complete Go languag
 ## Phase 1: Pre-Implementation Setup
 
 ### 1.1 ABI-15 Node Discovery 🔴
-- [ ] Create comprehensive Go ABI-15 exploration test in `tests/abi15_exploration.rs`
-- [ ] Test all Go language constructs:
-  - [ ] Package declarations
-  - [ ] Import statements
-  - [ ] Function declarations (regular and method receivers)
-  - [ ] Struct type declarations
-  - [ ] Interface type declarations
-  - [ ] Variable/constant declarations
-  - [ ] Type aliases
-  - [ ] Generic types and constraints
-- [ ] Document findings in `contributing/parsers/go/NODE_MAPPING.md`
-- [ ] Run: `cargo test explore_go_abi15_comprehensive -- --nocapture > contributing/parsers/go/node_discovery.txt`
+- [x] Create comprehensive Go ABI-15 exploration test in `tests/abi15_exploration.rs`
+- [x] Test all Go language constructs:
+  - [x] Package declarations
+  - [x] Import statements
+  - [x] Function declarations (regular and method receivers)
+  - [x] Struct type declarations
+  - [x] Interface type declarations
+  - [x] Variable/constant declarations
+  - [x] Type aliases
+  - [x] Generic types and constraints
+- [x] Document findings in `contributing/parsers/go/NODE_MAPPING.md`
+- [x] Run: `cargo test explore_go_abi15_comprehensive -- --nocapture > contributing/parsers/go/node_discovery.txt`
 
 ### 1.2 Test Infrastructure 🟡
 - [ ] Create Go test fixtures in `tests/fixtures/go/`
