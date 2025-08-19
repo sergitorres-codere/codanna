@@ -901,6 +901,346 @@ class DatabaseLogger implements Logger {
         );
     }
 
+    #[test] 
+    fn explore_go_abi15_comprehensive() {
+        let language: Language = tree_sitter_go::LANGUAGE.into();
+
+        println!("=== Go Language ABI-15 COMPREHENSIVE NODE MAPPING ===");
+        println!("  ABI Version: {}", language.abi_version());
+        println!("  Node kind count: {}", language.node_kind_count());
+
+        println!("\n=== PACKAGE AND IMPORT NODES ===");
+        for node_kind in &[
+            "package_clause",
+            "package_identifier",
+            "import_declaration", 
+            "import_spec",
+            "import_spec_list",
+            "interpreted_string_literal",
+            "dot_import",
+            "blank_import",
+            "import_alias",
+        ] {
+            let id = language.id_for_node_kind(node_kind, true);
+            if id != 0 {
+                println!("  ✓ {node_kind:30} -> ID: {id}");
+            } else {
+                println!("  ✗ {node_kind:30} NOT FOUND");
+            }
+        }
+
+        println!("\n=== STRUCT-RELATED NODES ===");
+        for node_kind in &[
+            "type_declaration",
+            "type_spec",
+            "struct_type",
+            "field_declaration",
+            "field_declaration_list", 
+            "tag",
+            "struct_literal",
+            "struct_field",
+            "embedded_field",
+            "type_identifier",
+        ] {
+            let id = language.id_for_node_kind(node_kind, true);
+            if id != 0 {
+                println!("  ✓ {node_kind:30} -> ID: {id}");
+            } else {
+                println!("  ✗ {node_kind:30} NOT FOUND");
+            }
+        }
+
+        println!("\n=== INTERFACE-RELATED NODES ===");
+        for node_kind in &[
+            "interface_type",
+            "method_spec",
+            "method_spec_list",
+            "type_elem",
+            "type_constraint",
+            "type_set",
+            "embedded_interface",
+            "union_type",
+        ] {
+            let id = language.id_for_node_kind(node_kind, true);
+            if id != 0 {
+                println!("  ✓ {node_kind:30} -> ID: {id}");
+            } else {
+                println!("  ✗ {node_kind:30} NOT FOUND");
+            }
+        }
+
+        println!("\n=== FUNCTION-RELATED NODES ===");
+        for node_kind in &[
+            "function_declaration",
+            "func_literal",
+            "function_type",
+            "method_declaration",
+            "receiver",
+            "parameter_declaration",
+            "parameter_list",
+            "result",
+            "variadic_parameter_declaration",
+            "type_parameter_declaration",
+            "type_parameter_list",
+            "type_constraint",
+        ] {
+            let id = language.id_for_node_kind(node_kind, true);
+            if id != 0 {
+                println!("  ✓ {node_kind:30} -> ID: {id}");
+            } else {
+                println!("  ✗ {node_kind:30} NOT FOUND");
+            }
+        }
+
+        println!("\n=== VARIABLE/CONSTANT NODES ===");
+        for node_kind in &[
+            "var_declaration",
+            "var_spec",
+            "const_declaration", 
+            "const_spec",
+            "short_var_declaration",
+            "assignment_statement",
+            "inc_statement",
+            "dec_statement",
+            "expression_list",
+            "identifier_list",
+        ] {
+            let id = language.id_for_node_kind(node_kind, true);
+            if id != 0 {
+                println!("  ✓ {node_kind:30} -> ID: {id}");
+            } else {
+                println!("  ✗ {node_kind:30} NOT FOUND");
+            }
+        }
+
+        println!("\n=== TYPE-RELATED NODES ===");
+        for node_kind in &[
+            "type_alias",
+            "type_declaration",
+            "type_spec",
+            "pointer_type",
+            "array_type",
+            "slice_type",
+            "map_type",
+            "channel_type",
+            "generic_type",
+            "type_instantiation",
+            "type_arguments",
+            "type_parameter",
+            "qualified_type",
+        ] {
+            let id = language.id_for_node_kind(node_kind, true);
+            if id != 0 {
+                println!("  ✓ {node_kind:30} -> ID: {id}");
+            } else {
+                println!("  ✗ {node_kind:30} NOT FOUND");
+            }
+        }
+
+        println!("\n=== CALL-RELATED NODES ===");
+        for node_kind in &[
+            "call_expression",
+            "method_expression",
+            "selector_expression", 
+            "index_expression",
+            "slice_expression",
+            "type_assertion_expression",
+            "type_conversion_expression",
+            "argument_list",
+            "parenthesized_expression",
+        ] {
+            let id = language.id_for_node_kind(node_kind, true);
+            if id != 0 {
+                println!("  ✓ {node_kind:30} -> ID: {id}");
+            } else {
+                println!("  ✗ {node_kind:30} NOT FOUND");
+            }
+        }
+
+        println!("\n=== CONTROL FLOW NODES ===");
+        for node_kind in &[
+            "if_statement",
+            "for_statement",
+            "switch_statement",
+            "type_switch_statement",
+            "select_statement",
+            "go_statement",
+            "defer_statement",
+            "return_statement",
+            "break_statement",
+            "continue_statement",
+            "fallthrough_statement",
+            "goto_statement",
+            "labeled_statement",
+        ] {
+            let id = language.id_for_node_kind(node_kind, true);
+            if id != 0 {
+                println!("  ✓ {node_kind:30} -> ID: {id}");
+            } else {
+                println!("  ✗ {node_kind:30} NOT FOUND");
+            }
+        }
+
+        println!("\n=== CHANNEL/CONCURRENCY NODES ===");
+        for node_kind in &[
+            "channel_type",
+            "send_statement",
+            "receive_statement", 
+            "communication_case",
+            "default_case",
+            "expression_case",
+            "type_case",
+            "select_statement",
+        ] {
+            let id = language.id_for_node_kind(node_kind, true);
+            if id != 0 {
+                println!("  ✓ {node_kind:30} -> ID: {id}");
+            } else {
+                println!("  ✗ {node_kind:30} NOT FOUND");
+            }
+        }
+
+        println!("\n=== LITERAL NODES ===");
+        for node_kind in &[
+            "int_literal",
+            "float_literal", 
+            "imaginary_literal",
+            "rune_literal",
+            "raw_string_literal",
+            "interpreted_string_literal",
+            "true",
+            "false", 
+            "nil",
+            "iota",
+            "composite_literal",
+            "literal_element",
+            "keyed_element",
+        ] {
+            let id = language.id_for_node_kind(node_kind, true);
+            if id != 0 {
+                println!("  ✓ {node_kind:30} -> ID: {id}");
+            } else {
+                println!("  ✗ {node_kind:30} NOT FOUND");
+            }
+        }
+
+        println!("\n=== DOCUMENTATION NODES ===");
+        for node_kind in &[
+            "comment",
+            "line_comment",
+            "general_comment",
+            "block_comment",
+        ] {
+            let id = language.id_for_node_kind(node_kind, true);
+            if id != 0 {
+                println!("  ✓ {node_kind:30} -> ID: {id}");
+            } else {
+                println!("  ✗ {node_kind:30} NOT FOUND");
+            }
+        }
+
+        println!("\n=== OPERATOR NODES ===");
+        for node_kind in &[
+            "binary_expression",
+            "unary_expression",
+            "assignment_statement",
+            "inc_statement",
+            "dec_statement",
+        ] {
+            let id = language.id_for_node_kind(node_kind, true);
+            if id != 0 {
+                println!("  ✓ {node_kind:30} -> ID: {id}");
+            } else {
+                println!("  ✗ {node_kind:30} NOT FOUND");
+            }
+        }
+
+        println!("\n=== Summary ===");
+        println!("Total node kinds available: {}", language.node_kind_count());
+        println!("Use these node names in the Go parser to extract symbols!");
+        println!("CRITICAL: Always verify exact node names - do NOT guess!");
+    }
+
+    #[test]
+    fn explore_go_node_structure() {
+        let mut parser = tree_sitter::Parser::new();
+        parser.set_language(&tree_sitter_go::LANGUAGE.into()).unwrap();
+
+        println!("\n=== Go Node Structure Exploration ===");
+
+        let test_cases = vec![
+            ("package main", "Package declaration"),
+            (r#"import "fmt""#, "Simple import"),
+            (r#"import (
+    "fmt"
+    "os"
+    m "math"
+    . "strings"  
+    _ "database/sql"
+)"#, "Import group"),
+            ("type User struct { Name string `json:\"name\"` }", "Struct with tag"),
+            ("type Writer interface { Write([]byte) (int, error) }", "Interface declaration"),
+            ("func (u *User) String() string { return u.Name }", "Method with receiver"),
+            ("func Add[T int | float64](a, b T) T { return a + b }", "Generic function"),
+            ("var count int = 42", "Variable declaration"),
+            ("const Pi = 3.14159", "Constant declaration"),
+            ("users := make([]User, 0)", "Short variable declaration"),
+            ("ch <- value", "Channel send"),
+            ("value := <-ch", "Channel receive"),
+            ("go doWork()", "Goroutine"),
+            ("defer file.Close()", "Defer statement"),
+        ];
+
+        for (code, description) in test_cases {
+            println!("\n--- {description} ---");
+            println!("Code: {code}");
+            
+            if let Some(tree) = parser.parse(code, None) {
+                let root = tree.root_node();
+                print_go_node_tree(root, code, 0);
+            }
+        }
+
+        fn print_go_node_tree(node: tree_sitter::Node, code: &str, indent: usize) {
+            let node_text = &code[node.byte_range()];
+            let truncated = if node_text.len() > 50 {
+                format!("{}...", &node_text[..50].replace('\n', "\\n"))
+            } else {
+                node_text.replace('\n', "\\n")
+            };
+
+            println!(
+                "{:indent$}[{}] '{}' (id: {})",
+                "",
+                node.kind(),
+                truncated,
+                node.kind_id(),
+                indent = indent
+            );
+
+            // Show field names
+            let mut cursor = node.walk();
+            for (i, child) in node.children(&mut cursor).enumerate() {
+                if let Some(field_name) = node.field_name_for_child(i as u32) {
+                    println!(
+                        "{:indent$}  └─ field: '{}'",
+                        "",
+                        field_name,
+                        indent = indent + 2
+                    );
+                }
+                print_go_node_tree(child, code, indent + 4);
+            }
+        }
+
+        println!("\n=== KEY FINDINGS FOR GO PARSER IMPLEMENTATION ===");
+        println!("1. Use exact node names found above - do NOT guess");
+        println!("2. Check field names for extracting specific parts");
+        println!("3. Go uses different patterns than TypeScript");
+        println!("4. Pay attention to receiver syntax for methods");
+        println!("5. Handle Go's unique import syntax carefully");
+    }
+
     #[test]
     fn explore_language_behavior_candidates() {
         println!("\n=== Potential LanguageBehavior Enhancements ===");
