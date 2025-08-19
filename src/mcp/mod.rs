@@ -247,7 +247,7 @@ impl CodeIntelligenceServer {
         use crate::symbol::context::ContextIncludes;
 
         let indexer = self.indexer.read().await;
-        let symbols = indexer.find_symbols_by_name(&name);
+        let symbols = indexer.find_symbols_by_name(&name, None);
 
         if symbols.is_empty() {
             return Ok(CallToolResult::success(vec![Content::text(format!(
@@ -365,7 +365,7 @@ impl CodeIntelligenceServer {
     ) -> Result<CallToolResult, McpError> {
         let indexer = self.indexer.read().await;
 
-        let symbols = indexer.find_symbols_by_name(&function_name);
+        let symbols = indexer.find_symbols_by_name(&function_name, None);
 
         if symbols.is_empty() {
             return Ok(CallToolResult::success(vec![Content::text(format!(
@@ -458,7 +458,7 @@ impl CodeIntelligenceServer {
     ) -> Result<CallToolResult, McpError> {
         let indexer = self.indexer.read().await;
 
-        let symbols = indexer.find_symbols_by_name(&function_name);
+        let symbols = indexer.find_symbols_by_name(&function_name, None);
 
         if symbols.is_empty() {
             return Ok(CallToolResult::success(vec![Content::text(format!(
@@ -1063,7 +1063,7 @@ impl CodeIntelligenceServer {
             _ => None,
         });
 
-        match indexer.search(&query, limit, kind_filter, module.as_deref()) {
+        match indexer.search(&query, limit, kind_filter, module.as_deref(), None) {
             Ok(results) => {
                 if results.is_empty() {
                     return Ok(CallToolResult::success(vec![Content::text(format!(

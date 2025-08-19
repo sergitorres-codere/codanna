@@ -11,7 +11,7 @@ use std::borrow::Cow;
 /// Execute retrieve symbol command
 pub fn retrieve_symbol(indexer: &SimpleIndexer, name: &str, format: OutputFormat) -> ExitCode {
     let mut output = OutputManager::new(format);
-    let symbols = indexer.find_symbols_by_name(name);
+    let symbols = indexer.find_symbols_by_name(name, None);
 
     if symbols.is_empty() {
         // Build not found output
@@ -78,7 +78,7 @@ pub fn retrieve_symbol(indexer: &SimpleIndexer, name: &str, format: OutputFormat
 /// Execute retrieve callers command
 pub fn retrieve_callers(indexer: &SimpleIndexer, function: &str, format: OutputFormat) -> ExitCode {
     let mut output = OutputManager::new(format);
-    let symbols = indexer.find_symbols_by_name(function);
+    let symbols = indexer.find_symbols_by_name(function, None);
 
     if symbols.is_empty() {
         let unified = UnifiedOutput {
@@ -156,7 +156,7 @@ pub fn retrieve_callers(indexer: &SimpleIndexer, function: &str, format: OutputF
 /// Execute retrieve calls command
 pub fn retrieve_calls(indexer: &SimpleIndexer, function: &str, format: OutputFormat) -> ExitCode {
     let mut output = OutputManager::new(format);
-    let symbols = indexer.find_symbols_by_name(function);
+    let symbols = indexer.find_symbols_by_name(function, None);
 
     if symbols.is_empty() {
         let unified = UnifiedOutput {
@@ -240,7 +240,7 @@ pub fn retrieve_implementations(
     let mut output = OutputManager::new(format);
 
     // Find the trait symbol first
-    let trait_symbols = indexer.find_symbols_by_name(trait_name);
+    let trait_symbols = indexer.find_symbols_by_name(trait_name, None);
     let implementations = if let Some(trait_symbol) = trait_symbols.first() {
         indexer.get_implementations(trait_symbol.id)
     } else {
@@ -313,7 +313,7 @@ pub fn retrieve_search(
     });
 
     let search_results = indexer
-        .search(query, limit, kind_filter, module)
+        .search(query, limit, kind_filter, module, None)
         .unwrap_or_default();
 
     let results_with_path: Vec<SymbolContext> = search_results
@@ -367,7 +367,7 @@ pub fn retrieve_impact(
     format: OutputFormat,
 ) -> ExitCode {
     let mut output = OutputManager::new(format);
-    let symbols = indexer.find_symbols_by_name(symbol_name);
+    let symbols = indexer.find_symbols_by_name(symbol_name, None);
 
     if symbols.is_empty() {
         let unified = UnifiedOutput {
@@ -445,7 +445,7 @@ pub fn retrieve_describe(
     format: OutputFormat,
 ) -> ExitCode {
     let mut output = OutputManager::new(format);
-    let symbols = indexer.find_symbols_by_name(symbol_name);
+    let symbols = indexer.find_symbols_by_name(symbol_name, None);
 
     if symbols.is_empty() {
         let unified = UnifiedOutput {
@@ -523,7 +523,7 @@ pub fn retrieve_describe(
 
                 for search_term in method_searches {
                     if let Ok(results) =
-                        indexer.search(search_term, 50, Some(SymbolKind::Method), None)
+                        indexer.search(search_term, 50, Some(SymbolKind::Method), None, None)
                     {
                         for result in &results {
                             if let Some(method_symbol) = indexer.get_symbol(result.symbol_id) {
@@ -553,7 +553,8 @@ pub fn retrieve_describe(
 
                 // Also check if anyone uses this struct (look for constructor calls)
                 // Find methods named "new" that belong to this struct
-                if let Ok(new_results) = indexer.search("new", 100, Some(SymbolKind::Method), None)
+                if let Ok(new_results) =
+                    indexer.search("new", 100, Some(SymbolKind::Method), None, None)
                 {
                     for result in &new_results {
                         if let Some(constructor) = indexer.get_symbol(result.symbol_id) {
@@ -584,7 +585,7 @@ pub fn retrieve_describe(
                 }
 
                 // Find trait methods
-                if let Ok(search_results) = indexer.search(&symbol.name, 20, None, None) {
+                if let Ok(search_results) = indexer.search(&symbol.name, 20, None, None, None) {
                     let mut methods: Vec<Symbol> = Vec::new();
 
                     for result in &search_results {
@@ -607,7 +608,7 @@ pub fn retrieve_describe(
             SymbolKind::Enum => {
                 // For enums: show variants and usage
                 // Find enum variants (they might be tagged as Constants or other)
-                if let Ok(search_results) = indexer.search(&symbol.name, 20, None, None) {
+                if let Ok(search_results) = indexer.search(&symbol.name, 20, None, None, None) {
                     let mut variants: Vec<Symbol> = Vec::new();
 
                     for result in &search_results {

@@ -1441,7 +1441,7 @@ async fn main() {
                     .and_then(|v| v.as_str());
 
                 if let Some(symbol_name) = name {
-                    let symbols = indexer.find_symbols_by_name(symbol_name);
+                    let symbols = indexer.find_symbols_by_name(symbol_name, None);
                     if !symbols.is_empty() {
                         use codanna::symbol::context::ContextIncludes;
                         let mut results = Vec::new();
@@ -1491,7 +1491,7 @@ async fn main() {
 
                 if let Some(func_name) = function_name {
                     // Find the function first
-                    let symbols = indexer.find_symbols_by_name(func_name);
+                    let symbols = indexer.find_symbols_by_name(func_name, None);
                     if let Some(symbol) = symbols.into_iter().find(|s| {
                         matches!(
                             s.kind,
@@ -1531,7 +1531,7 @@ async fn main() {
 
                 if let Some(func_name) = function_name {
                     // Find all functions with this name
-                    let symbols = indexer.find_symbols_by_name(func_name);
+                    let symbols = indexer.find_symbols_by_name(func_name, None);
                     if !symbols.is_empty() {
                         let mut all_callers = Vec::new();
 
@@ -1561,7 +1561,7 @@ async fn main() {
 
                 if let Some(sym_name) = symbol_name {
                     // Find the symbol first
-                    let symbols = indexer.find_symbols_by_name(sym_name);
+                    let symbols = indexer.find_symbols_by_name(sym_name, None);
                     if let Some(symbol) = symbols.first() {
                         let max_depth = arguments
                             .as_ref()
@@ -1626,7 +1626,7 @@ async fn main() {
                         _ => None,
                     });
 
-                    match indexer.search(q, limit, kind_filter, module) {
+                    match indexer.search(q, limit, kind_filter, module, None) {
                         Ok(results) => Some(results),
                         Err(_) => Some(Vec::new()),
                     }

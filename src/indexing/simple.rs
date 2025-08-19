@@ -1396,11 +1396,11 @@ impl SimpleIndexer {
             .and_then(|symbols| symbols.first().map(|s| s.id))
     }
 
-    pub fn find_symbols_by_name(&self, name: &str) -> Vec<Symbol> {
+    pub fn find_symbols_by_name(&self, name: &str, language_filter: Option<&str>) -> Vec<Symbol> {
         // For now, still use Tantivy for full symbol retrieval
         // Cache only helps with ID lookups
         self.document_index
-            .find_symbols_by_name(name, None)
+            .find_symbols_by_name(name, language_filter)
             .unwrap_or_default()
             .into_iter()
             .map(|mut symbol| {
@@ -1821,9 +1821,10 @@ impl SimpleIndexer {
         limit: usize,
         kind_filter: Option<crate::types::SymbolKind>,
         module_filter: Option<&str>,
+        language_filter: Option<&str>,
     ) -> IndexResult<Vec<SearchResult>> {
         self.document_index
-            .search(query, limit, kind_filter, module_filter, None)
+            .search(query, limit, kind_filter, module_filter, language_filter)
             .map_err(|e| IndexError::General(format!("Search failed: {e}")))
     }
 
@@ -2593,7 +2594,7 @@ mod tests {
 
         // Find the trait
         let found_trait = indexer
-            .find_symbols_by_name("MyTrait")
+            .find_symbols_by_name("MyTrait", None)
             .into_iter()
             .find(|s| s.kind == SymbolKind::Trait)
             .expect("Should find MyTrait");
@@ -3434,7 +3435,7 @@ pub struct Another {
 
         // Find the symbols - be more specific since multiple files have 'main'
         // Get all symbols named 'main' and find the one from the Rust file
-        let all_main_symbols = indexer.find_symbols_by_name("main");
+        let all_main_symbols = indexer.find_symbols_by_name("main", None);
         assert!(
             !all_main_symbols.is_empty(),
             "Should find 'main' symbols after indexing"
@@ -3516,5 +3517,210 @@ pub struct Another {
             3,
             "Should have 3 files with language mappings"
         );
+    }
+
+    #[test]
+    fn test_find_symbols_with_language_filter() {
+        use std::fs;
+        use tempfile::TempDir;
+
+        println!("\n=== Testing SimpleIndexer with language filtering ===");
+
+        // Create a temporary directory and test files
+        let temp_dir = TempDir::new().unwrap();
+        let rust_file = temp_dir.path().join("main.rs");
+        let python_file = temp_dir.path().join("main.py");
+        let ts_file = temp_dir.path().join("main.ts");
+
+        // Write test content with same function name in different languages
+        fs::write(&rust_file, "fn process_data() { println!(\"Rust\"); }").unwrap();
+        fs::write(&python_file, "def process_data():\n    print('Python')").unwrap();
+        fs::write(
+            &ts_file,
+            "function process_data() { console.log('TypeScript'); }",
+        )
+        .unwrap();
+
+        // Create indexer
+        let settings = Settings {
+            workspace_root: Some(temp_dir.path().to_path_buf()),
+            ..Default::default()
+        };
+        let mut indexer = SimpleIndexer::with_settings(Arc::new(settings));
+
+        // Index all files
+        indexer
+            .index_file(&rust_file)
+            .expect("Failed to index Rust file");
+        indexer
+            .index_file(&python_file)
+            .expect("Failed to index Python file");
+        indexer
+            .index_file(&ts_file)
+            .expect("Failed to index TypeScript file");
+
+        // Test 1: Find all symbols without filter
+        let all_symbols = indexer.find_symbols_by_name("process_data", None);
+        println!(
+            "Test 1 - No filter: Found {} 'process_data' symbols",
+            all_symbols.len()
+        );
+        for symbol in &all_symbols {
+            println!(
+                "  - Language: {:?}, File: {}",
+                symbol.language_id,
+                indexer.get_file_path(symbol.file_id).unwrap_or_default()
+            );
+        }
+        assert_eq!(all_symbols.len(), 3, "Should find 3 process_data functions");
+
+        // Test 2: Filter by Rust
+        let rust_symbols = indexer.find_symbols_by_name("process_data", Some("rust"));
+        println!("Test 2 - Rust filter: Found {} symbols", rust_symbols.len());
+        assert_eq!(rust_symbols.len(), 1, "Should find 1 Rust function");
+        assert_eq!(rust_symbols[0].language_id, Some(LanguageId::new("rust")));
+
+        // Test 3: Filter by Python
+        let python_symbols = indexer.find_symbols_by_name("process_data", Some("python"));
+        println!(
+            "Test 3 - Python filter: Found {} symbols",
+            python_symbols.len()
+        );
+        assert_eq!(python_symbols.len(), 1, "Should find 1 Python function");
+        assert_eq!(
+            python_symbols[0].language_id,
+            Some(LanguageId::new("python"))
+        );
+
+        // Test 4: Filter by TypeScript
+        let ts_symbols = indexer.find_symbols_by_name("process_data", Some("typescript"));
+        println!(
+            "Test 4 - TypeScript filter: Found {} symbols",
+            ts_symbols.len()
+        );
+        assert_eq!(ts_symbols.len(), 1, "Should find 1 TypeScript function");
+        assert_eq!(
+            ts_symbols[0].language_id,
+            Some(LanguageId::new("typescript"))
+        );
+
+        // Test 5: Filter by non-existent language
+        let java_symbols = indexer.find_symbols_by_name("process_data", Some("java"));
+        println!(
+            "Test 5 - Java filter (non-existent): Found {} symbols",
+            java_symbols.len()
+        );
+        assert_eq!(java_symbols.len(), 0, "Should find no Java functions");
+
+        println!("=== All SimpleIndexer language filter tests passed ===\n");
+    }
+
+    #[test]
+    fn test_search_with_language_filter() {
+        use std::fs;
+        use tempfile::TempDir;
+
+        println!("\n=== Testing SimpleIndexer search with language filtering ===");
+
+        // Create a temporary directory and test files
+        let temp_dir = TempDir::new().unwrap();
+        let rust_file = temp_dir.path().join("parser.rs");
+        let python_file = temp_dir.path().join("parser.py");
+
+        // Write test content with parse-related functions
+        fs::write(
+            &rust_file,
+            r#"
+            fn parse_json(input: &str) -> Result<Value, Error> {
+                // Parse JSON in Rust
+            }
+            fn parse_xml(input: &str) -> Result<Document, Error> {
+                // Parse XML in Rust
+            }
+        "#,
+        )
+        .unwrap();
+
+        fs::write(
+            &python_file,
+            r#"
+def parse_json(input: str) -> dict:
+    """Parse JSON in Python"""
+    pass
+
+def parse_yaml(input: str) -> dict:
+    """Parse YAML in Python"""
+    pass
+        "#,
+        )
+        .unwrap();
+
+        // Create indexer
+        let settings = Settings {
+            workspace_root: Some(temp_dir.path().to_path_buf()),
+            ..Default::default()
+        };
+        let mut indexer = SimpleIndexer::with_settings(Arc::new(settings));
+
+        // Index files
+        indexer
+            .index_file(&rust_file)
+            .expect("Failed to index Rust file");
+        indexer
+            .index_file(&python_file)
+            .expect("Failed to index Python file");
+
+        // Test 1: Search without language filter
+        let all_results = indexer.search("parse", 10, None, None, None).unwrap();
+        println!(
+            "Test 1 - Search 'parse' no filter: Found {} results",
+            all_results.len()
+        );
+        assert!(
+            all_results.len() >= 3,
+            "Should find at least 3 parse functions"
+        );
+
+        // Test 2: Search with Rust filter
+        let rust_results = indexer
+            .search("parse", 10, None, None, Some("rust"))
+            .unwrap();
+        println!(
+            "Test 2 - Search 'parse' Rust filter: Found {} results",
+            rust_results.len()
+        );
+        for result in &rust_results {
+            println!("  - {}: {}", result.name, result.file_path);
+        }
+        assert_eq!(rust_results.len(), 2, "Should find 2 Rust parse functions");
+
+        // Test 3: Search with Python filter
+        let python_results = indexer
+            .search("parse", 10, None, None, Some("python"))
+            .unwrap();
+        println!(
+            "Test 3 - Search 'parse' Python filter: Found {} results",
+            python_results.len()
+        );
+        for result in &python_results {
+            println!("  - {}: {}", result.name, result.file_path);
+        }
+        assert_eq!(
+            python_results.len(),
+            2,
+            "Should find 2 Python parse functions"
+        );
+
+        // Test 4: Search with non-existent language
+        let java_results = indexer
+            .search("parse", 10, None, None, Some("java"))
+            .unwrap();
+        println!(
+            "Test 4 - Search 'parse' Java filter: Found {} results",
+            java_results.len()
+        );
+        assert_eq!(java_results.len(), 0, "Should find no Java functions");
+
+        println!("=== All SimpleIndexer search tests passed ===\n");
     }
 }
