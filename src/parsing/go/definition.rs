@@ -21,7 +21,7 @@ impl LanguageDefinition for GoLanguage {
     }
 
     fn extensions(&self) -> &'static [&'static str] {
-        &["ts", "tsx", "mts", "cts"]
+        &["go"]
     }
 
     fn create_parser(&self, _settings: &Settings) -> IndexResult<Box<dyn LanguageParser>> {

@@ -49,12 +49,12 @@ impl LanguageBehavior for GoBehavior {
         tree_sitter_go::LANGUAGE.into()
     }
     fn module_separator(&self) -> &'static str {
-        "."
+        "/"
     }
 
     fn module_path_from_file(&self, file_path: &Path, project_root: &Path) -> Option<String> {
-        // Convert file path to module path relative to project root
-        // e.g., src/utils/helpers.ts -> src.utils.helpers
+        // Convert file path to Go package path relative to project root
+        // e.g., pkg/utils/helpers.go -> pkg/utils
 
         // Get relative path from project root
         let relative_path = file_path
@@ -65,35 +65,69 @@ impl LanguageBehavior for GoBehavior {
 
         let path = relative_path.to_str()?;
 
-        // Remove common directory prefixes and file extensions
+        // Remove Go file extension and get directory
         let module_path = path
             .trim_start_matches("./")
-            .trim_start_matches("src/")
-            .trim_start_matches("lib/")
-            .trim_end_matches(".ts")
-            .trim_end_matches(".tsx")
-            .trim_end_matches(".mts")
-            .trim_end_matches(".cts")
-            .trim_end_matches(".d.ts")
-            .trim_end_matches("/index");
+            .trim_end_matches(".go");
 
-        // Replace path separators with module separators
-        Some(module_path.replace('/', "."))
+        // Get directory path (Go packages are directories)
+        let dir_path = if let Some(parent) = Path::new(module_path).parent() {
+            parent.to_str().unwrap_or("")
+        } else {
+            "" // Root package
+        };
+
+        // Convert empty path to current directory marker
+        if dir_path.is_empty() {
+            Some(".".to_string())
+        } else {
+            Some(dir_path.to_string())
+        }
     }
 
     fn parse_visibility(&self, signature: &str) -> Visibility {
-        // Go visibility modifiers
-        if signature.contains("export ") || signature.contains("export default") {
-            Visibility::Public
-        } else if signature.contains("private ") || signature.contains("#") {
-            Visibility::Private
-        } else if signature.contains("protected ") {
-            // Go has protected but Rust's Visibility enum doesn't
-            // Map protected to Module visibility as a reasonable approximation
-            Visibility::Module
+        // Go uses capitalization for visibility
+        // Extract the symbol name from the signature and check if it starts with uppercase
+        
+        // Try to extract the symbol name from different signature patterns
+        let symbol_name = if let Some(func_start) = signature.find("func ") {
+            // Function signature: "func FunctionName(" or "func (receiver) MethodName("
+            let after_func = &signature[func_start + 5..];
+            if let Some(receiver_end) = after_func.find(") ") {
+                // Method with receiver: "func (r *Type) MethodName("
+                let after_receiver = &after_func[receiver_end + 2..];
+                after_receiver.split('(').next().unwrap_or("").trim()
+            } else {
+                // Regular function: "func FunctionName("
+                after_func.split('(').next().unwrap_or("").trim()
+            }
+        } else if let Some(type_start) = signature.find("type ") {
+            // Type signature: "type TypeName struct" or "type TypeName interface"
+            let after_type = &signature[type_start + 5..];
+            after_type.split_whitespace().next().unwrap_or("")
+        } else if let Some(var_start) = signature.find("var ") {
+            // Variable signature: "var VariableName type"
+            let after_var = &signature[var_start + 4..];
+            after_var.split_whitespace().next().unwrap_or("")
+        } else if let Some(const_start) = signature.find("const ") {
+            // Constant signature: "const ConstantName = value"
+            let after_const = &signature[const_start + 6..];
+            after_const.split_whitespace().next().unwrap_or("")
         } else {
-            // Default visibility for Go symbols
-            // Module-level symbols are private by default unless exported
+            // Fallback: take the first word that looks like an identifier
+            signature.split_whitespace()
+                .find(|word| word.chars().next().map_or(false, |c| c.is_alphabetic()))
+                .unwrap_or("")
+        };
+
+        // Go visibility: uppercase first letter = public, lowercase = private
+        if let Some(first_char) = symbol_name.chars().next() {
+            if first_char.is_uppercase() {
+                Visibility::Public
+            } else {
+                Visibility::Private
+            }
+        } else {
             Visibility::Private
         }
     }
@@ -295,28 +329,22 @@ impl LanguageBehavior for GoBehavior {
         symbol_module_path: &str,
         importing_module: Option<&str>,
     ) -> bool {
-        // Helper function to normalize path separators to dots
-        fn normalize_path(path: &str) -> String {
-            path.replace('/', ".")
-        }
-
-        // Helper function to resolve relative path to absolute module path
+        // Helper function to resolve relative path to absolute module path for Go
         fn resolve_relative_path(import_path: &str, importing_mod: &str) -> String {
             if import_path.starts_with("./") {
                 // Same directory import
                 let relative = import_path.trim_start_matches("./");
-                let normalized = normalize_path(relative);
 
-                if importing_mod.is_empty() {
-                    normalized
+                if importing_mod.is_empty() || importing_mod == "." {
+                    relative.to_string()
                 } else {
-                    format!("{importing_mod}.{normalized}")
+                    format!("{importing_mod}/{relative}")
                 }
             } else if import_path.starts_with("../") {
                 // Parent directory import
                 // Start with the importing module parts as owned strings
                 let mut module_parts: Vec<String> =
-                    importing_mod.split('.').map(|s| s.to_string()).collect();
+                    importing_mod.split('/').map(|s| s.to_string()).collect();
 
                 let mut path_remaining: &str = import_path;
 
@@ -332,25 +360,19 @@ impl LanguageBehavior for GoBehavior {
 
                 // Add the remaining path
                 if !path_remaining.is_empty() {
-                    let normalized = normalize_path(path_remaining);
                     module_parts.extend(
-                        normalized
-                            .split('.')
+                        path_remaining
+                            .split('/')
                             .filter(|s| !s.is_empty())
                             .map(|s| s.to_string()),
                     );
                 }
 
-                module_parts.join(".")
+                module_parts.join("/")
             } else {
                 // Not a relative path, return as-is
                 import_path.to_string()
             }
-        }
-
-        // Helper function to check if path matches with optional index resolution
-        fn matches_with_index(candidate: &str, target: &str) -> bool {
-            candidate == target || format!("{candidate}.index") == target
         }
 
         // Case 1: Exact match (most common case, check first for performance)

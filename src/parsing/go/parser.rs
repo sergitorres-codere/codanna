@@ -97,9 +97,9 @@ impl GoParser {
                 // Set current function for parent tracking BEFORE processing children
                 self.context.set_current_function(func_name.clone());
 
-                // Process children for nested functions/classes
+                // Process children for nested functions
                 for child in node.children(&mut node.walk()) {
-                    if child.kind() != "identifier" && child.kind() != "formal_parameters" {
+                    if child.kind() != "identifier" && child.kind() != "parameter_list" {
                         self.extract_symbols_from_node(
                             child,
                             code,
@@ -118,73 +118,53 @@ impl GoParser {
                 self.context.set_current_function(saved_function);
                 self.context.set_current_class(saved_class);
             }
-            "class_declaration" | "abstract_class_declaration" => {
-                // Extract class name for parent tracking
-                let class_name = node
-                    .children(&mut node.walk())
-                    .find(|n| n.kind() == "type_identifier")
+            "method_declaration" => {
+                // Extract method name for parent tracking
+                let method_name = node
+                    .child_by_field_name("name")
                     .map(|n| code[n.byte_range()].to_string());
 
-                if let Some(symbol) = self.process_class(node, code, file_id, counter, module_path)
-                {
-                    symbols.push(symbol);
-                    // Enter class scope for processing members
-                    self.context.enter_scope(ScopeType::Class);
-
-                    // Save the current parent context before setting new one
-                    let saved_function = self.context.current_function().map(|s| s.to_string());
-                    let saved_class = self.context.current_class().map(|s| s.to_string());
-
-                    // Set current class for parent tracking
-                    self.context.set_current_class(class_name.clone());
-
-                    // Extract class members
-                    self.extract_class_members(node, code, file_id, counter, symbols, module_path);
-
-                    // Exit scope first (this clears the current context)
-                    self.context.exit_scope();
-
-                    // Then restore the previous parent context
-                    self.context.set_current_function(saved_function);
-                    self.context.set_current_class(saved_class);
-                }
-            }
-            "interface_declaration" => {
                 if let Some(symbol) =
-                    self.process_interface(node, code, file_id, counter, module_path)
+                    self.process_method_declaration(node, code, file_id, counter, module_path)
                 {
                     symbols.push(symbol);
                 }
-            }
-            "type_alias_declaration" => {
-                if let Some(symbol) =
-                    self.process_type_alias(node, code, file_id, counter, module_path)
-                {
-                    symbols.push(symbol);
+                // Enter method scope for processing nested symbols
+                self.context.enter_scope(ScopeType::hoisting_function());
+
+                // Save the current parent context before setting new one
+                let saved_function = self.context.current_function().map(|s| s.to_string());
+                let saved_class = self.context.current_class().map(|s| s.to_string());
+                // Set current function for parent tracking
+                self.context.set_current_function(method_name.clone());
+
+                // Process children
+                for child in node.children(&mut node.walk()) {
+                    if child.kind() != "identifier" && child.kind() != "parameter_list" {
+                        self.extract_symbols_from_node(
+                            child,
+                            code,
+                            file_id,
+                            counter,
+                            symbols,
+                            module_path,
+                        );
+                    }
                 }
+
+                // Exit scope and restore context
+                self.context.exit_scope();
+                self.context.set_current_function(saved_function);
+                self.context.set_current_class(saved_class);
             }
-            "enum_declaration" => {
-                if let Some(symbol) = self.process_enum(node, code, file_id, counter, module_path) {
-                    symbols.push(symbol);
-                }
+            "type_declaration" => {
+                self.process_type_declaration(node, code, file_id, counter, symbols, module_path);
             }
-            "lexical_declaration" | "variable_declaration" => {
-                self.process_variable_declaration(
-                    node,
-                    code,
-                    file_id,
-                    counter,
-                    symbols,
-                    module_path,
-                );
+            "var_declaration" => {
+                self.process_var_declaration(node, code, file_id, counter, symbols, module_path);
             }
-            "arrow_function" => {
-                // Handle arrow functions assigned to variables
-                if let Some(symbol) =
-                    self.process_arrow_function(node, code, file_id, counter, module_path)
-                {
-                    symbols.push(symbol);
-                }
+            "const_declaration" => {
+                self.process_const_declaration(node, code, file_id, counter, symbols, module_path);
             }
             _ => {
                 // For unhandled node types, recursively process children
@@ -217,7 +197,7 @@ impl GoParser {
 
         let signature = self.extract_signature(node, code);
         let doc_comment = self.extract_doc_comment(&node, code);
-        let visibility = self.determine_visibility(node, code);
+        let visibility = self.determine_go_visibility(name);
 
         Some(self.create_symbol(
             counter.next_id(),
@@ -237,217 +217,26 @@ impl GoParser {
         ))
     }
 
-    /// Process a class declaration
-    fn process_class(
+    /// Process a Go type declaration (struct, interface, or type alias)
+    fn process_type_declaration(
         &mut self,
         node: Node,
-        code: &str,
-        file_id: FileId,
-        counter: &mut SymbolCounter,
-        module_path: &str,
-    ) -> Option<Symbol> {
-        // For abstract classes, the name isn't a field, it's a type_identifier child
-        let name = node
-            .children(&mut node.walk())
-            .find(|n| n.kind() == "type_identifier")
-            .map(|n| &code[n.byte_range()])?;
-
-        let signature = self.extract_class_signature(node, code);
-        let doc_comment = self.extract_doc_comment(&node, code);
-        let visibility = self.determine_visibility(node, code);
-
-        Some(self.create_symbol(
-            counter.next_id(),
-            name.to_string(),
-            SymbolKind::Class,
-            file_id,
-            Range::new(
-                node.start_position().row as u32,
-                node.start_position().column as u16,
-                node.end_position().row as u32,
-                node.end_position().column as u16,
-            ),
-            Some(signature),
-            doc_comment,
-            module_path,
-            visibility,
-        ))
-    }
-
-    /// Extract class members (methods, properties)
-    fn extract_class_members(
-        &mut self,
-        class_node: Node,
         code: &str,
         file_id: FileId,
         counter: &mut SymbolCounter,
         symbols: &mut Vec<Symbol>,
         module_path: &str,
     ) {
-        if let Some(body) = class_node.child_by_field_name("body") {
-            let mut cursor = body.walk();
-            for child in body.children(&mut cursor) {
-                match child.kind() {
-                    "method_definition" => {
-                        // Extract method name for parent tracking
-                        let method_name = child
-                            .child_by_field_name("name")
-                            .map(|n| code[n.byte_range()].to_string());
-
-                        if let Some(symbol) =
-                            self.process_method(child, code, file_id, counter, module_path)
-                        {
-                            symbols.push(symbol);
-                        }
-
-                        // Also process the method body for nested classes/functions
-                        if let Some(body) = child.child_by_field_name("body") {
-                            // Enter function scope for method body
-                            self.context
-                                .enter_scope(ScopeType::Function { hoisting: false });
-
-                            // Save the current parent context before setting new one
-                            let saved_function =
-                                self.context.current_function().map(|s| s.to_string());
-
-                            // Set current function to the method name
-                            self.context.set_current_function(method_name.clone());
-
-                            for body_child in body.children(&mut body.walk()) {
-                                self.extract_symbols_from_node(
-                                    body_child,
-                                    code,
-                                    file_id,
-                                    counter,
-                                    symbols,
-                                    module_path,
-                                );
-                            }
-
-                            // Exit scope first (this clears the current context)
-                            self.context.exit_scope();
-
-                            // Then restore the previous parent context when exiting method
-                            self.context.set_current_function(saved_function);
-                        }
-                    }
-                    "public_field_definition" | "property_declaration" => {
-                        if let Some(symbol) =
-                            self.process_property(child, code, file_id, counter, module_path)
-                        {
-                            symbols.push(symbol);
-                        }
-                    }
-                    _ => {}
-                }
+        // type_declaration contains type_spec nodes
+        for child in node.children(&mut node.walk()) {
+            if child.kind() == "type_spec" {
+                self.process_type_spec(child, code, file_id, counter, symbols, module_path);
             }
         }
     }
 
-    /// Process an interface declaration
-    fn process_interface(
-        &mut self,
-        node: Node,
-        code: &str,
-        file_id: FileId,
-        counter: &mut SymbolCounter,
-        module_path: &str,
-    ) -> Option<Symbol> {
-        let name_node = node.child_by_field_name("name")?;
-        let name = &code[name_node.byte_range()];
-
-        let signature = self.extract_interface_signature(node, code);
-        let doc_comment = self.extract_doc_comment(&node, code);
-        let visibility = self.determine_visibility(node, code);
-
-        Some(self.create_symbol(
-            counter.next_id(),
-            name.to_string(),
-            SymbolKind::Interface,
-            file_id,
-            Range::new(
-                node.start_position().row as u32,
-                node.start_position().column as u16,
-                node.end_position().row as u32,
-                node.end_position().column as u16,
-            ),
-            Some(signature),
-            doc_comment,
-            module_path,
-            visibility,
-        ))
-    }
-
-    /// Process a type alias declaration
-    fn process_type_alias(
-        &mut self,
-        node: Node,
-        code: &str,
-        file_id: FileId,
-        counter: &mut SymbolCounter,
-        module_path: &str,
-    ) -> Option<Symbol> {
-        let name_node = node.child_by_field_name("name")?;
-        let name = &code[name_node.byte_range()];
-
-        let signature = &code[node.byte_range()];
-        let doc_comment = self.extract_doc_comment(&node, code);
-        let visibility = self.determine_visibility(node, code);
-
-        Some(self.create_symbol(
-            counter.next_id(),
-            name.to_string(),
-            SymbolKind::TypeAlias,
-            file_id,
-            Range::new(
-                node.start_position().row as u32,
-                node.start_position().column as u16,
-                node.end_position().row as u32,
-                node.end_position().column as u16,
-            ),
-            Some(signature.to_string()),
-            doc_comment,
-            module_path,
-            visibility,
-        ))
-    }
-
-    /// Process an enum declaration
-    fn process_enum(
-        &mut self,
-        node: Node,
-        code: &str,
-        file_id: FileId,
-        counter: &mut SymbolCounter,
-        module_path: &str,
-    ) -> Option<Symbol> {
-        let name_node = node.child_by_field_name("name")?;
-        let name = &code[name_node.byte_range()];
-
-        let signature = &code[node.byte_range()];
-        let doc_comment = self.extract_doc_comment(&node, code);
-        let visibility = self.determine_visibility(node, code);
-
-        Some(self.create_symbol(
-            counter.next_id(),
-            name.to_string(),
-            SymbolKind::Enum,
-            file_id,
-            Range::new(
-                node.start_position().row as u32,
-                node.start_position().column as u16,
-                node.end_position().row as u32,
-                node.end_position().column as u16,
-            ),
-            Some(signature.to_string()),
-            doc_comment,
-            module_path,
-            visibility,
-        ))
-    }
-
-    /// Process variable declarations
-    fn process_variable_declaration(
+    /// Process a type_spec node (individual type definition)
+    fn process_type_spec(
         &mut self,
         node: Node,
         code: &str,
@@ -456,106 +245,271 @@ impl GoParser {
         symbols: &mut Vec<Symbol>,
         module_path: &str,
     ) {
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if child.kind() == "variable_declarator" {
-                if let Some(name_node) = child.child_by_field_name("name") {
-                    if name_node.kind() == "identifier" {
-                        let name = &code[name_node.byte_range()];
-                        let kind = if code[node.byte_range()].starts_with("const") {
-                            SymbolKind::Constant
-                        } else {
-                            SymbolKind::Variable
-                        };
+        let name_node = match node.child_by_field_name("name") {
+            Some(n) => n,
+            None => return,
+        };
+        let name = &code[name_node.byte_range()];
+        let type_node = match node.child_by_field_name("type") {
+            Some(n) => n,
+            None => return,
+        };
 
-                        let visibility = self.determine_visibility(node, code);
+        match type_node.kind() {
+            "struct_type" => {
+                // Handle struct type
+                let signature = self.extract_struct_signature(node, code);
+                let doc_comment = self.extract_doc_comment(&node, code);
+                let visibility = self.determine_go_visibility(name);
 
-                        // Check if this is an arrow function assignment
-                        let is_arrow_function =
-                            if let Some(value_node) = child.child_by_field_name("value") {
-                                value_node.kind() == "arrow_function"
-                            } else {
-                                false
-                            };
+                let symbol = self.create_symbol(
+                    counter.next_id(),
+                    name.to_string(),
+                    SymbolKind::Struct,
+                    file_id,
+                    Range::new(
+                        node.start_position().row as u32,
+                        node.start_position().column as u16,
+                        node.end_position().row as u32,
+                        node.end_position().column as u16,
+                    ),
+                    Some(signature),
+                    doc_comment,
+                    module_path,
+                    visibility,
+                );
+                symbols.push(symbol);
 
-                        let mut symbol = self.create_symbol(
-                            counter.next_id(),
-                            name.to_string(),
-                            kind,
+                // Extract struct fields
+                self.extract_struct_fields(
+                    type_node,
+                    code,
+                    file_id,
+                    counter,
+                    symbols,
+                    module_path,
+                    name,
+                );
+            }
+            "interface_type" => {
+                // Handle interface type
+                let signature = self.extract_interface_signature(node, code);
+                let doc_comment = self.extract_doc_comment(&node, code);
+                let visibility = self.determine_go_visibility(name);
+
+                let symbol = self.create_symbol(
+                    counter.next_id(),
+                    name.to_string(),
+                    SymbolKind::Interface,
+                    file_id,
+                    Range::new(
+                        node.start_position().row as u32,
+                        node.start_position().column as u16,
+                        node.end_position().row as u32,
+                        node.end_position().column as u16,
+                    ),
+                    Some(signature),
+                    doc_comment,
+                    module_path,
+                    visibility,
+                );
+                symbols.push(symbol);
+
+                // Extract interface methods
+                self.extract_interface_methods(
+                    type_node,
+                    code,
+                    file_id,
+                    counter,
+                    symbols,
+                    module_path,
+                    name,
+                );
+            }
+            _ => {
+                // Handle type alias
+                let signature = &code[node.byte_range()];
+                let doc_comment = self.extract_doc_comment(&node, code);
+                let visibility = self.determine_go_visibility(name);
+
+                let symbol = self.create_symbol(
+                    counter.next_id(),
+                    name.to_string(),
+                    SymbolKind::TypeAlias,
+                    file_id,
+                    Range::new(
+                        node.start_position().row as u32,
+                        node.start_position().column as u16,
+                        node.end_position().row as u32,
+                        node.end_position().column as u16,
+                    ),
+                    Some(signature.to_string()),
+                    doc_comment,
+                    module_path,
+                    visibility,
+                );
+                symbols.push(symbol);
+            }
+        }
+    }
+
+    /// Extract struct fields from a struct_type node
+    fn extract_struct_fields(
+        &mut self,
+        struct_node: Node,
+        code: &str,
+        file_id: FileId,
+        counter: &mut SymbolCounter,
+        symbols: &mut Vec<Symbol>,
+        module_path: &str,
+        struct_name: &str,
+    ) {
+        // Look for field_declaration_list
+        for child in struct_node.children(&mut struct_node.walk()) {
+            if child.kind() == "field_declaration_list" {
+                for field_child in child.children(&mut child.walk()) {
+                    if field_child.kind() == "field_declaration" {
+                        self.process_struct_field(
+                            field_child,
+                            code,
                             file_id,
-                            Range::new(
-                                child.start_position().row as u32,
-                                child.start_position().column as u16,
-                                child.end_position().row as u32,
-                                child.end_position().column as u16,
-                            ),
-                            None,
-                            None,
+                            counter,
+                            symbols,
                             module_path,
-                            visibility,
+                            struct_name,
                         );
-
-                        // Override scope context for arrow functions - they are never hoisted
-                        if is_arrow_function {
-                            // Arrow functions are not hoisted, but keep the parent context that was already set
-                            match symbol.scope_context {
-                                Some(crate::symbol::ScopeContext::Local {
-                                    parent_name,
-                                    parent_kind,
-                                    ..
-                                }) => {
-                                    symbol.scope_context =
-                                        Some(crate::symbol::ScopeContext::Local {
-                                            hoisted: false, // Arrow functions are never hoisted
-                                            parent_name,    // Keep the parent context
-                                            parent_kind,    // Keep the parent kind
-                                        });
-                                }
-                                _ => {
-                                    // If not already Local, make it Local with parent context
-                                    let (parent_name, parent_kind) = if let Some(func_name) =
-                                        self.context.current_function()
-                                    {
-                                        (Some(func_name.into()), Some(crate::SymbolKind::Function))
-                                    } else if let Some(class_name) = self.context.current_class() {
-                                        (Some(class_name.into()), Some(crate::SymbolKind::Class))
-                                    } else {
-                                        (None, None)
-                                    };
-
-                                    symbol.scope_context =
-                                        Some(crate::symbol::ScopeContext::Local {
-                                            hoisted: false,
-                                            parent_name,
-                                            parent_kind,
-                                        });
-                                }
-                            }
-                        }
-
-                        symbols.push(symbol);
                     }
                 }
             }
         }
     }
 
-    /// Process arrow functions
-    fn process_arrow_function(
+    /// Process a single struct field declaration
+    fn process_struct_field(
         &mut self,
-        _node: Node,
-        _code: &str,
-        _file_id: FileId,
-        _counter: &mut SymbolCounter,
-        _module_path: &str,
-    ) -> Option<Symbol> {
-        // Arrow functions are typically anonymous
-        // We'll handle named arrow functions when assigned to variables
-        None
+        field_node: Node,
+        code: &str,
+        file_id: FileId,
+        counter: &mut SymbolCounter,
+        symbols: &mut Vec<Symbol>,
+        module_path: &str,
+        struct_name: &str,
+    ) {
+        // field_declaration may have multiple field names for the same type
+        // e.g., "Width, Height float64"
+        let mut field_names = Vec::new();
+        let mut field_type = None;
+
+        for child in field_node.children(&mut field_node.walk()) {
+            match child.kind() {
+                "field_identifier" => {
+                    field_names.push(&code[child.byte_range()]);
+                }
+                "type_identifier" | "pointer_type" | "array_type" | "slice_type" | "map_type"
+                | "channel_type" => {
+                    field_type = Some(&code[child.byte_range()]);
+                }
+                _ => {}
+            }
+        }
+
+        // Create symbols for each field name
+        for field_name in field_names {
+            let visibility = self.determine_go_visibility(field_name);
+            let signature = match field_type {
+                Some(typ) => format!("{field_name} {typ}"),
+                None => field_name.to_string(),
+            };
+
+            let symbol = self.create_symbol(
+                counter.next_id(),
+                field_name.to_string(),
+                SymbolKind::Field,
+                file_id,
+                Range::new(
+                    field_node.start_position().row as u32,
+                    field_node.start_position().column as u16,
+                    field_node.end_position().row as u32,
+                    field_node.end_position().column as u16,
+                ),
+                Some(signature),
+                None,
+                module_path,
+                visibility,
+            );
+            symbols.push(symbol);
+        }
     }
 
-    /// Process a method definition
-    fn process_method(
+    /// Extract interface methods from an interface_type node
+    fn extract_interface_methods(
+        &mut self,
+        interface_node: Node,
+        code: &str,
+        file_id: FileId,
+        counter: &mut SymbolCounter,
+        symbols: &mut Vec<Symbol>,
+        module_path: &str,
+        interface_name: &str,
+    ) {
+        // Look for method_elem nodes
+        for child in interface_node.children(&mut interface_node.walk()) {
+            if child.kind() == "method_elem" {
+                self.process_interface_method(
+                    child,
+                    code,
+                    file_id,
+                    counter,
+                    symbols,
+                    module_path,
+                    interface_name,
+                );
+            }
+        }
+    }
+
+    /// Process a single interface method element
+    fn process_interface_method(
+        &mut self,
+        method_node: Node,
+        code: &str,
+        file_id: FileId,
+        counter: &mut SymbolCounter,
+        symbols: &mut Vec<Symbol>,
+        module_path: &str,
+        interface_name: &str,
+    ) {
+        let method_name = method_node
+            .children(&mut method_node.walk())
+            .find(|n| n.kind() == "field_identifier")
+            .map(|n| &code[n.byte_range()]);
+
+        if let Some(name) = method_name {
+            let signature = &code[method_node.byte_range()];
+            let visibility = self.determine_go_visibility(name);
+
+            let symbol = self.create_symbol(
+                counter.next_id(),
+                name.to_string(),
+                SymbolKind::Method,
+                file_id,
+                Range::new(
+                    method_node.start_position().row as u32,
+                    method_node.start_position().column as u16,
+                    method_node.end_position().row as u32,
+                    method_node.end_position().column as u16,
+                ),
+                Some(signature.to_string()),
+                None,
+                module_path,
+                visibility,
+            );
+            symbols.push(symbol);
+        }
+    }
+
+    /// Process a Go method declaration (function with receiver)
+    fn process_method_declaration(
         &mut self,
         node: Node,
         code: &str,
@@ -566,9 +520,9 @@ impl GoParser {
         let name_node = node.child_by_field_name("name")?;
         let name = &code[name_node.byte_range()];
 
-        let signature = self.extract_signature(node, code);
+        let signature = self.extract_method_signature(node, code);
         let doc_comment = self.extract_doc_comment(&node, code);
-        let visibility = self.determine_method_visibility(node, code);
+        let visibility = self.determine_go_visibility(name);
 
         Some(self.create_symbol(
             counter.next_id(),
@@ -588,39 +542,195 @@ impl GoParser {
         ))
     }
 
-    /// Process a property/field definition
-    fn process_property(
+    /// Process Go variable declarations
+    fn process_var_declaration(
         &mut self,
         node: Node,
         code: &str,
         file_id: FileId,
         counter: &mut SymbolCounter,
+        symbols: &mut Vec<Symbol>,
         module_path: &str,
-    ) -> Option<Symbol> {
-        let name_node = node.child_by_field_name("name")?;
-        let name = &code[name_node.byte_range()];
-
-        let visibility = self.determine_method_visibility(node, code);
-
-        Some(self.create_symbol(
-            counter.next_id(),
-            name.to_string(),
-            SymbolKind::Field,
-            file_id,
-            Range::new(
-                node.start_position().row as u32,
-                node.start_position().column as u16,
-                node.end_position().row as u32,
-                node.end_position().column as u16,
-            ),
-            None,
-            None,
-            module_path,
-            visibility,
-        ))
+    ) {
+        // var_declaration contains var_spec nodes
+        for child in node.children(&mut node.walk()) {
+            if child.kind() == "var_spec" {
+                self.process_var_spec(child, code, file_id, counter, symbols, module_path);
+            }
+        }
     }
 
-    /// Extract function/method signature
+    /// Process a single variable specification
+    fn process_var_spec(
+        &mut self,
+        node: Node,
+        code: &str,
+        file_id: FileId,
+        counter: &mut SymbolCounter,
+        symbols: &mut Vec<Symbol>,
+        module_path: &str,
+    ) {
+        let mut var_names = Vec::new();
+        let mut var_type = None;
+
+        for child in node.children(&mut node.walk()) {
+            match child.kind() {
+                "identifier" => {
+                    var_names.push(&code[child.byte_range()]);
+                }
+                "type_identifier" | "pointer_type" | "array_type" | "slice_type" | "map_type"
+                | "channel_type" => {
+                    var_type = Some(&code[child.byte_range()]);
+                }
+                _ => {}
+            }
+        }
+
+        // Create symbols for each variable name
+        for var_name in var_names {
+            let visibility = self.determine_go_visibility(var_name);
+            let signature = match var_type {
+                Some(typ) => format!("var {var_name} {typ}"),
+                None => format!("var {var_name}"),
+            };
+
+            let symbol = self.create_symbol(
+                counter.next_id(),
+                var_name.to_string(),
+                SymbolKind::Variable,
+                file_id,
+                Range::new(
+                    node.start_position().row as u32,
+                    node.start_position().column as u16,
+                    node.end_position().row as u32,
+                    node.end_position().column as u16,
+                ),
+                Some(signature),
+                None,
+                module_path,
+                visibility,
+            );
+            symbols.push(symbol);
+        }
+    }
+
+    /// Process Go constant declarations
+    fn process_const_declaration(
+        &mut self,
+        node: Node,
+        code: &str,
+        file_id: FileId,
+        counter: &mut SymbolCounter,
+        symbols: &mut Vec<Symbol>,
+        module_path: &str,
+    ) {
+        // const_declaration contains const_spec nodes
+        for child in node.children(&mut node.walk()) {
+            if child.kind() == "const_spec" {
+                self.process_const_spec(child, code, file_id, counter, symbols, module_path);
+            }
+        }
+    }
+
+    /// Process a single constant specification
+    fn process_const_spec(
+        &mut self,
+        node: Node,
+        code: &str,
+        file_id: FileId,
+        counter: &mut SymbolCounter,
+        symbols: &mut Vec<Symbol>,
+        module_path: &str,
+    ) {
+        let mut const_names = Vec::new();
+        let mut const_type = None;
+
+        for child in node.children(&mut node.walk()) {
+            match child.kind() {
+                "identifier" => {
+                    const_names.push(&code[child.byte_range()]);
+                }
+                "type_identifier" | "pointer_type" | "array_type" | "slice_type" | "map_type"
+                | "channel_type" => {
+                    const_type = Some(&code[child.byte_range()]);
+                }
+                _ => {}
+            }
+        }
+
+        // Create symbols for each constant name
+        for const_name in const_names {
+            let visibility = self.determine_go_visibility(const_name);
+            let signature = match const_type {
+                Some(typ) => format!("const {const_name} {typ}"),
+                None => format!("const {const_name}"),
+            };
+
+            let symbol = self.create_symbol(
+                counter.next_id(),
+                const_name.to_string(),
+                SymbolKind::Constant,
+                file_id,
+                Range::new(
+                    node.start_position().row as u32,
+                    node.start_position().column as u16,
+                    node.end_position().row as u32,
+                    node.end_position().column as u16,
+                ),
+                Some(signature),
+                None,
+                module_path,
+                visibility,
+            );
+            symbols.push(symbol);
+        }
+    }
+
+    /// Determine Go visibility based on capitalization
+    fn determine_go_visibility(&self, name: &str) -> Visibility {
+        if let Some(first_char) = name.chars().next() {
+            if first_char.is_uppercase() {
+                Visibility::Public
+            } else {
+                Visibility::Private
+            }
+        } else {
+            Visibility::Private
+        }
+    }
+
+    /// Extract signature for struct types
+    fn extract_struct_signature(&self, node: Node, code: &str) -> String {
+        let start = node.start_byte();
+        let mut end = node.end_byte();
+
+        // Find the struct body and exclude it, keeping only the header
+        if let Some(type_node) = node.child_by_field_name("type") {
+            if let Some(body) = type_node
+                .children(&mut type_node.walk())
+                .find(|n| n.kind() == "field_declaration_list")
+            {
+                end = body.start_byte();
+            }
+        }
+
+        code[start..end].trim().to_string()
+    }
+
+    /// Extract signature for Go methods (with receiver)
+    fn extract_method_signature(&self, node: Node, code: &str) -> String {
+        let start = node.start_byte();
+        let mut end = node.end_byte();
+
+        // Try to find the body and exclude it
+        if let Some(body) = node.child_by_field_name("body") {
+            end = body.start_byte();
+        }
+
+        code[start..end].trim().to_string()
+    }
+
+    /// Extract function signature for Go functions
     fn extract_signature(&self, node: Node, code: &str) -> String {
         // Extract the signature without the body
         let start = node.start_byte();
@@ -634,265 +744,30 @@ impl GoParser {
         code[start..end].trim().to_string()
     }
 
-    /// Extract class signature (with extends/implements)
-    fn extract_class_signature(&self, node: Node, code: &str) -> String {
-        let start = node.start_byte();
-        let mut end = node.end_byte();
-
-        // Find the class body and exclude it
-        if let Some(body) = node.child_by_field_name("body") {
-            end = body.start_byte();
-        }
-
-        code[start..end].trim().to_string()
-    }
-
-    /// Extract interface signature
+    /// Extract interface signature for Go interfaces
     fn extract_interface_signature(&self, node: Node, code: &str) -> String {
         let start = node.start_byte();
         let mut end = node.end_byte();
 
-        // Find the interface body and exclude it
-        if let Some(body) = node.child_by_field_name("body") {
-            end = body.start_byte();
+        // Find the interface body and exclude it, keeping only the declaration
+        if let Some(type_node) = node.child_by_field_name("type") {
+            if let Some(body_start) = type_node
+                .children(&mut type_node.walk())
+                .find(|n| n.kind() == "method_elem" || n.kind() == "type_elem")
+                .map(|n| n.start_byte())
+            {
+                end = body_start.saturating_sub(2); // Account for the opening brace
+            }
         }
 
         code[start..end].trim().to_string()
     }
 
-    /// Determine visibility based on export keywords
-    fn determine_visibility(&self, node: Node, code: &str) -> Visibility {
-        // Check if preceded by export keyword
-        if let Some(prev) = node.prev_sibling() {
-            if prev.kind() == "export_statement" {
-                return Visibility::Public;
-            }
-        }
+    // Go uses implicit interface implementation (structural typing)
+    // There are no explicit "implements" declarations to detect at parse time
+    // Implementation detection would require semantic analysis across files
 
-        // Check parent for export
-        if let Some(parent) = node.parent() {
-            if parent.kind() == "export_statement" {
-                return Visibility::Public;
-            }
-        }
-
-        // Check the signature itself
-        let signature = &code[node.byte_range()];
-        if signature.starts_with("export ") {
-            Visibility::Public
-        } else {
-            Visibility::Private
-        }
-    }
-
-    /// Determine method/property visibility
-    fn determine_method_visibility(&self, node: Node, code: &str) -> Visibility {
-        let signature = &code[node.byte_range()];
-
-        if signature.contains("private ") || signature.starts_with("#") {
-            Visibility::Private
-        } else if signature.contains("protected ") {
-            Visibility::Module // Map Go protected to Module visibility
-        } else {
-            Visibility::Public // Default for class members
-        }
-    }
-
-    /// Find implementations (extends and implements) in Go
-    fn find_implementations_in_node<'a>(
-        &self,
-        node: Node,
-        code: &'a str,
-        implementations: &mut Vec<(&'a str, &'a str, Range)>,
-        extends_only: bool,
-    ) {
-        match node.kind() {
-            "class_declaration" | "abstract_class_declaration" => {
-                // Get class name first
-                let class_name = node
-                    .children(&mut node.walk())
-                    .find(|n| n.kind() == "type_identifier")
-                    .map(|n| &code[n.byte_range()]);
-
-                if let Some(class_name) = class_name {
-                    // Look for class_heritage child node (not a field!)
-                    let mut cursor = node.walk();
-                    for child in node.children(&mut cursor) {
-                        if child.kind() == "class_heritage" {
-                            self.process_heritage_clauses(
-                                child,
-                                code,
-                                class_name,
-                                implementations,
-                                extends_only,
-                            );
-                        }
-                    }
-                }
-            }
-            "interface_declaration" => {
-                // Only process interface extends if we're looking for extends relationships
-                if extends_only {
-                    if let Some(interface_name_node) = node.child_by_field_name("name") {
-                        let interface_name = &code[interface_name_node.byte_range()];
-
-                        // Check for extends_type_clause - it's a child node, not a field!
-                        // ABI-15 exploration shows: interfaces use "extends_type_clause" not "extends_clause"
-                        let mut cursor = node.walk();
-                        for child in node.children(&mut cursor) {
-                            if child.kind() == "extends_type_clause" {
-                                // Extract the extended interface(s)
-                                // The extended type is in field "type"
-                                if let Some(type_node) = child.child_by_field_name("type") {
-                                    if let Some(base_name) = self.extract_type_name(type_node, code)
-                                    {
-                                        let range = Range::new(
-                                            type_node.start_position().row as u32,
-                                            type_node.start_position().column as u16,
-                                            type_node.end_position().row as u32,
-                                            type_node.end_position().column as u16,
-                                        );
-                                        implementations.push((interface_name, base_name, range));
-                                    }
-                                } else {
-                                    // Fallback: process as before for multiple extends
-                                    self.process_extends_clause(
-                                        child,
-                                        code,
-                                        interface_name,
-                                        implementations,
-                                    );
-                                }
-                            }
-                        }
-                    }
-                }
-                // When extends_only = false, skip interfaces entirely since they don't implement
-            }
-            _ => {}
-        }
-
-        // Recurse into children
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            self.find_implementations_in_node(child, code, implementations, extends_only);
-        }
-    }
-
-    /// Process heritage clauses (extends and implements)
-    fn process_heritage_clauses<'a>(
-        &self,
-        heritage_node: Node,
-        code: &'a str,
-        class_name: &'a str,
-        implementations: &mut Vec<(&'a str, &'a str, Range)>,
-        extends_only: bool,
-    ) {
-        let mut cursor = heritage_node.walk();
-        for child in heritage_node.children(&mut cursor) {
-            match child.kind() {
-                "extends_clause" => {
-                    // Process extends clause ONLY when looking for extends relationships
-                    // This maintains separation between extends and implements
-                    if extends_only {
-                        let mut extends_cursor = child.walk();
-                        for extends_child in child.children(&mut extends_cursor) {
-                            if extends_child.kind() == "type_identifier"
-                                || extends_child.kind() == "identifier"
-                                || extends_child.kind() == "nested_type_identifier"
-                                || extends_child.kind() == "generic_type"
-                            {
-                                if let Some(base_name) = self.extract_type_name(extends_child, code)
-                                {
-                                    let range = Range::new(
-                                        extends_child.start_position().row as u32,
-                                        extends_child.start_position().column as u16,
-                                        extends_child.end_position().row as u32,
-                                        extends_child.end_position().column as u16,
-                                    );
-                                    implementations.push((class_name, base_name, range));
-                                }
-                            }
-                        }
-                    }
-                }
-                "implements_clause" => {
-                    // Only process implements clause when NOT looking for extends only
-                    if !extends_only {
-                        // Skip "implements" keyword, get all the interfaces
-                        let mut impl_cursor = child.walk();
-                        for impl_child in child.children(&mut impl_cursor) {
-                            if impl_child.kind() == "type_identifier"
-                                || impl_child.kind() == "identifier"
-                                || impl_child.kind() == "nested_type_identifier"
-                                || impl_child.kind() == "generic_type"
-                            {
-                                if let Some(interface_name) =
-                                    self.extract_type_name(impl_child, code)
-                                {
-                                    let range = Range::new(
-                                        impl_child.start_position().row as u32,
-                                        impl_child.start_position().column as u16,
-                                        impl_child.end_position().row as u32,
-                                        impl_child.end_position().column as u16,
-                                    );
-                                    implementations.push((class_name, interface_name, range));
-                                }
-                            }
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-
-    /// Process extends clause for interfaces
-    fn process_extends_clause<'a>(
-        &self,
-        extends_node: Node,
-        code: &'a str,
-        interface_name: &'a str,
-        implementations: &mut Vec<(&'a str, &'a str, Range)>,
-    ) {
-        let mut cursor = extends_node.walk();
-        for child in extends_node.children(&mut cursor) {
-            if child.kind() == "type_identifier" || child.kind() == "nested_type_identifier" {
-                if let Some(base_interface) = self.extract_type_name(child, code) {
-                    let range = Range::new(
-                        child.start_position().row as u32,
-                        child.start_position().column as u16,
-                        child.end_position().row as u32,
-                        child.end_position().column as u16,
-                    );
-                    implementations.push((interface_name, base_interface, range));
-                }
-            }
-        }
-    }
-
-    /// Extract type name from a type node
-    #[allow(clippy::only_used_in_recursion)]
-    fn extract_type_name<'a>(&self, node: Node, code: &'a str) -> Option<&'a str> {
-        match node.kind() {
-            "type_identifier" | "identifier" => Some(&code[node.byte_range()]),
-            "nested_type_identifier" => {
-                // For qualified names like Namespace.Type, get the full name
-                Some(&code[node.byte_range()])
-            }
-            "generic_type" => {
-                // For generic types like Array<T>, get just the base type
-                if let Some(name_node) = node.child_by_field_name("name") {
-                    self.extract_type_name(name_node, code)
-                } else {
-                    None
-                }
-            }
-            _ => None,
-        }
-    }
-
-    /// Extract imports from AST node recursively
+    /// Extract imports from AST node recursively  
     fn extract_imports_from_node(
         &self,
         node: Node,
@@ -901,14 +776,8 @@ impl GoParser {
         imports: &mut Vec<Import>,
     ) {
         match node.kind() {
-            "import_statement" => {
-                self.process_import_statement(node, code, file_id, imports);
-            }
-            "export_statement" => {
-                // Check if it's a re-export (has source)
-                if node.child_by_field_name("source").is_some() {
-                    self.process_export_statement(node, code, file_id, imports);
-                }
+            "import_declaration" => {
+                self.process_go_import_declaration(node, code, file_id, imports);
             }
             _ => {
                 // Recurse into children
@@ -920,203 +789,86 @@ impl GoParser {
         }
     }
 
-    /// Process an import statement node
-    fn process_import_statement(
+    /// Process a Go import declaration node
+    fn process_go_import_declaration(
         &self,
         node: Node,
         code: &str,
         file_id: FileId,
         imports: &mut Vec<Import>,
     ) {
-        eprintln!(
-            "ENTERING process_import_statement, code: {}",
-            &code[node.byte_range()]
-        );
-
-        // Debug: print all children
-        let mut cursor = node.walk();
-        eprintln!("  Node has {} children:", node.child_count());
-
-        // Check if this is a type-only import (has 'type' keyword after 'import')
-        let mut is_type_only = false;
-        for (i, child) in node.children(&mut cursor).enumerate() {
-            eprintln!(
-                "    child[{}]: kind='{}', field_name={:?}",
-                i,
-                child.kind(),
-                node.field_name_for_child(i as u32)
-            );
-            // Check for 'type' keyword (appears in type-only imports)
-            if child.kind() == "type" && i == 1 {
-                is_type_only = true;
-                eprintln!("    Detected type-only import!");
-            }
-        }
-
-        // Get the source (the module being imported from)
-        let source_node = match node.child_by_field_name("source") {
-            Some(n) => n,
-            None => return,
-        };
-
-        let source_path = &code[source_node.byte_range()];
-        let source_path = source_path.trim_matches(|c| c == '"' || c == '\'' || c == '`');
-
-        // Process import clause (what's being imported)
-        // Note: import_clause is not a named field, we need to find it by kind
-        let import_clause = {
-            let mut cursor = node.walk();
-            node.children(&mut cursor)
-                .find(|c| c.kind() == "import_clause")
-        };
-
-        if let Some(import_clause) = import_clause {
-            eprintln!(
-                "  Found import_clause: {}",
-                &code[import_clause.byte_range()]
-            );
-
-            // Check for different import types
-            let mut has_default = false;
-            let mut has_named = false;
-            let mut has_namespace = false;
-            let mut default_name = None;
-            let mut namespace_name = None;
-
-            let mut cursor = import_clause.walk();
-            for child in import_clause.children(&mut cursor) {
-                eprintln!(
-                    "    Child kind: {}, text: {}",
-                    child.kind(),
-                    &code[child.byte_range()]
-                );
-                match child.kind() {
-                    "identifier" => {
-                        // Default import
-                        has_default = true;
-                        let name = code[child.byte_range()].to_string();
-                        eprintln!("      Setting default_name = {name}");
-                        default_name = Some(name);
-                    }
-                    "named_imports" => {
-                        // Named imports exist
-                        has_named = true;
-                    }
-                    "namespace_import" => {
-                        // * as name
-                        has_namespace = true;
-                        let mut ns_cursor = child.walk();
-                        let children: Vec<_> = child.children(&mut ns_cursor).collect();
-                        if let Some(identifier) =
-                            children.iter().rev().find(|n| n.kind() == "identifier")
-                        {
-                            namespace_name = Some(code[identifier.byte_range()].to_string());
+        // import_declaration can contain either a single import_spec or import_spec_list
+        for child in node.children(&mut node.walk()) {
+            match child.kind() {
+                "import_spec" => {
+                    self.process_go_import_spec(child, code, file_id, imports);
+                }
+                "import_spec_list" => {
+                    // Process each import_spec in the list
+                    for spec_child in child.children(&mut child.walk()) {
+                        if spec_child.kind() == "import_spec" {
+                            self.process_go_import_spec(spec_child, code, file_id, imports);
                         }
                     }
-                    _ => {}
                 }
+                _ => {}
             }
-
-            // Add imports based on what we found
-            // Following Rust pattern: one Import per module, with alias for default/namespace
-            eprintln!(
-                "  Summary: has_default={has_default}, has_named={has_named}, has_namespace={has_namespace}"
-            );
-            eprintln!("  default_name={default_name:?}, namespace_name={namespace_name:?}");
-
-            if has_namespace {
-                // Namespace import: import * as utils from './utils'
-                imports.push(Import {
-                    path: source_path.to_string(),
-                    alias: namespace_name,
-                    file_id,
-                    is_glob: true,
-                    is_type_only,
-                });
-            } else if has_default && has_named {
-                // Mixed import: import React, { Component } from 'react'
-                // We create one import with the default as alias
-                imports.push(Import {
-                    path: source_path.to_string(),
-                    alias: default_name,
-                    file_id,
-                    is_glob: false,
-                    is_type_only,
-                });
-            } else if has_default {
-                // Default only: import React from 'react'
-                eprintln!(
-                    "  Adding default import: path='{source_path}', alias={default_name:?}, type_only={is_type_only}"
-                );
-                imports.push(Import {
-                    path: source_path.to_string(),
-                    alias: default_name,
-                    file_id,
-                    is_glob: false,
-                    is_type_only,
-                });
-            } else if has_named {
-                // Named only: import { Component } from 'react'
-                imports.push(Import {
-                    path: source_path.to_string(),
-                    alias: None,
-                    file_id,
-                    is_glob: false,
-                    is_type_only,
-                });
-            }
-        } else {
-            // Side-effect import (no import clause)
-            imports.push(Import {
-                path: source_path.to_string(),
-                alias: None,
-                file_id,
-                is_glob: false,
-                is_type_only: false, // Side-effect imports are never type-only
-            });
         }
     }
 
-    /// Process export statements (for re-exports)
-    fn process_export_statement(
+    /// Process a single Go import_spec node
+    fn process_go_import_spec(
         &self,
         node: Node,
         code: &str,
         file_id: FileId,
         imports: &mut Vec<Import>,
     ) {
-        // Get the source module
-        let source_node = match node.child_by_field_name("source") {
-            Some(n) => n,
-            None => return,
-        };
+        let mut import_path = None;
+        let mut import_alias = None;
+        let mut is_dot_import = false;
+        let mut is_blank_import = false;
 
-        let source_path = &code[source_node.byte_range()];
-        let source_path = source_path.trim_matches(|c| c == '"' || c == '\'' || c == '`');
+        for child in node.children(&mut node.walk()) {
+            match child.kind() {
+                "interpreted_string_literal" | "raw_string_literal" => {
+                    // This is the import path
+                    let path_text = &code[child.byte_range()];
+                    // Remove quotes
+                    import_path =
+                        Some(path_text.trim_matches(|c| c == '"' || c == '`').to_string());
+                }
+                "package_identifier" => {
+                    // This is an alias (e.g., "import f 'fmt'")
+                    import_alias = Some(code[child.byte_range()].to_string());
+                }
+                "dot" => {
+                    // Dot import (e.g., "import . 'fmt'")
+                    is_dot_import = true;
+                }
+                "blank_identifier" => {
+                    // Blank import (e.g., "import _ 'database/sql'")
+                    is_blank_import = true;
+                }
+                _ => {}
+            }
+        }
 
-        // Check if it's a type-only export
-        let node_text = &code[node.byte_range()];
-        let is_type_only = node_text.starts_with("export type");
-
-        // Check what's being exported
-        if node_text.contains("* from") {
-            // export * from './module'
-            imports.push(Import {
-                path: source_path.to_string(),
-                alias: None,
+        if let Some(path) = import_path {
+            let import = Import {
+                path,
+                alias: if is_dot_import {
+                    Some(".".to_string())
+                } else if is_blank_import {
+                    Some("_".to_string())
+                } else {
+                    import_alias
+                },
                 file_id,
-                is_glob: true,
-                is_type_only,
-            });
-        } else {
-            // Named re-exports - just track the module being imported from
-            imports.push(Import {
-                path: source_path.to_string(),
-                alias: None,
-                file_id,
-                is_glob: false,
-                is_type_only,
-            });
+                is_glob: is_dot_import, // Dot imports are like glob imports
+                is_type_only: false,    // Go doesn't have type-only imports
+            };
+            imports.push(import);
         }
     }
 
@@ -1131,15 +883,14 @@ impl GoParser {
     ) {
         // Handle function context - track which function we're inside
         let function_context = if node.kind() == "function_declaration"
-            || node.kind() == "method_definition"
-            || node.kind() == "arrow_function"
-            || node.kind() == "function_expression"
+            || node.kind() == "method_declaration"
+            || node.kind() == "func_literal"
         {
             // Extract function name
             if let Some(name_node) = node.child_by_field_name("name") {
                 Some(&code[name_node.byte_range()])
             } else {
-                // Arrow functions might not have a name, check parent
+                // Function literals might not have a name
                 current_function
             }
         } else {
@@ -1150,7 +901,7 @@ impl GoParser {
         if node.kind() == "call_expression" {
             // Skip if it's a method call (handled by find_method_calls)
             if let Some(function_node) = node.child_by_field_name("function") {
-                if function_node.kind() != "member_expression" {
+                if function_node.kind() != "selector_expression" {
                     // It's a regular function call
                     if let Some(fn_name) = Self::extract_function_name(&function_node, code) {
                         if let Some(context) = function_context {
@@ -1181,11 +932,8 @@ impl GoParser {
         uses: &mut Vec<(&'a str, &'a str, Range)>,
     ) {
         match node.kind() {
-            // Function declarations with parameters and return types
-            "function_declaration"
-            | "function_signature"
-            | "method_definition"
-            | "method_signature" => {
+            // Go function and method declarations with parameters and return types
+            "function_declaration" | "method_declaration" => {
                 let context_name = node
                     .child_by_field_name("name")
                     .map(|n| &code[n.byte_range()])
@@ -1193,117 +941,55 @@ impl GoParser {
 
                 // Check parameters
                 if let Some(params) = node.child_by_field_name("parameters") {
-                    self.extract_parameter_types(params, code, context_name, uses);
+                    self.extract_go_parameter_types(params, code, context_name, uses);
                 }
 
-                // Check return type - try both "type" and "return_type" fields
-                if let Some(return_type) = node.child_by_field_name("type") {
-                    self.extract_type_from_annotation(&return_type, code, context_name, uses);
-                } else if let Some(return_type) = node.child_by_field_name("return_type") {
-                    self.extract_type_from_annotation(&return_type, code, context_name, uses);
-                } else {
-                    // Also look for type_annotation as a direct child (not a field)
-                    let mut cursor = node.walk();
-                    for child in node.children(&mut cursor) {
-                        if child.kind() == "type_annotation" {
-                            // Make sure it's the return type (comes after parameters)
-                            if child.start_position().column > 30 {
-                                // Heuristic: return types are usually after column 30
-                                self.extract_type_from_annotation(&child, code, context_name, uses);
+                // Check return type (Go uses "result" field)
+                if let Some(result) = node.child_by_field_name("result") {
+                    self.extract_go_type_reference(&result, code, context_name, uses);
+                }
+            }
+
+            // Go struct types
+            "struct_type" => {
+                // Extract field types from struct
+                for child in node.children(&mut node.walk()) {
+                    if child.kind() == "field_declaration_list" {
+                        for field_child in child.children(&mut child.walk()) {
+                            if field_child.kind() == "field_declaration" {
+                                self.extract_go_field_types(&field_child, code, "struct", uses);
                             }
                         }
                     }
                 }
             }
 
-            // Class declarations with fields
-            "class_declaration" | "abstract_class_declaration" => {
-                let class_name = node
-                    .child_by_field_name("name")
-                    .map(|n| &code[n.byte_range()])
-                    .unwrap_or("anonymous");
+            // Go variable declarations
+            "var_spec" | "const_spec" => {
+                if let Some(identifier) = node
+                    .children(&mut node.walk())
+                    .find(|n| n.kind() == "identifier")
+                {
+                    let var_name = &code[identifier.byte_range()];
 
-                // Check for class_heritage which contains extends and implements
-                let mut cursor = node.walk();
-                for child in node.children(&mut cursor) {
-                    if child.kind() == "class_heritage" {
-                        // Look for implements_clause and extends_clause within heritage
-                        let mut heritage_cursor = child.walk();
-                        for heritage_child in child.children(&mut heritage_cursor) {
-                            if heritage_child.kind() == "implements_clause" {
-                                self.extract_implements_types(
-                                    &heritage_child,
-                                    code,
-                                    class_name,
-                                    uses,
-                                );
-                            } else if heritage_child.kind() == "extends_clause" {
-                                self.extract_extends_types(&heritage_child, code, class_name, uses);
-                            }
+                    // Look for type reference
+                    for child in node.children(&mut node.walk()) {
+                        if matches!(
+                            child.kind(),
+                            "type_identifier"
+                                | "pointer_type"
+                                | "array_type"
+                                | "slice_type"
+                                | "map_type"
+                                | "channel_type"
+                        ) {
+                            self.extract_go_type_reference(&child, code, var_name, uses);
                         }
                     }
                 }
-
-                // Check class body for field types
-                if let Some(body) = node.child_by_field_name("body") {
-                    self.extract_class_field_types(&body, code, class_name, uses);
-                }
             }
 
-            // Variable declarations with type annotations
-            "variable_declarator" => {
-                if let Some(name_node) = node.child_by_field_name("name") {
-                    let var_name = &code[name_node.byte_range()];
-
-                    // Look for type annotation
-                    if let Some(type_ann) = node.child_by_field_name("type") {
-                        self.extract_type_from_annotation(&type_ann, code, var_name, uses);
-                    }
-                }
-            }
-
-            // Interface declarations with extends
-            "interface_declaration" => {
-                let interface_name = node
-                    .child_by_field_name("name")
-                    .map(|n| &code[n.byte_range()])
-                    .unwrap_or("anonymous");
-
-                // Check extends clause - look through all children
-                let mut cursor = node.walk();
-                for child in node.children(&mut cursor) {
-                    if child.kind() == "extends_clause" || child.kind() == "extends_type_clause" {
-                        self.extract_extends_types(&child, code, interface_name, uses);
-                    }
-                }
-            }
-
-            // NEW: Handle constructor calls with generic type arguments
-            // Example: new Map<string, Session>()
-            "new_expression" => {
-                // Get the context for the variable this is assigned to
-                // We need to traverse up to find the variable_declarator
-                let context_name = if let Some(parent) = node.parent() {
-                    if parent.kind() == "variable_declarator" {
-                        parent
-                            .child_by_field_name("name")
-                            .map(|n| &code[n.byte_range()])
-                            .unwrap_or("anonymous")
-                    } else {
-                        "anonymous"
-                    }
-                } else {
-                    "anonymous"
-                };
-
-                // Check for type_arguments field
-                if let Some(type_args) = node.child_by_field_name("type_arguments") {
-                    self.extract_types_from_type_arguments(&type_args, code, context_name, uses);
-                }
-            }
-
-            // NEW: Handle function calls with generic type arguments
-            // Example: useState<Session>(null)
+            // Go function calls - look for calls to generic functions
             "call_expression" => {
                 // Get the function being called for context
                 let func_name = node
@@ -1311,10 +997,8 @@ impl GoParser {
                     .map(|n| &code[n.byte_range()])
                     .unwrap_or("anonymous");
 
-                // Check for type_arguments field
-                if let Some(type_args) = node.child_by_field_name("type_arguments") {
-                    self.extract_types_from_type_arguments(&type_args, code, func_name, uses);
-                }
+                // For Go, we mainly track type uses in function signatures and variable declarations
+                // Function calls don't typically have explicit type arguments like in TypeScript
             }
 
             _ => {}
@@ -1326,7 +1010,8 @@ impl GoParser {
         }
     }
 
-    fn extract_parameter_types<'a>(
+    /// Extract type references from Go parameter list
+    fn extract_go_parameter_types<'a>(
         &self,
         params_node: tree_sitter::Node,
         code: &'a str,
@@ -1334,26 +1019,57 @@ impl GoParser {
         uses: &mut Vec<(&'a str, &'a str, Range)>,
     ) {
         for param in params_node.children(&mut params_node.walk()) {
-            if matches!(
-                param.kind(),
-                "required_parameter" | "optional_parameter" | "rest_parameter"
-            ) {
-                if let Some(type_ann) = param.child_by_field_name("type") {
-                    self.extract_type_from_annotation(&type_ann, code, context_name, uses);
+            if param.kind() == "parameter_declaration" {
+                // Go parameters have type after name
+                for child in param.children(&mut param.walk()) {
+                    if matches!(
+                        child.kind(),
+                        "type_identifier"
+                            | "pointer_type"
+                            | "array_type"
+                            | "slice_type"
+                            | "map_type"
+                            | "channel_type"
+                    ) {
+                        self.extract_go_type_reference(&child, code, context_name, uses);
+                    }
                 }
             }
         }
     }
 
-    fn extract_type_from_annotation<'a>(
+    /// Extract type references from Go field declarations
+    fn extract_go_field_types<'a>(
+        &self,
+        field_node: &tree_sitter::Node,
+        code: &'a str,
+        context_name: &'a str,
+        uses: &mut Vec<(&'a str, &'a str, Range)>,
+    ) {
+        for child in field_node.children(&mut field_node.walk()) {
+            if matches!(
+                child.kind(),
+                "type_identifier"
+                    | "pointer_type"
+                    | "array_type"
+                    | "slice_type"
+                    | "map_type"
+                    | "channel_type"
+            ) {
+                self.extract_go_type_reference(&child, code, context_name, uses);
+            }
+        }
+    }
+
+    /// Extract Go type reference and add to uses
+    fn extract_go_type_reference<'a>(
         &self,
         type_node: &tree_sitter::Node,
         code: &'a str,
         context_name: &'a str,
         uses: &mut Vec<(&'a str, &'a str, Range)>,
     ) {
-        // Find the actual type identifier
-        if let Some(type_name) = self.extract_simple_type_name(type_node, code) {
+        if let Some(type_name) = self.extract_go_type_name(type_node, code) {
             let range = Range::new(
                 type_node.start_position().row as u32,
                 type_node.start_position().column as u16,
@@ -1364,147 +1080,48 @@ impl GoParser {
         }
     }
 
+    /// Extract type name from Go type node
     #[allow(clippy::only_used_in_recursion)]
-    fn extract_simple_type_name<'a>(
-        &self,
-        node: &tree_sitter::Node,
-        code: &'a str,
-    ) -> Option<&'a str> {
+    fn extract_go_type_name<'a>(&self, node: &tree_sitter::Node, code: &'a str) -> Option<&'a str> {
         match node.kind() {
             "type_identifier" => Some(&code[node.byte_range()]),
-            "predefined_type" => Some(&code[node.byte_range()]),
-            "generic_type" => {
-                // For generic types like Array<User>, extract the base type
-                if let Some(name) = node.child_by_field_name("name") {
-                    return Some(&code[name.byte_range()]);
-                }
-                None
+            "qualified_type" => {
+                // For qualified types like pkg.Type, get the full name
+                Some(&code[node.byte_range()])
             }
-            _ => {
-                // Try to find a type_identifier child
-                for child in node.children(&mut node.walk()) {
-                    if let Some(name) = self.extract_simple_type_name(&child, code) {
-                        return Some(name);
-                    }
-                }
-                None
-            }
-        }
-    }
-
-    fn extract_class_field_types<'a>(
-        &self,
-        body_node: &tree_sitter::Node,
-        code: &'a str,
-        class_name: &'a str,
-        uses: &mut Vec<(&'a str, &'a str, Range)>,
-    ) {
-        for child in body_node.children(&mut body_node.walk()) {
-            if matches!(
-                child.kind(),
-                "public_field_definition" | "property_declaration"
-            ) {
-                if let Some(type_ann) = child.child_by_field_name("type") {
-                    self.extract_type_from_annotation(&type_ann, code, class_name, uses);
+            "pointer_type" => {
+                // For pointer types like *User, get the underlying type
+                if let Some(child) = node.children(&mut node.walk()).nth(1) {
+                    self.extract_go_type_name(&child, code)
+                } else {
+                    None
                 }
             }
-        }
-    }
-
-    fn extract_implements_types<'a>(
-        &self,
-        implements_node: &tree_sitter::Node,
-        code: &'a str,
-        class_name: &'a str,
-        uses: &mut Vec<(&'a str, &'a str, Range)>,
-    ) {
-        for child in implements_node.children(&mut implements_node.walk()) {
-            if matches!(child.kind(), "type_identifier" | "generic_type") {
-                if let Some(type_name) = self.extract_simple_type_name(&child, code) {
-                    let range = Range::new(
-                        child.start_position().row as u32,
-                        child.start_position().column as u16,
-                        child.end_position().row as u32,
-                        child.end_position().column as u16,
-                    );
-                    uses.push((class_name, type_name, range));
+            "array_type" | "slice_type" => {
+                // For array/slice types like []User, get the element type
+                if let Some(element_node) = node.child_by_field_name("element") {
+                    self.extract_go_type_name(&element_node, code)
+                } else {
+                    None
                 }
             }
-        }
-    }
-
-    fn extract_extends_types<'a>(
-        &self,
-        extends_node: &tree_sitter::Node,
-        code: &'a str,
-        interface_name: &'a str,
-        uses: &mut Vec<(&'a str, &'a str, Range)>,
-    ) {
-        for child in extends_node.children(&mut extends_node.walk()) {
-            if matches!(child.kind(), "type_identifier" | "generic_type") {
-                if let Some(type_name) = self.extract_simple_type_name(&child, code) {
-                    let range = Range::new(
-                        child.start_position().row as u32,
-                        child.start_position().column as u16,
-                        child.end_position().row as u32,
-                        child.end_position().column as u16,
-                    );
-                    uses.push((interface_name, type_name, range));
+            "map_type" => {
+                // For map types like map[string]User, get the value type
+                if let Some(value_node) = node.child_by_field_name("value") {
+                    self.extract_go_type_name(&value_node, code)
+                } else {
+                    None
                 }
             }
-        }
-    }
-
-    /// Extract type references from type_arguments node
-    /// Handles cases like: <string, Session> or <Map<string, User>>
-    #[allow(clippy::only_used_in_recursion)]
-    fn extract_types_from_type_arguments<'a>(
-        &self,
-        type_args_node: &tree_sitter::Node,
-        code: &'a str,
-        context_name: &'a str,
-        uses: &mut Vec<(&'a str, &'a str, Range)>,
-    ) {
-        for child in type_args_node.children(&mut type_args_node.walk()) {
-            match child.kind() {
-                // Simple type identifiers like Session, User
-                "type_identifier" => {
-                    let type_name = &code[child.byte_range()];
-                    let range = Range::new(
-                        child.start_position().row as u32,
-                        child.start_position().column as u16,
-                        child.end_position().row as u32,
-                        child.end_position().column as u16,
-                    );
-                    uses.push((context_name, type_name, range));
+            "channel_type" => {
+                // For channel types like chan User, get the element type
+                if let Some(element_node) = node.child_by_field_name("element") {
+                    self.extract_go_type_name(&element_node, code)
+                } else {
+                    None
                 }
-                // Generic types like Map<string, User>
-                "generic_type" => {
-                    // Extract the base type (e.g., Map)
-                    if let Some(name_node) = child.child_by_field_name("name") {
-                        let type_name = &code[name_node.byte_range()];
-                        let range = Range::new(
-                            name_node.start_position().row as u32,
-                            name_node.start_position().column as u16,
-                            name_node.end_position().row as u32,
-                            name_node.end_position().column as u16,
-                        );
-                        uses.push((context_name, type_name, range));
-                    }
-                    // Recursively extract nested type arguments
-                    if let Some(nested_args) = child.child_by_field_name("type_arguments") {
-                        self.extract_types_from_type_arguments(
-                            &nested_args,
-                            code,
-                            context_name,
-                            uses,
-                        );
-                    }
-                }
-                // Skip punctuation and predefined types
-                "<" | ">" | "," | "predefined_type" => {}
-                _ => {}
             }
+            _ => None,
         }
     }
 
@@ -1516,83 +1133,56 @@ impl GoParser {
         defines: &mut Vec<(&'a str, &'a str, Range)>,
     ) {
         match node.kind() {
-            // Interface method signatures
-            "interface_declaration" => {
-                let interface_name = node
-                    .child_by_field_name("name")
-                    .map(|n| &code[n.byte_range()])
-                    .unwrap_or("anonymous");
+            // Go interface types with method elements
+            "interface_type" => {
+                // We need to get the interface name from the parent type_spec
+                let interface_name = "interface"; // Default name, could be improved
 
-                if let Some(body) = node.child_by_field_name("body") {
-                    for child in body.children(&mut body.walk()) {
-                        if child.kind() == "method_signature" {
-                            if let Some(name_node) = child.child_by_field_name("name") {
-                                let method_name = &code[name_node.byte_range()];
-                                let range = Range::new(
-                                    child.start_position().row as u32,
-                                    child.start_position().column as u16,
-                                    child.end_position().row as u32,
-                                    child.end_position().column as u16,
-                                );
-                                defines.push((interface_name, method_name, range));
-                            }
+                for child in node.children(&mut node.walk()) {
+                    if child.kind() == "method_elem" {
+                        // Extract method name from method_elem
+                        if let Some(name_node) = child
+                            .children(&mut child.walk())
+                            .find(|n| n.kind() == "field_identifier")
+                        {
+                            let method_name = &code[name_node.byte_range()];
+                            let range = Range::new(
+                                child.start_position().row as u32,
+                                child.start_position().column as u16,
+                                child.end_position().row as u32,
+                                child.end_position().column as u16,
+                            );
+                            defines.push((interface_name, method_name, range));
                         }
                     }
                 }
             }
 
-            // Class method definitions
-            "class_declaration" | "abstract_class_declaration" => {
-                let class_name = node
-                    .child_by_field_name("name")
-                    .map(|n| &code[n.byte_range()])
-                    .unwrap_or("anonymous");
+            // Go method declarations (methods with receivers)
+            "method_declaration" => {
+                if let Some(name_node) = node.child_by_field_name("name") {
+                    let method_name = &code[name_node.byte_range()];
 
-                if let Some(body) = node.child_by_field_name("body") {
-                    for child in body.children(&mut body.walk()) {
-                        if matches!(
-                            child.kind(),
-                            "method_definition" | "abstract_method_signature"
-                        ) {
-                            if let Some(name_node) = child.child_by_field_name("name") {
-                                let method_name = &code[name_node.byte_range()];
-                                let range = Range::new(
-                                    child.start_position().row as u32,
-                                    child.start_position().column as u16,
-                                    child.end_position().row as u32,
-                                    child.end_position().column as u16,
-                                );
-                                defines.push((class_name, method_name, range));
-                            }
-                        }
-                    }
-                }
-            }
+                    // Extract receiver type for context
+                    let receiver_type = if let Some(receiver) = node.child_by_field_name("receiver")
+                    {
+                        // Get the receiver type from the parameter list
+                        receiver
+                            .children(&mut receiver.walk())
+                            .find(|n| matches!(n.kind(), "type_identifier" | "pointer_type"))
+                            .map(|n| &code[n.byte_range()])
+                            .unwrap_or("unknown")
+                    } else {
+                        "unknown"
+                    };
 
-            // Type aliases with object types (method signatures in type literals)
-            "type_alias_declaration" => {
-                let type_name = node
-                    .child_by_field_name("name")
-                    .map(|n| &code[n.byte_range()])
-                    .unwrap_or("anonymous");
-
-                if let Some(value) = node.child_by_field_name("value") {
-                    if value.kind() == "object_type" {
-                        for child in value.children(&mut value.walk()) {
-                            if child.kind() == "method_signature" {
-                                if let Some(name_node) = child.child_by_field_name("name") {
-                                    let method_name = &code[name_node.byte_range()];
-                                    let range = Range::new(
-                                        child.start_position().row as u32,
-                                        child.start_position().column as u16,
-                                        child.end_position().row as u32,
-                                        child.end_position().column as u16,
-                                    );
-                                    defines.push((type_name, method_name, range));
-                                }
-                            }
-                        }
-                    }
+                    let range = Range::new(
+                        node.start_position().row as u32,
+                        node.start_position().column as u16,
+                        node.end_position().row as u32,
+                        node.end_position().column as u16,
+                    );
+                    defines.push((receiver_type, method_name, range));
                 }
             }
 
@@ -1613,11 +1203,10 @@ impl GoParser {
         current_function: Option<&str>,
         calls: &mut Vec<MethodCall>,
     ) {
-        // Track function context (same as find_calls)
+        // Track function context for Go
         let function_context = if node.kind() == "function_declaration"
-            || node.kind() == "method_definition"
-            || node.kind() == "arrow_function"
-            || node.kind() == "function_expression"
+            || node.kind() == "method_declaration"
+            || node.kind() == "func_literal"
         {
             // Extract function name
             if let Some(name_node) = node.child_by_field_name("name") {
@@ -1629,13 +1218,13 @@ impl GoParser {
             current_function
         };
 
-        // Check for method calls
+        // Check for method calls (Go uses selector_expression)
         if node.kind() == "call_expression" {
             if let Some(function_node) = node.child_by_field_name("function") {
-                if function_node.kind() == "member_expression" {
+                if function_node.kind() == "selector_expression" {
                     // It's a method call!
                     if let Some((receiver, method_name, is_static)) =
-                        self.extract_method_signature(&function_node, code)
+                        self.extract_go_method_signature(&function_node, code)
                     {
                         if let Some(context) = function_context {
                             let range = Range {
@@ -1667,22 +1256,21 @@ impl GoParser {
         }
     }
 
-    fn extract_method_signature<'a>(
+    fn extract_go_method_signature<'a>(
         &self,
-        member_expr: &tree_sitter::Node,
+        selector_expr: &tree_sitter::Node,
         code: &'a str,
     ) -> Option<(Option<&'a str>, &'a str, bool)> {
-        // member_expression has 'object' and 'property' fields
-        let object = member_expr.child_by_field_name("object");
-        let property = member_expr.child_by_field_name("property");
+        // selector_expression has 'operand' and 'field' fields
+        let operand = selector_expr.child_by_field_name("operand");
+        let field = selector_expr.child_by_field_name("field");
 
-        match (object, property) {
+        match (operand, field) {
             (Some(obj), Some(prop)) => {
                 let receiver = &code[obj.byte_range()];
                 let method_name = &code[prop.byte_range()];
 
-                // Check if it's a static call (Go doesn't have :: but uses .)
-                // We can't easily distinguish static from instance in Go
+                // In Go, we can't easily distinguish between static and instance calls
                 // without type information, so we'll assume instance calls
                 let is_static = false;
 
@@ -1695,20 +1283,9 @@ impl GoParser {
     fn extract_function_name<'a>(node: &tree_sitter::Node, code: &'a str) -> Option<&'a str> {
         match node.kind() {
             "identifier" => Some(&code[node.byte_range()]),
-            "await_expression" => {
-                // Handle await foo()
-                if let Some(expr) = node.child_by_field_name("expression") {
-                    Self::extract_function_name(&expr, code)
-                } else {
-                    // Sometimes await_expression has the identifier as a direct child
-                    let mut cursor = node.walk();
-                    for child in node.children(&mut cursor) {
-                        if let Some(name) = Self::extract_function_name(&child, code) {
-                            return Some(name);
-                        }
-                    }
-                    None
-                }
+            "selector_expression" => {
+                // For qualified function calls like pkg.Function()
+                Some(&code[node.byte_range()])
             }
             _ => None,
         }
@@ -1751,26 +1328,64 @@ impl LanguageParser for GoParser {
     }
 
     fn extract_doc_comment(&self, node: &Node, code: &str) -> Option<String> {
-        // Look for JSDoc/TSDoc comments (/** ... */)
-        if let Some(prev) = node.prev_sibling() {
-            if prev.kind() == "comment" {
-                let comment = &code[prev.byte_range()];
-                if comment.starts_with("/**") {
-                    // Clean up the comment
-                    let cleaned = comment
-                        .trim_start_matches("/**")
-                        .trim_end_matches("*/")
-                        .lines()
-                        .map(|line| line.trim_start_matches(" * ").trim_start_matches(" *"))
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                        .trim()
-                        .to_string();
+        // Extract Go-style documentation comments (//)
+        // For type_spec nodes, check the parent type_declaration for comments
+        // For other nodes, check the current node's previous siblings
 
-                    return Some(cleaned);
+        let comment_node = if node.kind() == "type_spec" {
+            // For type_spec, check parent's (type_declaration) previous siblings
+            node.parent()
+        } else {
+            // For other nodes, check current node's previous siblings
+            Some(*node)
+        };
+
+        let search_node = comment_node?;
+
+        let mut doc_lines = Vec::new();
+        let mut current = search_node.prev_sibling();
+
+        // Walk backwards through previous siblings to collect consecutive comment lines
+        while let Some(sibling) = current {
+            if sibling.kind() == "comment" {
+                let comment_text = &code[sibling.byte_range()];
+
+                // Check for Go-style line comments starting with //
+                if comment_text.starts_with("//") {
+                    // Extract the comment content (remove // and leading/trailing whitespace)
+                    let content = comment_text.trim_start_matches("//").trim();
+
+                    // Add to the beginning of doc_lines since we're walking backwards
+                    doc_lines.insert(0, content.to_string());
+
+                    // Continue to previous sibling to check for more comment lines
+                    current = sibling.prev_sibling();
+                } else {
+                    // Found a non-Go comment (like /* */), stop collecting
+                    break;
+                }
+            } else {
+                // Found a non-comment node, stop collecting
+                break;
+            }
+        }
+
+        // If we found any documentation comments, join them and return
+        if !doc_lines.is_empty() {
+            // Filter out empty lines and join with newlines
+            let filtered_lines: Vec<String> = doc_lines
+                .into_iter()
+                .filter(|line| !line.is_empty())
+                .collect();
+
+            if !filtered_lines.is_empty() {
+                let joined = filtered_lines.join("\n").trim().to_string();
+                if !joined.is_empty() {
+                    return Some(joined);
                 }
             }
         }
+
         None
     }
 
@@ -1803,24 +1418,21 @@ impl LanguageParser for GoParser {
         method_calls
     }
 
-    fn find_implementations<'a>(&mut self, code: &'a str) -> Vec<(&'a str, &'a str, Range)> {
-        let mut implementations = Vec::new();
-
-        if let Some(tree) = self.parser.parse(code, None) {
-            self.find_implementations_in_node(tree.root_node(), code, &mut implementations, false);
-        }
-
-        implementations
+    /// Go uses implicit interface implementation (duck typing).
+    /// Types implement interfaces by having matching method signatures,
+    /// not through explicit declarations. This cannot be reliably detected
+    /// through AST parsing alone - it requires cross-file semantic analysis.
+    fn find_implementations<'a>(&mut self, _code: &'a str) -> Vec<(&'a str, &'a str, Range)> {
+        // Return empty vector - Go has no explicit implementation declarations
+        Vec::new()
     }
 
-    fn find_extends<'a>(&mut self, code: &'a str) -> Vec<(&'a str, &'a str, Range)> {
-        let mut extends = Vec::new();
-
-        if let Some(tree) = self.parser.parse(code, None) {
-            self.find_implementations_in_node(tree.root_node(), code, &mut extends, true);
-        }
-
-        extends
+    /// Go doesn't have class inheritance. Interfaces can embed other interfaces,
+    /// but this is composition, not inheritance. Struct types can embed other types,
+    /// but again, this is composition rather than inheritance.
+    fn find_extends<'a>(&mut self, _code: &'a str) -> Vec<(&'a str, &'a str, Range)> {
+        // Return empty vector - Go has no class inheritance
+        Vec::new()
     }
 
     fn find_imports(&mut self, code: &str, file_id: FileId) -> Vec<Import> {
@@ -2016,113 +1628,80 @@ const hook = useState<Session>(null);
     }
 
     #[test]
-    fn test_extends_vs_implements_separation() {
-        println!("\n=== Go Extends vs Implements Separation Test ===\n");
+    fn test_go_interface_implementation_behavior() {
+        println!("\n=== Go Interface Implementation Behavior Test ===\n");
 
         let mut parser = GoParser::new().unwrap();
 
         let code = r#"
-interface Serializable {
-    serialize(): string;
+package main
+
+import (
+    "fmt"
+    "io"
+)
+
+// Interface definitions
+type Writer interface {
+    Write([]byte) (int, error)
 }
 
-interface Comparable<T> {
-    compareTo(other: T): number;
+type Reader interface {
+    Read([]byte) (int, error)
 }
 
-class BaseEntity {
-    id: number;
+// Struct that implements interfaces through method signatures
+type FileProcessor struct {
+    filename string
+    data     []byte
 }
 
-// Class extends another class
-class User extends BaseEntity implements Serializable, Comparable<User> {
-    name: string;
-
-    serialize(): string {
-        return JSON.stringify(this);
-    }
-
-    compareTo(other: User): number {
-        return this.id - other.id;
-    }
+// These methods make FileProcessor implement Writer interface
+func (f *FileProcessor) Write(data []byte) (int, error) {
+    f.data = append(f.data, data...)
+    return len(data), nil
 }
 
-// Class extends a class (inheritance chain)
-class Admin extends User {
-    permissions: string[];
+// This method makes FileProcessor implement Reader interface  
+func (f *FileProcessor) Read(data []byte) (int, error) {
+    copy(data, f.data)
+    return len(f.data), nil
 }
 
-// Interface extends another interface
-interface AdvancedSerializable extends Serializable {
-    deserialize(data: string): void;
+// Interface embedding (composition, not inheritance)
+type ReadWriter interface {
+    Reader
+    Writer
+}
+
+// Type embedding (composition, not inheritance)
+type ExtendedProcessor struct {
+    FileProcessor
+    metadata map[string]string
 }
 "#;
 
         println!("Test code:\n{code}");
 
-        // Get extends relationships
+        // Go uses implicit interface implementation
+        // No explicit "implements" declarations exist
+        let implementations = parser.find_implementations(code);
+        println!("\nImplementations found ({}):", implementations.len());
+        assert_eq!(
+            implementations.len(),
+            0,
+            "Go should have no explicit implementations"
+        );
+
+        // Go has no class inheritance
+        // Interface/struct embedding is composition, not inheritance
         let extends = parser.find_extends(code);
-        println!("\nExtends relationships ({}):", extends.len());
-        for (child, parent, _) in &extends {
-            println!("  {child} extends {parent}");
-        }
+        println!("Extends relationships found ({}):", extends.len());
+        assert_eq!(extends.len(), 0, "Go should have no extends relationships");
 
-        // Get implements relationships
-        let implements = parser.find_implementations(code);
-        println!("\nImplements relationships ({}):", implements.len());
-        for (implementor, interface, _) in &implements {
-            println!("  {implementor} implements {interface}");
-        }
-
-        // Verify extends relationships
-        assert!(
-            extends
-                .iter()
-                .any(|(c, p, _)| c == &"User" && p == &"BaseEntity"),
-            "User should extend BaseEntity"
-        );
-        assert!(
-            extends
-                .iter()
-                .any(|(c, p, _)| c == &"Admin" && p == &"User"),
-            "Admin should extend User"
-        );
-        assert!(
-            extends
-                .iter()
-                .any(|(c, p, _)| c == &"AdvancedSerializable" && p == &"Serializable"),
-            "AdvancedSerializable should extend Serializable"
-        );
-
-        // Verify implements relationships
-        assert!(
-            implements
-                .iter()
-                .any(|(c, i, _)| c == &"User" && i == &"Serializable"),
-            "User should implement Serializable"
-        );
-        assert!(
-            implements
-                .iter()
-                .any(|(c, i, _)| c == &"User" && i == &"Comparable"),
-            "User should implement Comparable"
-        );
-
-        // Verify separation - extends should NOT be in implements
-        assert!(
-            !implements
-                .iter()
-                .any(|(c, p, _)| c == &"User" && p == &"BaseEntity"),
-            "User extends BaseEntity should NOT be in implements"
-        );
-        assert!(
-            !implements
-                .iter()
-                .any(|(c, p, _)| c == &"Admin" && p == &"User"),
-            "Admin extends User should NOT be in implements"
-        );
-
-        println!("\n✅ Extends vs Implements separation test passed");
+        println!("\n✅ Go interface implementation behavior test passed");
+        println!("✅ Verified that Go returns empty results for explicit relationships");
+        println!("✅ Go's implicit interface implementation requires semantic analysis");
     }
 
     #[test]

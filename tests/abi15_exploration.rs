@@ -901,7 +901,7 @@ class DatabaseLogger implements Logger {
         );
     }
 
-    #[test] 
+    #[test]
     fn explore_go_abi15_comprehensive() {
         let language: Language = tree_sitter_go::LANGUAGE.into();
 
@@ -913,7 +913,7 @@ class DatabaseLogger implements Logger {
         for node_kind in &[
             "package_clause",
             "package_identifier",
-            "import_declaration", 
+            "import_declaration",
             "import_spec",
             "import_spec_list",
             "interpreted_string_literal",
@@ -935,7 +935,7 @@ class DatabaseLogger implements Logger {
             "type_spec",
             "struct_type",
             "field_declaration",
-            "field_declaration_list", 
+            "field_declaration_list",
             "tag",
             "struct_literal",
             "struct_field",
@@ -996,7 +996,7 @@ class DatabaseLogger implements Logger {
         for node_kind in &[
             "var_declaration",
             "var_spec",
-            "const_declaration", 
+            "const_declaration",
             "const_spec",
             "short_var_declaration",
             "assignment_statement",
@@ -1041,7 +1041,7 @@ class DatabaseLogger implements Logger {
         for node_kind in &[
             "call_expression",
             "method_expression",
-            "selector_expression", 
+            "selector_expression",
             "index_expression",
             "slice_expression",
             "type_assertion_expression",
@@ -1085,7 +1085,7 @@ class DatabaseLogger implements Logger {
         for node_kind in &[
             "channel_type",
             "send_statement",
-            "receive_statement", 
+            "receive_statement",
             "communication_case",
             "default_case",
             "expression_case",
@@ -1103,13 +1103,13 @@ class DatabaseLogger implements Logger {
         println!("\n=== LITERAL NODES ===");
         for node_kind in &[
             "int_literal",
-            "float_literal", 
+            "float_literal",
             "imaginary_literal",
             "rune_literal",
             "raw_string_literal",
             "interpreted_string_literal",
             "true",
-            "false", 
+            "false",
             "nil",
             "iota",
             "composite_literal",
@@ -1164,24 +1164,41 @@ class DatabaseLogger implements Logger {
     #[test]
     fn explore_go_node_structure() {
         let mut parser = tree_sitter::Parser::new();
-        parser.set_language(&tree_sitter_go::LANGUAGE.into()).unwrap();
+        parser
+            .set_language(&tree_sitter_go::LANGUAGE.into())
+            .unwrap();
 
         println!("\n=== Go Node Structure Exploration ===");
 
         let test_cases = vec![
             ("package main", "Package declaration"),
             (r#"import "fmt""#, "Simple import"),
-            (r#"import (
+            (
+                r#"import (
     "fmt"
     "os"
     m "math"
     . "strings"  
     _ "database/sql"
-)"#, "Import group"),
-            ("type User struct { Name string `json:\"name\"` }", "Struct with tag"),
-            ("type Writer interface { Write([]byte) (int, error) }", "Interface declaration"),
-            ("func (u *User) String() string { return u.Name }", "Method with receiver"),
-            ("func Add[T int | float64](a, b T) T { return a + b }", "Generic function"),
+)"#,
+                "Import group",
+            ),
+            (
+                "type User struct { Name string `json:\"name\"` }",
+                "Struct with tag",
+            ),
+            (
+                "type Writer interface { Write([]byte) (int, error) }",
+                "Interface declaration",
+            ),
+            (
+                "func (u *User) String() string { return u.Name }",
+                "Method with receiver",
+            ),
+            (
+                "func Add[T int | float64](a, b T) T { return a + b }",
+                "Generic function",
+            ),
             ("var count int = 42", "Variable declaration"),
             ("const Pi = 3.14159", "Constant declaration"),
             ("users := make([]User, 0)", "Short variable declaration"),
@@ -1194,7 +1211,7 @@ class DatabaseLogger implements Logger {
         for (code, description) in test_cases {
             println!("\n--- {description} ---");
             println!("Code: {code}");
-            
+
             if let Some(tree) = parser.parse(code, None) {
                 let root = tree.root_node();
                 print_go_node_tree(root, code, 0);
