@@ -2914,7 +2914,75 @@ let variable_{i}: number = {i};
 }
 
 fn generate_go_benchmark_code() -> String {
-    let mut code = String::from("// Go benchmark file\n\n");
+    let mut code =
+        String::from("// Go benchmark file\n\npackage bench\n\nimport (\n\t\"fmt\"\n)\n\n");
+
+    // Generate 500 free functions
+    for i in 0..500 {
+        code.push_str(&format!(
+            r#"// Function {i} documentation
+func Function_{i}(param1 int, param2 string) bool {{
+    result := param1 * 2
+    return result > 0 && len(param2) > 0
+}}
+
+"#
+        ));
+    }
+
+    // Generate 50 structs with methods and interface satisfaction
+    for i in 0..50 {
+        code.push_str(&format!(
+            r#"// Struct {i} documentation
+type Struct{i} struct {{
+    Value int
+}}
+
+func NewStruct{i}(v int) *Struct{i} {{
+    return &Struct{i}{{Value: v}}
+}}
+
+func (s *Struct{i}) MethodA() int {{
+    return s.Value * 2
+}}
+
+func (s *Struct{i}) Do(param string) int {{
+    fmt.Println(param)
+    return len(param) + s.Value
+}}
+
+"#
+        ));
+    }
+
+    // Generate 25 interfaces
+    for i in 0..25 {
+        code.push_str(&format!(
+            r#"// Interface {i} documentation
+type Interface_{i} interface {{
+    Do(param string) int
+}}
+
+"#
+        ));
+    }
+
+    // A small main-like entry to keep parser busy with calls/selectors
+    code.push_str(
+        r#"// Entry point (not used, just for call patterns)
+func main() {
+    s := NewStruct0(42)
+    _ = s.MethodA()
+    _ = s.Do("hello")
+    ok := Function_0(1, "x")
+    if ok {
+        fmt.Println("ok")
+    }
+}
+"#,
+    );
+
+    code
 }
 
 #[cfg(test)]

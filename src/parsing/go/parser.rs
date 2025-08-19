@@ -1,6 +1,6 @@
 //! Go parser implementation
 //!
-//! **Tree-sitter ABI Version**: ABI-14 (tree-sitter-Go 0.24.4)
+//! Uses tree-sitter-go crate’s LANGUAGE constant (converted via .into()).
 //!
 //! Note: This parser uses ABI-14 with 383 node types and 40 fields.
 //! When migrating or updating the parser, ensure compatibility with ABI-14 features.
@@ -10,7 +10,7 @@ use crate::parsing::{LanguageParser, MethodCall, ParserContext, ScopeType};
 use crate::types::SymbolCounter;
 use crate::{FileId, Range, Symbol, SymbolKind, Visibility};
 use std::any::Any;
-use tree_sitter::{Language, Node, Parser};
+use tree_sitter::{Node, Parser};
 
 /// Go language parser
 pub struct GoParser {
@@ -54,9 +54,9 @@ impl GoParser {
     /// Create a new Go parser
     pub fn new() -> Result<Self, String> {
         let mut parser = Parser::new();
-        let language: Language = tree_sitter_Go::LANGUAGE_Go.into();
+        let lang = tree_sitter_go::LANGUAGE;
         parser
-            .set_language(&language)
+            .set_language(&lang.into())
             .map_err(|e| format!("Failed to set Go language: {e}"))?;
 
         Ok(Self {
@@ -1873,7 +1873,7 @@ mod tests {
     use crate::types::FileId;
 
     #[test]
-    fn test_Go_import_extraction() {
+    fn test_go_import_extraction() {
         println!("\n=== Go Import Extraction Test ===\n");
 
         let mut parser = GoParser::new().unwrap();

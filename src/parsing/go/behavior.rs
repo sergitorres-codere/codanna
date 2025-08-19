@@ -46,7 +46,7 @@ impl LanguageBehavior for GoBehavior {
     }
 
     fn get_language(&self) -> Language {
-        tree_sitter_Go::LANGUAGE_Go.into()
+        tree_sitter_go::LANGUAGE.into()
     }
     fn module_separator(&self) -> &'static str {
         "."

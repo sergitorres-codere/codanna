@@ -581,7 +581,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_Go_hoisting() {
+    fn test_go_hoisting() {
         let mut context = GoResolutionContext::new(FileId::new(1).unwrap());
 
         // Add hoisted function
