@@ -277,7 +277,6 @@ All retrieve commands support `--json` flag for structured output (exit code 3 w
 | `retrieve calls <FUNCTION>` | Show what functions a given function calls | `codanna retrieve calls parse_file --json` |
 | `retrieve callers <FUNCTION>` | Show what functions call a given function | `codanna retrieve callers main --json` |
 | `retrieve implementations <TRAIT>` | Show what types implement a trait | `codanna retrieve implementations Parser --json` |
-| `retrieve impact <SYMBOL>` | Show the impact radius of changing a symbol | `codanna retrieve impact main --depth 3 --json` |
 | `retrieve search <QUERY>` | Search for symbols using full-text search | `codanna retrieve search "parse" --limit 5 --json` |
 | `retrieve describe <SYMBOL>` | Show comprehensive information about a symbol | `codanna retrieve describe SimpleIndexer --json` |
 

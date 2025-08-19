@@ -187,7 +187,7 @@ enum Commands {
     #[command(
         about = "Search symbols, find callers/callees, analyze impact",
         long_about = "Query indexed symbols, relationships, and dependencies.",
-        after_help = "Examples:\n  codanna retrieve symbol main\n  codanna retrieve callers process_file\n  codanna retrieve calls init\n  codanna retrieve implementations Parser\n  codanna retrieve impact MyStruct --depth 3\n  codanna retrieve search \"parse\" --limit 10\n\nJSON paths:\n  retrieve symbol     .data.name\n  retrieve search     .data[].name\n  retrieve callers    .data[].name\n  retrieve impact     .data[].name"
+        after_help = "Examples:\n  codanna retrieve symbol main\n  codanna retrieve callers process_file\n  codanna retrieve calls init\n  codanna retrieve implementations Parser\n  codanna retrieve describe OutputManager\n  codanna retrieve search \"parse\" --limit 10\n\nJSON paths:\n  retrieve symbol     .data.items[0].symbol.name\n  retrieve search     .data.items[].symbol.name\n  retrieve callers    .data.items[].symbol.name\n  retrieve describe   .data.items[0].symbol.name"
     )]
     Retrieve {
         #[command(subcommand)]
@@ -353,22 +353,31 @@ enum RetrieveQuery {
         symbol: String,
     },
 
-    /// Show the impact radius of changing a symbol
-    #[command(
-        after_help = "Examples:\n  codanna retrieve impact MyStruct\n  codanna retrieve impact symbol:MyStruct depth:3\n  codanna retrieve impact main --depth 2 --json"
-    )]
-    Impact {
-        /// Positional arguments (symbol name and/or key:value pairs)
-        #[arg(num_args = 0..)]
-        args: Vec<String>,
-        /// Maximum depth to search (flag format)
-        #[arg(short, long)]
-        depth: Option<usize>,
-        /// Output in JSON format
-        #[arg(long)]
-        json: bool,
-    },
-
+    // DISABLED: Impact command has been deprecated in favor of:
+    // 1. MCP semantic_search_with_context for comprehensive analysis
+    // 2. Slash commands that compose simple retrieve commands
+    // 3. Enhanced describe command (future)
+    //
+    // The impact command had fundamental issues:
+    // - Didn't work for non-function symbols (structs, traits, enums)
+    // - Returned empty results for valid symbols
+    // - Conceptually flawed (not all symbols have "impact" in the same way)
+    //
+    // /// Show the impact radius of changing a symbol
+    // #[command(
+    //     after_help = "Examples:\n  codanna retrieve impact MyStruct\n  codanna retrieve impact symbol:MyStruct depth:3\n  codanna retrieve impact main --depth 2 --json"
+    // )]
+    // Impact {
+    //     /// Positional arguments (symbol name and/or key:value pairs)
+    //     #[arg(num_args = 0..)]
+    //     args: Vec<String>,
+    //     /// Maximum depth to search (flag format)
+    //     #[arg(short, long)]
+    //     depth: Option<usize>,
+    //     /// Output in JSON format
+    //     #[arg(long)]
+    //     json: bool,
+    // },
     /// Search for symbols using full-text search
     #[command(
         after_help = "Examples:\n  # Traditional flag format\n  codanna retrieve search \"parse\" --limit 5 --kind function\n  \n  # Key:value format (Unix-style)\n  codanna retrieve search query:parse limit:5 kind:function\n  \n  # Mixed format\n  codanna retrieve search \"parse\" limit:5 --json"
@@ -1196,33 +1205,35 @@ async fn main() {
                         format,
                     )
                 }
-                RetrieveQuery::Impact { args, depth, json } => {
-                    use codanna::io::args::parse_positional_args;
-
-                    // Parse positional arguments for symbol name and key:value pairs
-                    let (positional_symbol, params) = parse_positional_args(&args);
-
-                    // Determine symbol name (priority: positional > key:value)
-                    let final_symbol = positional_symbol
-                        .or_else(|| params.get("symbol").cloned())
-                        .unwrap_or_else(|| {
-                            eprintln!("Error: impact requires a symbol name");
-                            eprintln!("Usage: codanna retrieve impact MyStruct");
-                            eprintln!("   or: codanna retrieve impact symbol:MyStruct depth:3");
-                            std::process::exit(1);
-                        });
-
-                    // Merge depth parameter (flags take precedence over key:value)
-                    let final_depth = depth.unwrap_or_else(|| {
-                        params
-                            .get("depth")
-                            .and_then(|s| s.parse::<usize>().ok())
-                            .unwrap_or(5)
-                    });
-
-                    let format = OutputFormat::from_json_flag(json);
-                    retrieve::retrieve_impact(&indexer, &final_symbol, final_depth, format)
-                }
+                // DISABLED: Impact command handler commented out
+                // See the RetrieveQuery enum for deprecation details
+                // RetrieveQuery::Impact { args, depth, json } => {
+                //     use codanna::io::args::parse_positional_args;
+                //
+                //     // Parse positional arguments for symbol name and key:value pairs
+                //     let (positional_symbol, params) = parse_positional_args(&args);
+                //
+                //     // Determine symbol name (priority: positional > key:value)
+                //     let final_symbol = positional_symbol
+                //         .or_else(|| params.get("symbol").cloned())
+                //         .unwrap_or_else(|| {
+                //             eprintln!("Error: impact requires a symbol name");
+                //             eprintln!("Usage: codanna retrieve impact MyStruct");
+                //             eprintln!("   or: codanna retrieve impact symbol:MyStruct depth:3");
+                //             std::process::exit(1);
+                //         });
+                //
+                //     // Merge depth parameter (flags take precedence over key:value)
+                //     let final_depth = depth.unwrap_or_else(|| {
+                //         params
+                //             .get("depth")
+                //             .and_then(|s| s.parse::<usize>().ok())
+                //             .unwrap_or(5)
+                //     });
+                //
+                //     let format = OutputFormat::from_json_flag(json);
+                //     retrieve::retrieve_impact(&indexer, &final_symbol, final_depth, format)
+                // }
                 RetrieveQuery::Describe { args, json } => {
                     use codanna::io::args::parse_positional_args;
 
