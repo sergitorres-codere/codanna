@@ -13,6 +13,7 @@ pub enum Language {
     JavaScript,
     TypeScript,
     Php,
+    Go,
 }
 
 impl Language {
@@ -28,6 +29,7 @@ impl Language {
             Language::JavaScript => super::LanguageId::new("javascript"),
             Language::TypeScript => super::LanguageId::new("typescript"),
             Language::Php => super::LanguageId::new("php"),
+            Language::Go => super::LanguageId::new("go"),
         }
     }
 
@@ -42,6 +44,7 @@ impl Language {
             "javascript" => Some(Language::JavaScript),
             "typescript" => Some(Language::TypeScript),
             "php" => Some(Language::Php),
+            "go" => Some(Language::Go),
             _ => None,
         }
     }
@@ -70,7 +73,10 @@ impl Language {
             "ts" | "tsx" | "mts" | "cts" => Some(Language::TypeScript),
             "php" | "php3" | "php4" | "php5" | "php7" | "php8" | "phps" | "phtml" => {
                 Some(Language::Php)
-            }
+            },
+            "go" | "go.mod" | "go.sum" => {
+                Some(Language::Go)
+            },
             _ => None,
         }
     }
@@ -92,6 +98,7 @@ impl Language {
             Language::Php => &[
                 "php", "php3", "php4", "php5", "php7", "php8", "phps", "phtml",
             ],
+            Language::Go => &["go", "go.mod", "go.sum"],
         }
     }
 
@@ -103,6 +110,7 @@ impl Language {
             Language::JavaScript => "javascript",
             Language::TypeScript => "typescript",
             Language::Php => "php",
+            Language::Go => "go",
         }
     }
 
@@ -114,6 +122,7 @@ impl Language {
             Language::JavaScript => "JavaScript",
             Language::TypeScript => "TypeScript",
             Language::Php => "PHP",
+            Language::Go => "Go",
         }
     }
 }
@@ -143,6 +152,9 @@ mod tests {
         assert_eq!(Language::from_extension("PHP"), Some(Language::Php));
         assert_eq!(Language::from_extension("php5"), Some(Language::Php));
         assert_eq!(Language::from_extension("phtml"), Some(Language::Php));
+        assert_eq!(Language::from_extension("go"), Some(Language::Go));
+        assert_eq!(Language::from_extension("go.mod"), Some(Language::Go));
+        assert_eq!(Language::from_extension("go.sum"), Some(Language::Go));
         assert_eq!(Language::from_extension("txt"), None);
     }
 
@@ -176,6 +188,10 @@ mod tests {
             Language::from_path(Path::new("src/class.php5")),
             Some(Language::Php)
         );
+        assert_eq!(
+            Language::from_path(Path::new("main.go")),
+            Some(Language::Go)
+        );
         assert_eq!(Language::from_path(Path::new("README.md")), None);
     }
 
@@ -188,5 +204,8 @@ mod tests {
         assert!(Language::Php.extensions().contains(&"php"));
         assert!(Language::Php.extensions().contains(&"php5"));
         assert!(Language::Php.extensions().contains(&"phtml"));
+        assert!(Language::Go.extensions().contains(&"go"));
+        assert!(Language::Go.extensions().contains(&"go.mod"));
+        assert!(Language::Go.extensions().contains(&"go.sum")); 
     }
 }

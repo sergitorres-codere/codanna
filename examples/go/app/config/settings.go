@@ -20,10 +20,10 @@ import (
 // Package-level constants
 const (
 	DefaultConfigFile = "app.yaml"
-	EnvPrefix        = "APP_"
-	DefaultHost      = "localhost"
-	DefaultPort      = 8080
-	DefaultDBURL     = "sqlite://app.db"
+	EnvPrefix         = "APP_"
+	DefaultHost       = "localhost"
+	DefaultPort       = 8080
+	DefaultDBURL      = "sqlite://app.db"
 )
 
 // Settings represents the main application configuration
@@ -32,10 +32,10 @@ type Settings struct {
 	Database DatabaseConfig `json:"database" yaml:"database"`
 	Logging  LoggingConfig  `json:"logging" yaml:"logging"`
 	Features FeatureFlags   `json:"features" yaml:"features"`
-	
+
 	// Private fields for internal state
-	loaded   bool
-	envVars  map[string]string
+	loaded  bool
+	envVars map[string]string
 }
 
 // NewSettings creates a new Settings instance with defaults
@@ -56,7 +56,7 @@ func (s *Settings) LoadFromEnv() error {
 	if host := os.Getenv(EnvPrefix + "SERVER_HOST"); host != "" {
 		s.Server.Host = host
 	}
-	
+
 	if portStr := os.Getenv(EnvPrefix + "SERVER_PORT"); portStr != "" {
 		port, err := strconv.Atoi(portStr)
 		if err != nil {
@@ -64,7 +64,7 @@ func (s *Settings) LoadFromEnv() error {
 		}
 		s.Server.Port = port
 	}
-	
+
 	if timeoutStr := os.Getenv(EnvPrefix + "SERVER_TIMEOUT"); timeoutStr != "" {
 		timeout, err := time.ParseDuration(timeoutStr)
 		if err != nil {
@@ -72,12 +72,12 @@ func (s *Settings) LoadFromEnv() error {
 		}
 		s.Server.Timeout = timeout
 	}
-	
+
 	// Database configuration
 	if dbURL := os.Getenv(EnvPrefix + "DATABASE_URL"); dbURL != "" {
 		s.Database.URL = dbURL
 	}
-	
+
 	if maxConnStr := os.Getenv(EnvPrefix + "DATABASE_MAX_CONNECTIONS"); maxConnStr != "" {
 		maxConn, err := strconv.Atoi(maxConnStr)
 		if err != nil {
@@ -85,7 +85,7 @@ func (s *Settings) LoadFromEnv() error {
 		}
 		s.Database.MaxConnections = maxConn
 	}
-	
+
 	// Logging configuration
 	if logLevel := os.Getenv(EnvPrefix + "LOG_LEVEL"); logLevel != "" {
 		level, err := ParseLogLevel(logLevel)
@@ -94,20 +94,20 @@ func (s *Settings) LoadFromEnv() error {
 		}
 		s.Logging.Level = level
 	}
-	
+
 	if logFile := os.Getenv(EnvPrefix + "LOG_FILE"); logFile != "" {
 		s.Logging.FilePath = &logFile
 	}
-	
+
 	// Feature flags
 	if metricsEnabled := os.Getenv(EnvPrefix + "FEATURE_METRICS"); metricsEnabled != "" {
 		s.Features.EnableMetrics = strings.ToLower(metricsEnabled) == "true"
 	}
-	
+
 	if tracingEnabled := os.Getenv(EnvPrefix + "FEATURE_TRACING"); tracingEnabled != "" {
 		s.Features.EnableTracing = strings.ToLower(tracingEnabled) == "true"
 	}
-	
+
 	s.loaded = true
 	return nil
 }
@@ -117,15 +117,15 @@ func (s *Settings) Validate() error {
 	if err := s.Server.Validate(); err != nil {
 		return fmt.Errorf("server config error: %w", err)
 	}
-	
+
 	if err := s.Database.Validate(); err != nil {
 		return fmt.Errorf("database config error: %w", err)
 	}
-	
+
 	if err := s.Logging.Validate(); err != nil {
 		return fmt.Errorf("logging config error: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -169,19 +169,19 @@ func (sc *ServerConfig) Validate() error {
 	if sc.Host == "" {
 		return NewConfigError(ErrMissingRequired, "server host is required")
 	}
-	
+
 	if sc.Port <= 0 || sc.Port > 65535 {
 		return NewConfigError(ErrInvalidValue, "server port must be between 1 and 65535")
 	}
-	
+
 	if sc.Timeout <= 0 {
 		return NewConfigError(ErrInvalidValue, "server timeout must be positive")
 	}
-	
+
 	if sc.MaxConnections <= 0 {
 		return NewConfigError(ErrInvalidValue, "max connections must be positive")
 	}
-	
+
 	return nil
 }
 
@@ -210,19 +210,19 @@ func (dc *DatabaseConfig) Validate() error {
 	if dc.URL == "" {
 		return NewConfigError(ErrMissingRequired, "database URL is required")
 	}
-	
+
 	if !strings.Contains(dc.URL, "://") {
 		return NewConfigError(ErrInvalidValue, "database URL must include protocol")
 	}
-	
+
 	if dc.MaxConnections <= 0 {
 		return NewConfigError(ErrInvalidValue, "max connections must be positive")
 	}
-	
+
 	if dc.ConnectionTimeout <= 0 {
 		return NewConfigError(ErrInvalidValue, "connection timeout must be positive")
 	}
-	
+
 	return nil
 }
 
@@ -263,11 +263,11 @@ func (lc *LoggingConfig) Validate() error {
 	if !lc.Level.IsValid() {
 		return NewConfigError(ErrInvalidValue, "invalid log level")
 	}
-	
+
 	if lc.Format != "json" && lc.Format != "text" {
 		return NewConfigError(ErrInvalidValue, "log format must be 'json' or 'text'")
 	}
-	
+
 	return nil
 }
 
@@ -320,16 +320,16 @@ func ParseLogLevel(level string) (LogLevel, error) {
 
 // FeatureFlags holds feature toggle configuration
 type FeatureFlags struct {
-	EnableMetrics          bool `json:"enable_metrics" yaml:"enable_metrics"`
-	EnableTracing         bool `json:"enable_tracing" yaml:"enable_tracing"`
-	ExperimentalFeatures  bool `json:"experimental_features" yaml:"experimental_features"`
-	MaintenanceMode       bool `json:"maintenance_mode" yaml:"maintenance_mode"`
+	EnableMetrics        bool `json:"enable_metrics" yaml:"enable_metrics"`
+	EnableTracing        bool `json:"enable_tracing" yaml:"enable_tracing"`
+	ExperimentalFeatures bool `json:"experimental_features" yaml:"experimental_features"`
+	MaintenanceMode      bool `json:"maintenance_mode" yaml:"maintenance_mode"`
 }
 
 // DefaultFeatureFlags returns default feature flags
 func DefaultFeatureFlags() FeatureFlags {
 	return FeatureFlags{
-		EnableMetrics:         false,
+		EnableMetrics:        false,
 		EnableTracing:        false,
 		ExperimentalFeatures: false,
 		MaintenanceMode:      false,
@@ -351,12 +351,12 @@ func ParseDurationFromString(durationStr string) (time.Duration, error) {
 	if durationStr == "" {
 		return 0, NewConfigError(ErrInvalidValue, "duration cannot be empty")
 	}
-	
+
 	duration, err := time.ParseDuration(durationStr)
 	if err != nil {
 		return 0, NewConfigError(ErrInvalidValue, fmt.Sprintf("invalid duration: %s", durationStr))
 	}
-	
+
 	return duration, nil
 }
 
@@ -365,18 +365,18 @@ func LoadFromFile(filePath string) (*Settings, error) {
 	if filePath == "" {
 		return nil, NewConfigError(ErrInvalidValue, "file path cannot be empty")
 	}
-	
+
 	// In a real implementation, this would parse YAML/JSON/TOML
 	settings := NewSettings()
 	fmt.Printf("Loading configuration from file: %s\n", filePath)
-	
+
 	return settings, nil
 }
 
 // MergeSettings merges two settings, with the second taking precedence
 func MergeSettings(base, override *Settings) *Settings {
 	result := *base // Copy base
-	
+
 	// Merge server config
 	if override.Server.Host != DefaultHost {
 		result.Server.Host = override.Server.Host
@@ -384,14 +384,14 @@ func MergeSettings(base, override *Settings) *Settings {
 	if override.Server.Port != DefaultPort {
 		result.Server.Port = override.Server.Port
 	}
-	
-	// Merge database config  
+
+	// Merge database config
 	if override.Database.URL != DefaultDBURL {
 		result.Database.URL = override.Database.URL
 	}
-	
+
 	// Merge other configs...
-	
+
 	return &result
 }
 

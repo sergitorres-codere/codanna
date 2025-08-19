@@ -18,8 +18,8 @@ import (
 
 // Package-level constants (exported)
 const (
-	Version       = "1.0.0"
-	MaxNameLength = 100
+	Version        = "1.0.0"
+	MaxNameLength  = 100
 	MaxEmailLength = 254
 )
 
@@ -62,11 +62,11 @@ func (r UserRole) IsValid() bool {
 // User represents a system user
 type User struct {
 	// Exported fields
-	ID   uint64 `json:"id"`
-	name string `json:"name"` // unexported (private)
-	email string `json:"email"` // unexported (private)
-	role UserRole `json:"role"` // unexported (private)
-	
+	ID    uint64   `json:"id"`
+	name  string   `json:"name"`  // unexported (private)
+	email string   `json:"email"` // unexported (private)
+	role  UserRole `json:"role"`  // unexported (private)
+
 	// unexported fields
 	createdAt time.Time
 	lastLogin *time.Time
@@ -145,7 +145,7 @@ func (u *User) UpdateLastLogin() {
 
 // String implements fmt.Stringer interface
 func (u *User) String() string {
-	return fmt.Sprintf("User(id=%d, name=%s, email=%s, role=%s)", 
+	return fmt.Sprintf("User(id=%d, name=%s, email=%s, role=%s)",
 		u.ID, u.name, u.email, u.role)
 }
 
@@ -154,15 +154,15 @@ func (u *User) Validate() error {
 	if strings.TrimSpace(u.name) == "" {
 		return NewUserError(ErrInvalidName, "name cannot be empty")
 	}
-	
+
 	if err := validateEmail(u.email); err != nil {
 		return err
 	}
-	
+
 	if !u.role.IsValid() {
 		return NewUserError(ErrInvalidRole, "invalid user role")
 	}
-	
+
 	return nil
 }
 
@@ -183,15 +183,15 @@ func validateEmail(email string) error {
 	if email == "" {
 		return NewUserError(ErrInvalidEmail, "email cannot be empty")
 	}
-	
+
 	if !strings.Contains(email, "@") {
 		return NewUserError(ErrInvalidEmail, "invalid email format")
 	}
-	
+
 	if len(email) > MaxEmailLength {
 		return NewUserError(ErrInvalidEmail, fmt.Sprintf("email too long (max %d characters)", MaxEmailLength))
 	}
-	
+
 	return nil
 }
 

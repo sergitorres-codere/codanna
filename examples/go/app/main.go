@@ -16,15 +16,15 @@ import (
 	"time"
 
 	// Import from local packages
+	"app/config"
 	"app/models"
 	"app/services"
-	"app/config"
 	"app/utils"
 
 	// Import with aliases
+	appConfig "app/config"
 	userModel "app/models"
 	authSvc "app/services"
-	appConfig "app/config"
 )
 
 func main() {

@@ -10,7 +10,6 @@
 package services
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -19,8 +18,8 @@ import (
 
 // Package-level constants
 const (
-	MaxConnections     = 100
-	ConnectionTimeout  = 30 * time.Second
+	MaxConnections    = 100
+	ConnectionTimeout = 30 * time.Second
 	QueryTimeout      = 60 * time.Second
 	DefaultPort       = 5432
 )
@@ -37,23 +36,23 @@ type Database interface {
 
 // DatabaseConnection implements the Database interface
 type DatabaseConnection struct {
-	connectionURL string
-	connected     bool
-	mockData      map[string]interface{}
-	mutex         sync.RWMutex
+	connectionURL  string
+	connected      bool
+	mockData       map[string]interface{}
+	mutex          sync.RWMutex
 	connectionPool *ConnectionPool
 }
 
 // ConnectionPool manages database connections
 type ConnectionPool struct {
-	maxConnections int
+	maxConnections    int
 	activeConnections int
-	mutex         sync.Mutex
+	mutex             sync.Mutex
 }
 
 func NewConnectionPool(maxConnections int) *ConnectionPool {
 	return &ConnectionPool{
-		maxConnections: maxConnections,
+		maxConnections:    maxConnections,
 		activeConnections: 0,
 	}
 }
@@ -61,11 +60,11 @@ func NewConnectionPool(maxConnections int) *ConnectionPool {
 func (cp *ConnectionPool) Acquire() error {
 	cp.mutex.Lock()
 	defer cp.mutex.Unlock()
-	
+
 	if cp.activeConnections >= cp.maxConnections {
 		return NewDatabaseError(ErrConnectionPoolFull, "connection pool is full")
 	}
-	
+
 	cp.activeConnections++
 	return nil
 }
@@ -73,7 +72,7 @@ func (cp *ConnectionPool) Acquire() error {
 func (cp *ConnectionPool) Release() {
 	cp.mutex.Lock()
 	defer cp.mutex.Unlock()
-	
+
 	if cp.activeConnections > 0 {
 		cp.activeConnections--
 	}
@@ -82,10 +81,10 @@ func (cp *ConnectionPool) Release() {
 func (cp *ConnectionPool) Stats() ConnectionPoolStats {
 	cp.mutex.Lock()
 	defer cp.mutex.Unlock()
-	
+
 	return ConnectionPoolStats{
-		MaxConnections:    cp.maxConnections,
-		ActiveConnections: cp.activeConnections,
+		MaxConnections:       cp.maxConnections,
+		ActiveConnections:    cp.activeConnections,
 		AvailableConnections: cp.maxConnections - cp.activeConnections,
 	}
 }
@@ -100,9 +99,9 @@ type ConnectionPoolStats struct {
 // NewDatabaseConnection creates a new database connection
 func NewDatabaseConnection(connectionURL string) *DatabaseConnection {
 	return &DatabaseConnection{
-		connectionURL: connectionURL,
-		connected:     false,
-		mockData:      make(map[string]interface{}),
+		connectionURL:  connectionURL,
+		connected:      false,
+		mockData:       make(map[string]interface{}),
 		connectionPool: NewConnectionPool(MaxConnections),
 	}
 }
@@ -128,7 +127,7 @@ func (db *DatabaseConnection) Connect() error {
 
 	// Mock connection establishment
 	fmt.Printf("Connecting to database: %s\n", db.connectionURL)
-	
+
 	db.mutex.Lock()
 	db.connected = true
 	db.mutex.Unlock()
@@ -165,7 +164,7 @@ func (db *DatabaseConnection) Execute(query string, args []interface{}) error {
 
 	// Mock query execution
 	fmt.Printf("Executing query: %s with %d args\n", query, len(args))
-	
+
 	// Simulate different query types
 	queryUpper := strings.ToUpper(strings.TrimSpace(query))
 	switch {
@@ -233,7 +232,7 @@ func (db *DatabaseConnection) GetPoolStats() ConnectionPoolStats {
 func (db *DatabaseConnection) checkConnection() error {
 	db.mutex.RLock()
 	defer db.mutex.RUnlock()
-	
+
 	if !db.connected {
 		return NewDatabaseError(ErrNotConnected, "database not connected")
 	}
@@ -244,7 +243,7 @@ func (db *DatabaseConnection) mockInsert(query string, args []interface{}) error
 	// Mock INSERT operation
 	db.mutex.Lock()
 	defer db.mutex.Unlock()
-	
+
 	key := fmt.Sprintf("insert_%d", len(db.mockData))
 	db.mockData[key] = args
 	return nil
@@ -266,7 +265,7 @@ func (db *DatabaseConnection) mockSelect(query string, args []interface{}) (*Que
 		{"id": 1, "name": "Test User", "email": "test@example.com"},
 		{"id": 2, "name": "Another User", "email": "another@example.com"},
 	}
-	
+
 	return &QueryResult{
 		Rows:         rows,
 		RowsAffected: 0,
@@ -284,8 +283,8 @@ type Transaction interface {
 
 // DatabaseTransaction implements the Transaction interface
 type DatabaseTransaction struct {
-	db        *DatabaseConnection
-	committed bool
+	db         *DatabaseConnection
+	committed  bool
 	rolledBack bool
 }
 
@@ -299,7 +298,7 @@ func (tx *DatabaseTransaction) Commit() error {
 	if tx.committed || tx.rolledBack {
 		return NewDatabaseError(ErrTransactionClosed, "transaction already closed")
 	}
-	
+
 	tx.committed = true
 	fmt.Println("Transaction committed")
 	return nil
@@ -309,7 +308,7 @@ func (tx *DatabaseTransaction) Rollback() error {
 	if tx.committed || tx.rolledBack {
 		return NewDatabaseError(ErrTransactionClosed, "transaction already closed")
 	}
-	
+
 	tx.rolledBack = true
 	fmt.Println("Transaction rolled back")
 	return nil
@@ -319,7 +318,7 @@ func (tx *DatabaseTransaction) Execute(query string, args []interface{}) error {
 	if tx.committed || tx.rolledBack {
 		return NewDatabaseError(ErrTransactionClosed, "transaction is closed")
 	}
-	
+
 	return tx.db.Execute(query, args)
 }
 
@@ -327,7 +326,7 @@ func (tx *DatabaseTransaction) Query(query string, args []interface{}) (*QueryRe
 	if tx.committed || tx.rolledBack {
 		return nil, NewDatabaseError(ErrTransactionClosed, "transaction is closed")
 	}
-	
+
 	return tx.db.Query(query, args)
 }
 
@@ -353,11 +352,11 @@ func ValidateConnectionString(connectionString string) error {
 	if connectionString == "" {
 		return NewDatabaseError(ErrInvalidConnectionString, "connection string cannot be empty")
 	}
-	
+
 	if !strings.Contains(connectionString, "://") {
 		return NewDatabaseError(ErrInvalidConnectionString, "connection string must contain protocol")
 	}
-	
+
 	return nil
 }
 
@@ -376,13 +375,13 @@ func ParseConnectionString(connectionString string) (ConnectionInfo, error) {
 	if err := ValidateConnectionString(connectionString); err != nil {
 		return ConnectionInfo{}, err
 	}
-	
+
 	// Simple parsing for demonstration
 	parts := strings.Split(connectionString, "://")
 	if len(parts) != 2 {
 		return ConnectionInfo{}, NewDatabaseError(ErrInvalidConnectionString, "invalid format")
 	}
-	
+
 	return ConnectionInfo{
 		Protocol: parts[0],
 		Address:  parts[1],

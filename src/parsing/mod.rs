@@ -7,6 +7,7 @@ pub mod language_behavior;
 pub mod method_call;
 pub mod parser;
 pub mod php;
+pub mod go;
 pub mod python;
 pub mod registry;
 pub mod resolution;
@@ -29,3 +30,4 @@ pub use resolution::{
 };
 pub use rust::{RustBehavior, RustParser};
 pub use typescript::{TypeScriptBehavior, TypeScriptParser};
+pub use go::{GoBehavior, GoParser};

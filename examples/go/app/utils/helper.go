@@ -19,11 +19,11 @@ import (
 
 // Package-level constants (exported)
 const (
-	ModuleName    = "utils"
-	Version       = "1.0.0"
-	MaxBatchSize  = 1000
+	ModuleName     = "utils"
+	Version        = "1.0.0"
+	MaxBatchSize   = 1000
 	DefaultRetries = 3
-	BackoffBaseMS = 100
+	BackoffBaseMS  = 100
 )
 
 // Package-level variables
@@ -51,19 +51,19 @@ func ValidateInputDetailed(data string) error {
 	if data == "" {
 		return NewValidationError(ErrEmpty, "input cannot be empty")
 	}
-	
+
 	if len(data) < 5 {
 		return NewValidationError(ErrTooShort, fmt.Sprintf("input too short (minimum 5 characters, got %d)", len(data)))
 	}
-	
+
 	if len(data) > 254 {
 		return NewValidationError(ErrTooLong, fmt.Sprintf("input too long (maximum 254 characters, got %d)", len(data)))
 	}
-	
+
 	if !strings.Contains(data, "@") {
 		return NewValidationError(ErrInvalidFormat, "input must contain @ symbol")
 	}
-	
+
 	return nil
 }
 
@@ -79,11 +79,11 @@ func NewDataProcessor(config map[string]string) *DataProcessor {
 	globalMutex.Lock()
 	processorCount++
 	globalMutex.Unlock()
-	
+
 	if config == nil {
 		config = make(map[string]string)
 	}
-	
+
 	return &DataProcessor{
 		config:         config,
 		processedCount: 0,
@@ -96,9 +96,9 @@ func (dp *DataProcessor) Process(data string) string {
 	dp.processedCount++
 	count := dp.processedCount
 	dp.mutex.Unlock()
-	
+
 	mode := dp.GetConfig("transform", "standard")
-	
+
 	switch mode {
 	case "uppercase":
 		return strings.ToUpper(data)
@@ -118,24 +118,24 @@ func (dp *DataProcessor) Process(data string) string {
 // ProcessBatch processes multiple items efficiently
 func (dp *DataProcessor) ProcessBatch(items []string) []string {
 	results := make([]string, len(items))
-	
+
 	// Process items in chunks for better performance
 	chunkSize := MaxBatchSize
 	if len(items) < chunkSize {
 		chunkSize = len(items)
 	}
-	
+
 	for i := 0; i < len(items); i += chunkSize {
 		end := i + chunkSize
 		if end > len(items) {
 			end = len(items)
 		}
-		
+
 		for j := i; j < end; j++ {
 			results[j] = dp.Process(items[j])
 		}
 	}
-	
+
 	return results
 }
 
@@ -143,7 +143,7 @@ func (dp *DataProcessor) ProcessBatch(items []string) []string {
 func (dp *DataProcessor) Stats() ProcessingStats {
 	dp.mutex.RLock()
 	defer dp.mutex.RUnlock()
-	
+
 	return ProcessingStats{
 		ProcessedCount: dp.processedCount,
 		ConfigCount:    len(dp.config),
@@ -162,7 +162,7 @@ func (dp *DataProcessor) SetConfig(key, value string) {
 func (dp *DataProcessor) GetConfig(key, defaultValue string) string {
 	dp.mutex.RLock()
 	defer dp.mutex.RUnlock()
-	
+
 	if value, exists := dp.config[key]; exists {
 		return value
 	}
@@ -180,12 +180,12 @@ func (dp *DataProcessor) Reset() {
 func (dp *DataProcessor) Clone() *DataProcessor {
 	dp.mutex.RLock()
 	defer dp.mutex.RUnlock()
-	
+
 	configCopy := make(map[string]string)
 	for k, v := range dp.config {
 		configCopy[k] = v
 	}
-	
+
 	return &DataProcessor{
 		config:         configCopy,
 		processedCount: 0, // Reset count for new instance
@@ -237,23 +237,23 @@ func RetryWithBackoff[T any](
 	baseDelayMS int,
 ) (T, error) {
 	var zero T
-	
+
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		result, err := operation()
 		if err == nil {
 			return result, nil
 		}
-		
+
 		if attempt == maxAttempts {
 			return zero, fmt.Errorf("operation failed after %d attempts: %w", maxAttempts, err)
 		}
-		
+
 		// Calculate delay with exponential backoff
 		delay := time.Duration(baseDelayMS*int(math.Pow(2, float64(attempt-1)))) * time.Millisecond
 		fmt.Printf("Retry attempt %d after %v delay\n", attempt, delay)
 		time.Sleep(delay)
 	}
-	
+
 	return zero, fmt.Errorf("unexpected end of retry loop")
 }
 
@@ -261,7 +261,7 @@ func RetryWithBackoff[T any](
 func FindDuplicates[T comparable](items []T) []T {
 	seen := make(map[T]bool)
 	duplicates := make([]T, 0)
-	
+
 	for _, item := range items {
 		if seen[item] {
 			// Only add to duplicates once
@@ -279,24 +279,24 @@ func FindDuplicates[T comparable](items []T) []T {
 			seen[item] = true
 		}
 	}
-	
+
 	return duplicates
 }
 
 // MergeMaps merges two maps, with the second taking precedence
 func MergeMaps[K comparable, V any](map1, map2 map[K]V) map[K]V {
 	result := make(map[K]V)
-	
+
 	// Copy first map
 	for k, v := range map1 {
 		result[k] = v
 	}
-	
+
 	// Override with second map
 	for k, v := range map2 {
 		result[k] = v
 	}
-	
+
 	return result
 }
 
@@ -307,11 +307,11 @@ func TruncateString(s string, maxLength int) string {
 	if len(s) <= maxLength {
 		return s
 	}
-	
+
 	if maxLength <= 3 {
 		return s[:maxLength]
 	}
-	
+
 	return s[:maxLength-3] + "..."
 }
 
@@ -420,7 +420,7 @@ func (e *ValidationError) Is(target error) bool {
 // Package initialization
 func init() {
 	fmt.Println("[INIT] Utils package initialized")
-	
+
 	// Initialize default processor
 	DefaultProcessor = CreateDefaultProcessor()
 }

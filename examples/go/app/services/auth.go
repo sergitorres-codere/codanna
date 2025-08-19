@@ -24,8 +24,8 @@ import (
 
 // Package-level constants
 const (
-	TokenExpiry     = 24 * time.Hour
-	MaxSessions     = 1000
+	TokenExpiry       = 24 * time.Hour
+	MaxSessions       = 1000
 	MinPasswordLength = 6
 )
 
@@ -47,10 +47,10 @@ func (s *Session) IsExpired() bool {
 
 // AuthService handles user authentication and session management
 type AuthService struct {
-	db       *DatabaseConnection
-	sessions map[AuthToken]*Session
-	users    map[string]*models.User // email -> user
-	mutex    sync.RWMutex
+	db           *DatabaseConnection
+	sessions     map[AuthToken]*Session
+	users        map[string]*models.User // email -> user
+	mutex        sync.RWMutex
 	tokenCounter uint64
 }
 
@@ -83,7 +83,7 @@ func (a *AuthService) RegisterUser(user *models.User) error {
 	a.users[user.Email()] = user
 
 	// Mock database operation
-	if err := a.db.Execute("INSERT INTO users (name, email, role) VALUES (?, ?, ?)", 
+	if err := a.db.Execute("INSERT INTO users (name, email, role) VALUES (?, ?, ?)",
 		[]interface{}{user.Name(), user.Email(), user.Role().String()}); err != nil {
 		return fmt.Errorf("database error: %w", err)
 	}
@@ -155,7 +155,7 @@ func (a *AuthService) ValidateSession(token AuthToken) (*models.User, error) {
 	// Find user by ID
 	a.mutex.RLock()
 	defer a.mutex.RUnlock()
-	
+
 	for _, user := range a.users {
 		if user.ID == session.UserID {
 			return user, nil
@@ -182,7 +182,7 @@ func (a *AuthService) Logout(token AuthToken) error {
 func (a *AuthService) GetSessionCount() int {
 	a.mutex.RLock()
 	defer a.mutex.RUnlock()
-	
+
 	count := 0
 	for _, session := range a.sessions {
 		if !session.IsExpired() {
@@ -240,7 +240,7 @@ func VerifyPassword(password, hash string) bool {
 // ParseAuthError attempts to parse an error string into an AuthError
 func ParseAuthError(errorMsg string) (*AuthError, error) {
 	errorMsg = strings.ToLower(errorMsg)
-	
+
 	switch {
 	case strings.Contains(errorMsg, "not found"):
 		return NewAuthError(ErrUserNotFound, errorMsg), nil
