@@ -8,7 +8,9 @@ use clap::{
     builder::styling::{AnsiColor, Effects, Styles},
 };
 use codanna::FileId;
-use codanna::parsing::{LanguageParser, PhpParser, PythonParser, RustParser, TypeScriptParser};
+use codanna::parsing::{
+    GoParser, LanguageParser, PhpParser, PythonParser, RustParser, TypeScriptParser,
+};
 use codanna::types::SymbolCounter;
 use codanna::{IndexPersistence, Settings, SimpleIndexer, Symbol, SymbolKind};
 use serde::Serialize;
@@ -2454,6 +2456,7 @@ fn run_benchmark_command(language: &str, custom_file: Option<PathBuf>) {
         "python" => benchmark_python_parser(custom_file),
         "php" => benchmark_php_parser(custom_file),
         "typescript" | "ts" => benchmark_typescript_parser(custom_file),
+        "go" => benchmark_go_parser(custom_file),
         "all" => {
             benchmark_rust_parser(None);
             println!();
@@ -2462,10 +2465,12 @@ fn run_benchmark_command(language: &str, custom_file: Option<PathBuf>) {
             benchmark_php_parser(None);
             println!();
             benchmark_typescript_parser(None);
+            println!();
+            benchmark_go_parser(None);
         }
         _ => {
             eprintln!("Unknown language: {language}");
-            eprintln!("Available languages: rust, python, php, typescript, all");
+            eprintln!("Available languages: rust, python, php, typescript, go, all");
             std::process::exit(1);
         }
     }
@@ -2553,6 +2558,22 @@ fn benchmark_typescript_parser(custom_file: Option<PathBuf>) {
 
     let mut parser = TypeScriptParser::new().expect("Failed to create TypeScript parser");
     benchmark_parser("TypeScript", &mut parser, &code, file_path);
+}
+
+fn benchmark_go_parser(custom_file: Option<PathBuf>) {
+    let (code, file_path) = if let Some(path) = custom_file {
+        let content = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+            eprintln!("Failed to read {}: {e}", path.display());
+            std::process::exit(1);
+        });
+        (content, Some(path))
+    } else {
+        // Generate benchmark code
+        (generate_go_benchmark_code(), None)
+    };
+
+    let mut parser = GoParser::new().expect("Failed to create Go parser");
+    benchmark_parser("Go", &mut parser, &code, file_path);
 }
 
 fn benchmark_parser(
@@ -2890,6 +2911,10 @@ let variable_{i}: number = {i};
     }
 
     code
+}
+
+fn generate_go_benchmark_code() -> String {
+    let mut code = String::from("// Go benchmark file\n\n");
 }
 
 #[cfg(test)]

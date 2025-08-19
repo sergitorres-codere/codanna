@@ -723,7 +723,7 @@ impl Settings {
             } else if line.starts_with("[languages.") {
                 if !in_languages_section {
                     result.push_str("\n# Language-specific settings\n");
-                    result.push_str("# Currently supported: Rust, Python, PHP\n");
+                    result.push_str("# Currently supported: Rust, Python, PHP, Typescript, Go\n");
                     in_languages_section = true;
                 }
                 result.push('\n');

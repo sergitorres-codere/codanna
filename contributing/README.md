@@ -12,7 +12,7 @@ Thank you for your interest in contributing to Codanna! This guide focuses on th
 ## Current Status (v0.5.2)
 
 ✅ **Stable Architecture** - Language registry, resolution API, and signature extraction are production-ready
-✅ **4 Languages Supported** - Rust, TypeScript, Python, PHP with comprehensive feature parity
+✅ **5 Languages Supported** - Rust, TypeScript, Python, Go, PHP with comprehensive feature parity
 ✅ **Ready for New Languages** - Mature, well-tested architecture for easy expansion
 
 ## Development Setup
@@ -55,7 +55,7 @@ Thank you for your interest in contributing to Codanna! This guide focuses on th
 ```
 codanna/
 ├── src/
-│   ├── parsing/         # Language parsers (rust/, typescript/, python/, php/)
+│   ├── parsing/         # Language parsers (rust/, typescript/, python/, php/, go/)
 │   ├── indexing/        # Symbol indexing and resolution
 │   ├── storage/         # Tantivy and memory-mapped caches
 │   └── mcp/            # MCP server and HTTP/HTTPS endpoints

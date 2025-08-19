@@ -86,6 +86,7 @@ pub trait ResolutionScope: Send + Sync {
 /// - TypeScript: interfaces and class extension
 /// - Python: multiple inheritance with MRO
 /// - PHP: traits and interfaces
+/// - Go: interfaces and struct embedding
 pub trait InheritanceResolver: Send + Sync {
     /// Add an inheritance relationship
     fn add_inheritance(&mut self, child: String, parent: String, kind: &str);

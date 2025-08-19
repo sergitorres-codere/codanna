@@ -80,6 +80,7 @@ impl<'de> Deserialize<'de> for LanguageId {
             "javascript" => "javascript",
             "typescript" => "typescript",
             "php" => "php",
+            "go" => "go",
             // For unknown languages, we leak the string to get 'static lifetime
             // This is safe because language identifiers are typically created once
             // at startup and live for the entire program
@@ -371,6 +372,7 @@ fn initialize_registry(registry: &mut LanguageRegistry) {
     super::python::register(registry);
     super::php::register(registry);
     super::typescript::register(registry);
+    super::go::register(registry);
 
     // Future languages will be added here:
     // super::javascript_definition::register(registry);
@@ -485,11 +487,13 @@ mod tests {
         assert!(registry.is_available(LanguageId::new("rust")));
         assert!(registry.is_available(LanguageId::new("python")));
         assert!(registry.is_available(LanguageId::new("php")));
+        assert!(registry.is_available(LanguageId::new("go")));
 
         // Check extension mappings
         assert!(registry.get_by_extension("rs").is_some());
         assert!(registry.get_by_extension("py").is_some());
         assert!(registry.get_by_extension("php").is_some());
+        assert!(registry.get_by_extension("go").is_some());
 
         // Check language names
         let rust = registry.get(LanguageId::new("rust")).unwrap();
@@ -500,5 +504,8 @@ mod tests {
 
         let php = registry.get(LanguageId::new("php")).unwrap();
         assert_eq!(php.name(), "PHP");
+
+        let go = registry.get(LanguageId::new("go")).unwrap();
+        assert_eq!(go.name(), "Go");
     }
 }

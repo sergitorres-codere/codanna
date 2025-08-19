@@ -1,8 +1,8 @@
 //! Go-specific language behavior implementation
 
+use crate::parsing::LanguageBehavior;
 use crate::parsing::behavior_state::{BehaviorState, StatefulBehavior};
 use crate::parsing::resolution::{InheritanceResolver, ResolutionScope};
-use crate::parsing::LanguageBehavior;
 use crate::storage::DocumentIndex;
 use crate::types::FileId;
 use crate::{SymbolId, Visibility};
@@ -228,8 +228,8 @@ impl LanguageBehavior for GoBehavior {
 
     // Go-specific: Support hoisting
     fn is_resolvable_symbol(&self, symbol: &crate::Symbol) -> bool {
-        use crate::symbol::ScopeContext;
         use crate::SymbolKind;
+        use crate::symbol::ScopeContext;
 
         // Go hoists function declarations and class declarations
         // They can be used before their definition in the file

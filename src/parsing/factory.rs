@@ -4,9 +4,9 @@
 //! Validates language enablement and provides discovery of supported languages.
 
 use super::{
-    Language, LanguageBehavior, LanguageId, LanguageParser, PhpBehavior, PhpParser, PythonBehavior,
-    PythonParser, RustBehavior, RustParser, TypeScriptBehavior, TypeScriptParser, GoBehavior, GoParser, 
-    get_registry,
+    GoBehavior, GoParser, Language, LanguageBehavior, LanguageId, LanguageParser, PhpBehavior,
+    PhpParser, PythonBehavior, PythonParser, RustBehavior, RustParser, TypeScriptBehavior,
+    TypeScriptParser, get_registry,
 };
 use crate::{IndexError, IndexResult, Settings};
 use std::sync::Arc;
@@ -146,11 +146,11 @@ impl ParserFactory {
             Language::Php => {
                 let parser = PhpParser::new().map_err(|e| IndexError::General(e.to_string()))?;
                 Ok(Box::new(parser))
-            },
+            }
             Language::Go => {
                 let parser = GoParser::new().map_err(|e| IndexError::General(e.to_string()))?;
                 Ok(Box::new(parser))
-            },
+            }
         }
     }
 
@@ -224,7 +224,7 @@ impl ParserFactory {
                     "{} parser not yet implemented.",
                     language.name()
                 )));
-            },
+            }
             Language::Go => {
                 let parser = GoParser::new().map_err(|e| IndexError::General(e.to_string()))?;
                 ParserWithBehavior {

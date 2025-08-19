@@ -73,10 +73,8 @@ impl Language {
             "ts" | "tsx" | "mts" | "cts" => Some(Language::TypeScript),
             "php" | "php3" | "php4" | "php5" | "php7" | "php8" | "phps" | "phtml" => {
                 Some(Language::Php)
-            },
-            "go" | "go.mod" | "go.sum" => {
-                Some(Language::Go)
-            },
+            }
+            "go" | "go.mod" | "go.sum" => Some(Language::Go),
             _ => None,
         }
     }
@@ -206,6 +204,6 @@ mod tests {
         assert!(Language::Php.extensions().contains(&"phtml"));
         assert!(Language::Go.extensions().contains(&"go"));
         assert!(Language::Go.extensions().contains(&"go.mod"));
-        assert!(Language::Go.extensions().contains(&"go.sum")); 
+        assert!(Language::Go.extensions().contains(&"go.sum"));
     }
 }

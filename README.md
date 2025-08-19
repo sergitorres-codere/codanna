@@ -110,7 +110,7 @@ codanna mcp semantic_search_docs query:"where do we resolve symbol references  0
 
 ## How It Works
 
-1. **Parse fast** - Tree-sitter AST parsing (same as GitHub code navigator) for Rust, Python, TypeScript and PHP (more on deck)
+1. **Parse fast** - Tree-sitter AST parsing (same as GitHub code navigator) for Rust, Python, TypeScript, Go and PHP (more on deck)
 2. **Extract real stuff** -  functions, traits, type relationships, call graphs
 3. **Embed** - semantic vectors built from your doc comments
 4. **Index** - Tantivy + memory-mapped symbol cache for <10ms lookups
@@ -377,6 +377,7 @@ Parser benchmarks on a 750-symbol test file:
 | **Python** | 75,047 symbols/sec | 7.5x faster ✓ | Production |
 | **TypeScript** | 82,156 symbols/sec | 8.2x faster ✓ | Production |
 | **PHP** | 68,432 symbols/sec | 6.8x faster ✓ | Production |
+| **Go** | ??? symbols/sec | ??? faster ✓ | Production |
 | JavaScript | - | - | Planned |
 
 Key achievements:
@@ -417,7 +418,7 @@ codanna benchmark python       # Test specific language
 
 ## Current Limitations
 
-- Supports Rust, Python, TypeScript, PHP (more language support coming)
+- Supports Rust, Python, TypeScript, Go and PHP (more language support coming)
 - Semantic search requires English documentation/comments
 - Windows support is experimental
 
@@ -433,12 +434,12 @@ codanna benchmark python       # Test specific language
 | Language Registry Architecture | Modular parser system for easy language additions | ✓ |
 | PHP Support | Full PHP parser implementation | ✓ |
 | TypeScript Support | TypeScript with type annotations | ✓ |
+| Go Support | Go with type annotations | ✓ |
 
 ### Roadmap
 | Feature | Description | Status |
 |---------|-------------|--------|
 | JavaScript Support | Full JavaScript/ES6+ parser | ○ |
-| Go Support | Go language with interfaces and goroutines | ○ |
 | C# Support | C# with .NET ecosystem support | ○ |
 | Java Support | Java with class hierarchies | ○ |
 | C/C++ Support | C and C++ with headers and templates | ○ |

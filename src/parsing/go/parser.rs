@@ -1909,25 +1909,35 @@ export * from './common';
 
         // Verify specific imports
         // Named import creates one import with no alias
-        assert!(imports
-            .iter()
-            .any(|i| i.path == "react" && i.alias.is_none()));
+        assert!(
+            imports
+                .iter()
+                .any(|i| i.path == "react" && i.alias.is_none())
+        );
         // Default import has alias
-        assert!(imports
-            .iter()
-            .any(|i| i.path == "react" && i.alias == Some("React".to_string())));
+        assert!(
+            imports
+                .iter()
+                .any(|i| i.path == "react" && i.alias == Some("React".to_string()))
+        );
         // Namespace import has alias and is_glob
-        assert!(imports
-            .iter()
-            .any(|i| i.path == "./utils" && i.alias == Some("utils".to_string()) && i.is_glob));
+        assert!(
+            imports
+                .iter()
+                .any(|i| i.path == "./utils" && i.alias == Some("utils".to_string()) && i.is_glob)
+        );
         // Type import (named)
-        assert!(imports
-            .iter()
-            .any(|i| i.path == "./types" && i.alias.is_none()));
+        assert!(
+            imports
+                .iter()
+                .any(|i| i.path == "./types" && i.alias.is_none())
+        );
         // Side-effect import
-        assert!(imports
-            .iter()
-            .any(|i| i.path == "./styles.css" && i.alias.is_none()));
+        assert!(
+            imports
+                .iter()
+                .any(|i| i.path == "./styles.css" && i.alias.is_none())
+        );
         // Re-export
         assert!(imports.iter().any(|i| i.path == "./Button"));
         // Re-export all
@@ -2236,9 +2246,11 @@ export type { Props } from './types';
             );
         }
 
-        assert!(imports
-            .iter()
-            .any(|i| i.path == "react" && i.alias.is_none()));
+        assert!(
+            imports
+                .iter()
+                .any(|i| i.path == "react" && i.alias.is_none())
+        );
         assert!(imports.iter().any(|i| i.path == "./helper"));
         assert!(imports.iter().any(|i| i.path == "./utils" && i.is_glob));
 
