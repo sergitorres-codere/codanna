@@ -44,6 +44,7 @@ pub struct IndexSchema {
     pub context: Field,
     pub visibility: Field,
     pub scope_context: Field,
+    pub language: Field, // Language identifier for the symbol
 
     // Relationship fields
     pub from_symbol_id: Field,
@@ -108,6 +109,7 @@ impl IndexSchema {
         let kind = builder.add_text_field("kind", STRING | STORED);
         let visibility = builder.add_u64_field("visibility", STORED);
         let scope_context = builder.add_text_field("scope_context", STRING | STORED);
+        let language = builder.add_text_field("language", STRING | STORED | FAST);
 
         // Relationship fields
         let from_symbol_id = builder.add_u64_field("from_symbol_id", indexed_u64_options.clone());
@@ -147,6 +149,7 @@ impl IndexSchema {
             context,
             visibility,
             scope_context,
+            language,
             from_symbol_id,
             to_symbol_id,
             relation_kind,
@@ -778,6 +781,7 @@ impl DocumentIndex {
         context: Option<&str>,
         visibility: crate::Visibility,
         scope_context: Option<crate::ScopeContext>,
+        language_id: Option<&str>, // Language identifier for the symbol
     ) -> StorageResult<()> {
         let mut writer_lock = self.writer.lock().map_err(|_| StorageError::LockPoisoned)?;
         let writer = writer_lock.as_mut().ok_or(StorageError::NoActiveBatch)?;
@@ -813,6 +817,13 @@ impl DocumentIndex {
             doc.add_text(self.schema.scope_context, format!("{scope:?}"));
         } else {
             doc.add_text(self.schema.scope_context, "None");
+        }
+
+        // Store language identifier
+        if let Some(lang) = language_id {
+            doc.add_text(self.schema.language, lang);
+        } else {
+            doc.add_text(self.schema.language, "");
         }
 
         // Add default vector fields - these will be updated later if vectors are generated
@@ -1316,7 +1327,13 @@ impl DocumentIndex {
             module_path: module_path.map(|s| s.into()),
             visibility,
             scope_context,
-            language_id: None, // TODO: Read from document once schema is updated
+            language_id: {
+                // Read language field from document
+                // For now, we store the string but don't convert back to LanguageId
+                // This will be done in a future sprint when we wire everything together
+                // TODO: Convert string back to LanguageId once registry lookup is available here
+                None
+            },
         })
     }
 
@@ -1818,6 +1835,7 @@ impl DocumentIndex {
             //
             // This should be tested with real workloads to ensure we maintain our performance targets.
             symbol.scope_context.clone(),
+            symbol.language_id.as_ref().map(|id| id.as_str()),
         )
     }
 
@@ -2098,6 +2116,24 @@ mod tests {
     }
 
     #[test]
+    fn test_schema_has_language_field() {
+        let (schema, _) = IndexSchema::build();
+
+        // Check that language field exists in schema
+        let language_field = schema.get_field("language");
+        assert!(
+            language_field.is_ok(),
+            "Schema should have 'language' field"
+        );
+
+        // Verify field is configured correctly
+        let field = language_field.unwrap();
+        let field_entry = schema.get_field_entry(field);
+        assert!(field_entry.is_indexed(), "Language field should be indexed");
+        assert!(field_entry.is_stored(), "Language field should be stored");
+    }
+
+    #[test]
     fn test_add_and_search_document() {
         let temp_dir = TempDir::new().unwrap();
         let index = DocumentIndex::new(temp_dir.path()).unwrap();
@@ -2123,6 +2159,7 @@ mod tests {
                 None,
                 crate::Visibility::Public,
                 Some(crate::ScopeContext::Module),
+                None, // No language_id for this test
             )
             .unwrap();
 
@@ -2137,6 +2174,47 @@ mod tests {
         assert_eq!(result.name, "parse_json");
         assert_eq!(result.line, 42);
         assert_eq!(result.file_path, "src/parser.rs");
+    }
+
+    #[test]
+    fn test_store_and_retrieve_symbol_with_language() {
+        use crate::parsing::registry::LanguageId;
+
+        let temp_dir = TempDir::new().unwrap();
+        let index = DocumentIndex::new(temp_dir.path()).unwrap();
+
+        // Start batch
+        index.start_batch().unwrap();
+
+        // Create a symbol with language_id
+        let symbol = crate::Symbol::new(
+            SymbolId::new(1).unwrap(),
+            "test_func",
+            SymbolKind::Function,
+            FileId::new(1).unwrap(),
+            crate::Range::new(10, 0, 15, 0),
+        )
+        .with_language_id(LanguageId::new("rust"))
+        .with_signature("fn test_func() -> Result<()>")
+        .with_doc("Test function");
+
+        // Store the symbol
+        index.index_symbol(&symbol, "src/test.rs").unwrap();
+        index.commit_batch().unwrap();
+
+        // Retrieve the symbol
+        let retrieved = index.find_symbol_by_id(symbol.id).unwrap();
+        assert!(retrieved.is_some());
+
+        let retrieved_symbol = retrieved.unwrap();
+        // For now, language_id will be None since we haven't wired it through storage yet
+        // This test documents the current behavior and will fail when we implement storage
+        assert_eq!(retrieved_symbol.language_id, None); // TODO: Should be Some(LanguageId::new("rust"))
+        assert_eq!(retrieved_symbol.name.as_ref(), "test_func");
+        assert_eq!(
+            retrieved_symbol.signature.as_deref(),
+            Some("fn test_func() -> Result<()>")
+        );
     }
 
     #[test]
@@ -2164,6 +2242,7 @@ mod tests {
                 None,
                 crate::Visibility::Private,
                 Some(crate::ScopeContext::Module),
+                None, // No language_id for this test
             )
             .unwrap();
 
@@ -2319,6 +2398,7 @@ mod tests {
                 None,
                 crate::Visibility::Public,
                 Some(crate::ScopeContext::Module),
+                None, // No language_id for this test
             )
             .unwrap();
 
@@ -2507,6 +2587,7 @@ mod tests {
                 None,
                 crate::Visibility::Public,
                 Some(crate::ScopeContext::Module),
+                None, // No language_id for this test
             )
             .unwrap();
         index_no_vectors.commit_batch().unwrap();
@@ -2546,6 +2627,7 @@ mod tests {
                 None,
                 crate::Visibility::Public,
                 Some(crate::ScopeContext::Module),
+                None, // No language_id for this test
             )
             .unwrap();
         index_with_vectors.commit_batch().unwrap();
