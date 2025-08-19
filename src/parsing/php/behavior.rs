@@ -221,7 +221,9 @@ impl LanguageBehavior for PhpBehavior {
         let symbol_name = segments.last()?;
 
         // Find symbols with this name (using index for performance)
-        let candidates = document_index.find_symbols_by_name(symbol_name).ok()?;
+        let candidates = document_index
+            .find_symbols_by_name(symbol_name, None)
+            .ok()?;
 
         // Find the one with matching module path using PHP-specific rules
         for candidate in &candidates {

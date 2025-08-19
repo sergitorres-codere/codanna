@@ -197,7 +197,7 @@ impl ImportResolver {
         document_index: &DocumentIndex,
     ) -> Option<SymbolId> {
         // Use Tantivy to find symbols with this name
-        let candidates = document_index.find_symbols_by_name(name).ok()?;
+        let candidates = document_index.find_symbols_by_name(name, None).ok()?;
 
         // Filter by module path
         candidates

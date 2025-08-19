@@ -153,7 +153,7 @@ pub fn retrieve_callers(indexer: &SimpleIndexer, function: &str, format: OutputF
     }
 }
 
-/// Execute retrieve calls command  
+/// Execute retrieve calls command
 pub fn retrieve_calls(indexer: &SimpleIndexer, function: &str, format: OutputFormat) -> ExitCode {
     let mut output = OutputManager::new(format);
     let symbols = indexer.find_symbols_by_name(function);

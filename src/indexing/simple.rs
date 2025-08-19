@@ -665,6 +665,7 @@ impl SimpleIndexer {
             &module_path,
             behavior.as_ref(),
             &mut symbol_counter,
+            language_id,
         )?;
         self.extract_and_store_relationships(&mut parser, content, file_id, behavior.as_ref())?;
         self.update_symbol_counter(&symbol_counter)?;
@@ -788,6 +789,7 @@ impl SimpleIndexer {
         module_path: &Option<String>,
         behavior: &dyn crate::parsing::LanguageBehavior,
         symbol_counter: &mut SymbolCounter,
+        language_id: LanguageId,
     ) -> IndexResult<()> {
         let symbols = parser.parse(content, file_id, symbol_counter);
 
@@ -825,6 +827,9 @@ impl SimpleIndexer {
         for mut symbol in symbols {
             // Track trait symbols
             trait_symbols.insert(symbol.name.to_string(), symbol.kind);
+
+            // Set the language_id on the symbol
+            symbol.language_id = Some(language_id);
 
             self.configure_symbol(&mut symbol, module_path, behavior);
             self.store_symbol(symbol, path_str)?;
@@ -1386,7 +1391,7 @@ impl SimpleIndexer {
 
         // Fallback to Tantivy
         self.document_index
-            .find_symbols_by_name(name)
+            .find_symbols_by_name(name, None)
             .ok()
             .and_then(|symbols| symbols.first().map(|s| s.id))
     }
@@ -1395,12 +1400,31 @@ impl SimpleIndexer {
         // For now, still use Tantivy for full symbol retrieval
         // Cache only helps with ID lookups
         self.document_index
-            .find_symbols_by_name(name)
+            .find_symbols_by_name(name, None)
             .unwrap_or_default()
+            .into_iter()
+            .map(|mut symbol| {
+                // Enrich the symbol with language_id from our file_languages cache
+                if let Some(language_id) = self.file_languages.get(&symbol.file_id) {
+                    symbol.language_id = Some(*language_id);
+                }
+                symbol
+            })
+            .collect()
     }
 
     pub fn get_symbol(&self, id: SymbolId) -> Option<Symbol> {
-        self.document_index.find_symbol_by_id(id).ok().flatten()
+        self.document_index
+            .find_symbol_by_id(id)
+            .ok()
+            .flatten()
+            .map(|mut symbol| {
+                // Enrich the symbol with language_id from our file_languages cache
+                if let Some(language_id) = self.file_languages.get(&symbol.file_id) {
+                    symbol.language_id = Some(*language_id);
+                }
+                symbol
+            })
     }
 
     pub fn get_called_functions(&self, symbol_id: SymbolId) -> Vec<Symbol> {
@@ -1799,7 +1823,7 @@ impl SimpleIndexer {
         module_filter: Option<&str>,
     ) -> IndexResult<Vec<SearchResult>> {
         self.document_index
-            .search(query, limit, kind_filter, module_filter)
+            .search(query, limit, kind_filter, module_filter, None)
             .map_err(|e| IndexError::General(format!("Search failed: {e}")))
     }
 
@@ -2112,7 +2136,7 @@ impl SimpleIndexer {
                 // Find 'from' symbols - these should be in the current file
                 let all_from_symbols = self
                     .document_index
-                    .find_symbols_by_name(&rel.from_name)
+                    .find_symbols_by_name(&rel.from_name, None)
                     .map_err(|e| IndexError::TantivyError {
                         operation: "find_symbols_by_name".to_string(),
                         cause: e.to_string(),
@@ -2136,7 +2160,7 @@ impl SimpleIndexer {
                     // Methods aren't "in scope" - they're defined by their container
                     let method_symbols = self
                         .document_index
-                        .find_symbols_by_name(&rel.to_name)
+                        .find_symbols_by_name(&rel.to_name, None)
                         .map_err(|e| IndexError::TantivyError {
                             operation: "find_symbols_by_name".to_string(),
                             cause: e.to_string(),
@@ -2635,7 +2659,7 @@ pub struct World;
         // Find symbols and check their module paths
         let hello_symbols = indexer
             .document_index
-            .find_symbols_by_name("hello")
+            .find_symbols_by_name("hello", None)
             .unwrap();
         assert_eq!(hello_symbols.len(), 1);
         assert_eq!(
@@ -2645,7 +2669,7 @@ pub struct World;
 
         let world_symbols = indexer
             .document_index
-            .find_symbols_by_name("World")
+            .find_symbols_by_name("World", None)
             .unwrap();
         assert_eq!(world_symbols.len(), 1);
         assert_eq!(
@@ -2867,7 +2891,10 @@ pub struct Another {
         indexer.resolve_cross_file_relationships().unwrap();
 
         // Verify correct resolution
-        let main_symbols = indexer.document_index.find_symbols_by_name("main").unwrap();
+        let main_symbols = indexer
+            .document_index
+            .find_symbols_by_name("main", None)
+            .unwrap();
         assert_eq!(main_symbols.len(), 1);
 
         // Get relationships from main
@@ -3363,5 +3390,131 @@ pub struct Another {
         assert_eq!(rust_symbol.visibility, Visibility::Public); // Rust: "pub " means public
         assert_eq!(python_symbol.visibility, Visibility::Public); // Python: no underscore prefix means public
         assert_eq!(php_symbol.visibility, Visibility::Public); // PHP: "public function" means public
+    }
+
+    #[test]
+    fn test_symbols_get_language_id_during_indexing() {
+        use crate::parsing::registry::LanguageId;
+        use std::fs;
+        use tempfile::TempDir;
+
+        // Create a temporary directory and test files
+        let temp_dir = TempDir::new().unwrap();
+        let rust_file = temp_dir.path().join("test.rs");
+        let python_file = temp_dir.path().join("test.py");
+        let ts_file = temp_dir.path().join("test.ts");
+
+        // Write simple test content
+        fs::write(&rust_file, "fn main() {}").unwrap();
+        fs::write(&python_file, "def main(): pass").unwrap();
+        fs::write(&ts_file, "function main() {}").unwrap();
+
+        // Create indexer with temp directory as root
+        let settings = Settings {
+            workspace_root: Some(temp_dir.path().to_path_buf()),
+            ..Default::default()
+        };
+        let mut indexer = SimpleIndexer::with_settings(Arc::new(settings));
+
+        // Index the files
+        let rust_result = indexer
+            .index_file(&rust_file)
+            .expect("Failed to index Rust file");
+        let python_result = indexer
+            .index_file(&python_file)
+            .expect("Failed to index Python file");
+        let ts_result = indexer
+            .index_file(&ts_file)
+            .expect("Failed to index TypeScript file");
+
+        // Verify files were indexed successfully
+        assert!(matches!(rust_result, crate::IndexingResult::Indexed(_)));
+        assert!(matches!(python_result, crate::IndexingResult::Indexed(_)));
+        assert!(matches!(ts_result, crate::IndexingResult::Indexed(_)));
+
+        // Find the symbols - be more specific since multiple files have 'main'
+        // Get all symbols named 'main' and find the one from the Rust file
+        let all_main_symbols = indexer.find_symbols_by_name("main");
+        assert!(
+            !all_main_symbols.is_empty(),
+            "Should find 'main' symbols after indexing"
+        );
+
+        // Debug: Print all main symbols found
+        println!("\n=== All 'main' symbols found ===");
+        for (i, symbol) in all_main_symbols.iter().enumerate() {
+            println!(
+                "Symbol {}: name='{}', language_id={:?}, file_id={:?}",
+                i, symbol.name, symbol.language_id, symbol.file_id
+            );
+        }
+
+        // Debug: Print file_languages HashMap
+        println!("\n=== File -> Language mapping ===");
+        for (file_id, lang_id) in &indexer.file_languages {
+            println!(
+                "FileId({:?}) -> LanguageId({:?})",
+                file_id.0,
+                lang_id.as_str()
+            );
+        }
+
+        let rust_symbol = all_main_symbols
+            .iter()
+            .find(|s| s.language_id == Some(LanguageId::new("rust")))
+            .expect("Should find a Rust 'main' symbol");
+
+        println!("\n=== Selected Rust symbol ===");
+        println!(
+            "Symbol: name='{}', language_id={:?}",
+            rust_symbol.name, rust_symbol.language_id
+        );
+
+        // Verify the symbol has the correct language_id
+        assert_eq!(
+            rust_symbol.language_id,
+            Some(LanguageId::new("rust")),
+            "Symbol from Rust file should have language_id set to 'rust'"
+        );
+
+        // Test Python symbol - use 'main' which we know exists
+        let python_symbols = all_main_symbols
+            .iter()
+            .filter(|s| s.language_id == Some(LanguageId::new("python")))
+            .collect::<Vec<_>>();
+        println!("\n=== Python symbols ===");
+        for symbol in &python_symbols {
+            println!(
+                "Symbol: name='{}', language_id={:?}",
+                symbol.name, symbol.language_id
+            );
+            assert_eq!(
+                symbol.language_id,
+                Some(LanguageId::new("python")),
+                "Python symbol should have language_id set to 'python'"
+            );
+        }
+        assert!(!python_symbols.is_empty(), "Should find Python main symbol");
+
+        // Test TypeScript symbol
+        let ts_symbols = all_main_symbols
+            .iter()
+            .filter(|s| s.language_id == Some(LanguageId::new("typescript")))
+            .collect::<Vec<_>>();
+        println!("\n=== TypeScript symbols ===");
+        for symbol in &ts_symbols {
+            println!(
+                "Symbol: name='{}', language_id={:?}",
+                symbol.name, symbol.language_id
+            );
+        }
+        assert!(!ts_symbols.is_empty(), "Should find TypeScript main symbol");
+
+        // Verify that language detection is working internally
+        assert_eq!(
+            indexer.file_languages.len(),
+            3,
+            "Should have 3 files with language mappings"
+        );
     }
 }

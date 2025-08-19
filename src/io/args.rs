@@ -17,6 +17,8 @@ use std::collections::HashMap;
 ///
 /// # Example
 /// ```
+/// use codanna::io::args::parse_positional_args;
+///
 /// let args = vec!["unified output".to_string(), "limit:3".to_string()];
 /// let (query, params) = parse_positional_args(&args);
 /// assert_eq!(query, Some("unified output".to_string()));

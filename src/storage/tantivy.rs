@@ -904,6 +904,7 @@ impl DocumentIndex {
         limit: usize,
         kind_filter: Option<SymbolKind>,
         module_filter: Option<&str>,
+        language_filter: Option<&str>,
     ) -> StorageResult<Vec<SearchResult>> {
         let searcher = self.reader.searcher();
 
@@ -953,6 +954,15 @@ impl DocumentIndex {
 
         if let Some(module) = module_filter {
             let term = Term::from_field_text(self.schema.module_path, module);
+            all_clauses.push((
+                Occur::Must,
+                Box::new(TermQuery::new(term, IndexRecordOption::Basic)),
+            ));
+        }
+
+        // Add language filter if provided
+        if let Some(lang) = language_filter {
+            let term = Term::from_field_text(self.schema.language, lang);
             all_clauses.push((
                 Occur::Must,
                 Box::new(TermQuery::new(term, IndexRecordOption::Basic)),
@@ -1090,7 +1100,11 @@ impl DocumentIndex {
     }
 
     /// Find symbols by name
-    pub fn find_symbols_by_name(&self, name: &str) -> StorageResult<Vec<crate::Symbol>> {
+    pub fn find_symbols_by_name(
+        &self,
+        name: &str,
+        language_filter: Option<&str>,
+    ) -> StorageResult<Vec<crate::Symbol>> {
         let searcher = self.reader.searcher();
 
         // Use a QueryParser to correctly handle tokenization of the symbol name.
@@ -1106,17 +1120,30 @@ impl DocumentIndex {
             }
         };
 
-        // Combine with a filter to ensure we only get symbol documents.
-        let final_query = BooleanQuery::new(vec![
+        // Build query clauses
+        let mut query_clauses = vec![
             (Occur::Must, query),
             (
                 Occur::Must,
                 Box::new(TermQuery::new(
                     Term::from_field_text(self.schema.doc_type, "symbol"),
                     IndexRecordOption::Basic,
-                )),
+                )) as Box<dyn Query>,
             ),
-        ]);
+        ];
+
+        // Add language filter if provided
+        if let Some(lang) = language_filter {
+            query_clauses.push((
+                Occur::Must,
+                Box::new(TermQuery::new(
+                    Term::from_field_text(self.schema.language, lang),
+                    IndexRecordOption::Basic,
+                )),
+            ));
+        }
+
+        let final_query = BooleanQuery::new(query_clauses);
 
         let top_docs = searcher.search(&final_query, &TopDocs::with_limit(100))?;
         let mut symbols = Vec::new();
@@ -1328,10 +1355,10 @@ impl DocumentIndex {
             visibility,
             scope_context,
             language_id: {
-                // Read language field from document
-                // For now, we store the string but don't convert back to LanguageId
-                // This will be done in a future sprint when we wire everything together
-                // TODO: Convert string back to LanguageId once registry lookup is available here
+                // Cannot convert string to LanguageId here as it requires &'static str
+                // The storage layer remains language-agnostic
+                // For now, return None - the actual language is stored in the document
+                // and will be available when we implement language filtering in queries
                 None
             },
         })
@@ -2167,7 +2194,7 @@ mod tests {
         index.commit_batch().unwrap();
 
         // Search for it
-        let results = index.search("json", 10, None, None).unwrap();
+        let results = index.search("json", 10, None, None, None).unwrap();
         assert_eq!(results.len(), 1);
 
         let result = &results[0];
@@ -2250,11 +2277,11 @@ mod tests {
         index.commit_batch().unwrap();
 
         // Search with typo - try searching for a single word with typo
-        let results = index.search("handle", 10, None, None).unwrap();
+        let results = index.search("handle", 10, None, None, None).unwrap();
         assert!(!results.is_empty(), "Should find exact match");
 
         // Now try with a small typo
-        let results = index.search("handl", 10, None, None).unwrap();
+        let results = index.search("handl", 10, None, None, None).unwrap();
         assert!(!results.is_empty(), "Should find with fuzzy search");
     }
 
@@ -2593,7 +2620,7 @@ mod tests {
         index_no_vectors.commit_batch().unwrap();
 
         let results = index_no_vectors
-            .search("test_func", 10, None, None)
+            .search("test_func", 10, None, None, None)
             .unwrap();
         assert_eq!(results.len(), 1);
         assert!(!index_no_vectors.has_vector_support());
@@ -2633,7 +2660,7 @@ mod tests {
         index_with_vectors.commit_batch().unwrap();
 
         let results = index_with_vectors
-            .search("vector_func", 10, None, None)
+            .search("vector_func", 10, None, None, None)
             .unwrap();
         assert_eq!(results.len(), 1);
         assert!(index_with_vectors.has_vector_support());
@@ -2902,5 +2929,406 @@ mod tests {
         // Test generation check
         assert!(cache.is_valid_for_generation(1));
         assert!(!cache.is_valid_for_generation(2));
+    }
+
+    // ==================== Language Filtering Tests ====================
+    // TDD tests for Sprint 4: Task 4.1 - Language filtering support
+
+    #[test]
+    fn test_find_symbols_by_name_with_language_filter() {
+        let temp_dir = TempDir::new().unwrap();
+        let index = DocumentIndex::new(temp_dir.path()).unwrap();
+
+        // Start batch
+        index.start_batch().unwrap();
+
+        // Add symbols in different languages
+        // Rust main function
+        index
+            .add_document(
+                SymbolId::new(1).unwrap(),
+                "main",
+                SymbolKind::Function,
+                FileId::new(1).unwrap(),
+                "src/main.rs",
+                0,                         // line
+                0,                         // column
+                Some("Entry point"),       // doc_comment
+                Some("fn main() {}"),      // signature
+                "crate",                   // module_path
+                None,                      // context
+                crate::Visibility::Public, // visibility
+                None,                      // scope_context
+                Some("rust"),              // language_id
+            )
+            .unwrap();
+
+        // Python main function
+        index
+            .add_document(
+                SymbolId::new(2).unwrap(),
+                "main",
+                SymbolKind::Function,
+                FileId::new(2).unwrap(),
+                "src/main.py",
+                0,                          // line
+                0,                          // column
+                Some("Python entry point"), // doc_comment
+                Some("def main():"),        // signature
+                "__main__",                 // module_path
+                None,                       // context
+                crate::Visibility::Public,  // visibility
+                None,                       // scope_context
+                Some("python"),             // language_id
+            )
+            .unwrap();
+
+        // TypeScript main function
+        index
+            .add_document(
+                SymbolId::new(3).unwrap(),
+                "main",
+                SymbolKind::Function,
+                FileId::new(3).unwrap(),
+                "src/main.ts",
+                0,                             // line
+                0,                             // column
+                Some("TypeScript entry"),      // doc_comment
+                Some("function main(): void"), // signature
+                "app",                         // module_path
+                None,                          // context
+                crate::Visibility::Public,     // visibility
+                None,                          // scope_context
+                Some("typescript"),            // language_id
+            )
+            .unwrap();
+
+        // Commit the batch
+        index.commit_batch().unwrap();
+
+        println!("\n=== Testing find_symbols_by_name with language filtering ===");
+
+        // Test 1: Find all symbols named "main" without language filter
+        let all_symbols = index.find_symbols_by_name("main", None).unwrap();
+        println!("Test 1 - No filter: Found {} symbols", all_symbols.len());
+        for symbol in &all_symbols {
+            println!("  - Symbol ID: {:?}, File: {}", symbol.id, symbol.file_id.0);
+        }
+        assert_eq!(
+            all_symbols.len(),
+            3,
+            "Should find 3 'main' functions across all languages"
+        );
+
+        // Test 2: Find only Rust symbols
+        let rust_symbols = index.find_symbols_by_name("main", Some("rust")).unwrap();
+        println!("Test 2 - Rust filter: Found {} symbols", rust_symbols.len());
+        for symbol in &rust_symbols {
+            println!(
+                "  - Symbol ID: {:?}, Module: {:?}",
+                symbol.id, symbol.module_path
+            );
+        }
+        assert_eq!(rust_symbols.len(), 1, "Should find 1 Rust 'main' function");
+        assert_eq!(rust_symbols[0].id, SymbolId::new(1).unwrap());
+
+        // Test 3: Find only Python symbols
+        let python_symbols = index.find_symbols_by_name("main", Some("python")).unwrap();
+        println!(
+            "Test 3 - Python filter: Found {} symbols",
+            python_symbols.len()
+        );
+        for symbol in &python_symbols {
+            println!(
+                "  - Symbol ID: {:?}, Module: {:?}",
+                symbol.id, symbol.module_path
+            );
+        }
+        assert_eq!(
+            python_symbols.len(),
+            1,
+            "Should find 1 Python 'main' function"
+        );
+        assert_eq!(python_symbols[0].id, SymbolId::new(2).unwrap());
+
+        // Test 4: Find only TypeScript symbols
+        let ts_symbols = index
+            .find_symbols_by_name("main", Some("typescript"))
+            .unwrap();
+        println!(
+            "Test 4 - TypeScript filter: Found {} symbols",
+            ts_symbols.len()
+        );
+        for symbol in &ts_symbols {
+            println!(
+                "  - Symbol ID: {:?}, Module: {:?}",
+                symbol.id, symbol.module_path
+            );
+        }
+        assert_eq!(
+            ts_symbols.len(),
+            1,
+            "Should find 1 TypeScript 'main' function"
+        );
+        assert_eq!(ts_symbols[0].id, SymbolId::new(3).unwrap());
+
+        // Test 5: Find symbols with non-existent language (should return empty)
+        let java_symbols = index.find_symbols_by_name("main", Some("java")).unwrap();
+        println!(
+            "Test 5 - Java filter (non-existent): Found {} symbols",
+            java_symbols.len()
+        );
+        assert_eq!(java_symbols.len(), 0, "Should find no Java symbols");
+
+        println!("=== All find_symbols_by_name tests completed ===\n");
+    }
+
+    #[test]
+    fn test_search_with_language_filter() {
+        let temp_dir = TempDir::new().unwrap();
+        let index = DocumentIndex::new(temp_dir.path()).unwrap();
+
+        // Start batch
+        index.start_batch().unwrap();
+
+        // Add symbols with "parse" in different languages
+        // Rust parse function
+        index
+            .add_document(
+                SymbolId::new(10).unwrap(),
+                "parse_config",
+                SymbolKind::Function,
+                FileId::new(1).unwrap(),
+                "src/config.rs",
+                10,                                            // line
+                0,                                             // column
+                Some("Parse configuration from file"),         // doc_comment
+                Some("fn parse_config(path: &str) -> Config"), // signature
+                "crate::config",                               // module_path
+                None,                                          // context
+                crate::Visibility::Public,                     // visibility
+                None,                                          // scope_context
+                Some("rust"),                                  // language_id
+            )
+            .unwrap();
+
+        // Python parse function
+        index
+            .add_document(
+                SymbolId::new(11).unwrap(),
+                "parse_json",
+                SymbolKind::Function,
+                FileId::new(2).unwrap(),
+                "src/parser.py",
+                5,                                         // line
+                0,                                         // column
+                Some("Parse JSON data"),                   // doc_comment
+                Some("def parse_json(data: str) -> dict"), // signature
+                "parser",                                  // module_path
+                None,                                      // context
+                crate::Visibility::Public,                 // visibility
+                None,                                      // scope_context
+                Some("python"),                            // language_id
+            )
+            .unwrap();
+
+        // TypeScript parse function
+        index
+            .add_document(
+                SymbolId::new(12).unwrap(),
+                "parseXML",
+                SymbolKind::Function,
+                FileId::new(3).unwrap(),
+                "src/parser.ts",
+                1,                                                // line
+                0,                                                // column
+                Some("Parse XML string"),                         // doc_comment
+                Some("function parseXML(xml: string): Document"), // signature
+                "utils.parser",                                   // module_path
+                None,                                             // context
+                crate::Visibility::Public,                        // visibility
+                None,                                             // scope_context
+                Some("typescript"),                               // language_id
+            )
+            .unwrap();
+
+        // Commit the batch
+        index.commit_batch().unwrap();
+
+        println!("\n=== Testing search with language filtering ===");
+
+        // Test 1: Search for "parse" without language filter
+        let all_results = index.search("parse", 10, None, None, None).unwrap();
+        println!(
+            "Test 1 - Search 'parse' no filter: Found {} results",
+            all_results.len()
+        );
+        for result in &all_results {
+            println!(
+                "  - Symbol ID: {:?}, Name: {}",
+                result.symbol_id, result.name
+            );
+        }
+        assert_eq!(
+            all_results.len(),
+            3,
+            "Should find 3 parse functions across all languages"
+        );
+
+        // Test 2: Search for "parse" in Rust only
+        let rust_results = index.search("parse", 10, None, None, Some("rust")).unwrap();
+        println!(
+            "Test 2 - Search 'parse' Rust filter: Found {} results",
+            rust_results.len()
+        );
+        for result in &rust_results {
+            println!(
+                "  - Symbol ID: {:?}, Name: {}",
+                result.symbol_id, result.name
+            );
+        }
+        assert_eq!(rust_results.len(), 1, "Should find 1 Rust parse function");
+        assert_eq!(rust_results[0].symbol_id, SymbolId::new(10).unwrap());
+
+        // Test 3: Search for "parse" in Python only
+        let python_results = index
+            .search("parse", 10, None, None, Some("python"))
+            .unwrap();
+        println!(
+            "Test 3 - Search 'parse' Python filter: Found {} results",
+            python_results.len()
+        );
+        for result in &python_results {
+            println!(
+                "  - Symbol ID: {:?}, Name: {}",
+                result.symbol_id, result.name
+            );
+        }
+        assert_eq!(
+            python_results.len(),
+            1,
+            "Should find 1 Python parse function"
+        );
+        assert_eq!(python_results[0].symbol_id, SymbolId::new(11).unwrap());
+
+        // Test 4: Combine language filter with kind filter
+        let rust_functions = index
+            .search("parse", 10, Some(SymbolKind::Function), None, Some("rust"))
+            .unwrap();
+        println!(
+            "Test 4 - Search 'parse' Rust+Function filter: Found {} results",
+            rust_functions.len()
+        );
+        assert_eq!(
+            rust_functions.len(),
+            1,
+            "Should find 1 Rust function with 'parse'"
+        );
+
+        // Test 5: Search with language that has no matches
+        let java_results = index.search("parse", 10, None, None, Some("java")).unwrap();
+        println!(
+            "Test 5 - Search 'parse' Java filter (non-existent): Found {} results",
+            java_results.len()
+        );
+        assert_eq!(java_results.len(), 0, "Should find no Java parse functions");
+
+        println!("=== All search tests completed ===\n");
+    }
+
+    #[test]
+    fn test_language_filter_with_module_filter() {
+        let temp_dir = TempDir::new().unwrap();
+        let index = DocumentIndex::new(temp_dir.path()).unwrap();
+
+        // Start batch
+        index.start_batch().unwrap();
+
+        // Add symbols with same module name but different languages
+        index
+            .add_document(
+                SymbolId::new(20).unwrap(),
+                "Handler",
+                SymbolKind::Struct,
+                FileId::new(1).unwrap(),
+                "src/server.rs",
+                1,                         // line
+                0,                         // column
+                Some("Request handler"),   // doc_comment
+                Some("struct Handler"),    // signature
+                "server",                  // module_path
+                None,                      // context
+                crate::Visibility::Public, // visibility
+                None,                      // scope_context
+                Some("rust"),              // language_id
+            )
+            .unwrap();
+
+        index
+            .add_document(
+                SymbolId::new(21).unwrap(),
+                "Handler",
+                SymbolKind::Class,
+                FileId::new(2).unwrap(),
+                "src/server.py",
+                1,                             // line
+                0,                             // column
+                Some("Request handler class"), // doc_comment
+                Some("class Handler"),         // signature
+                "server",                      // module_path
+                None,                          // context
+                crate::Visibility::Public,     // visibility
+                None,                          // scope_context
+                Some("python"),                // language_id
+            )
+            .unwrap();
+
+        // Commit the batch
+        index.commit_batch().unwrap();
+
+        println!("\n=== Testing combined module and language filters ===");
+
+        // Test combining module and language filters
+        let rust_server = index
+            .search("Handler", 10, None, Some("server"), Some("rust"))
+            .unwrap();
+        println!(
+            "Test 1 - Search 'Handler' in server module + Rust: Found {} results",
+            rust_server.len()
+        );
+        for result in &rust_server {
+            println!(
+                "  - Symbol ID: {:?}, Kind: {:?}",
+                result.symbol_id, result.kind
+            );
+        }
+        assert_eq!(
+            rust_server.len(),
+            1,
+            "Should find 1 Rust Handler in server module"
+        );
+        assert_eq!(rust_server[0].symbol_id, SymbolId::new(20).unwrap());
+
+        let python_server = index
+            .search("Handler", 10, None, Some("server"), Some("python"))
+            .unwrap();
+        println!(
+            "Test 2 - Search 'Handler' in server module + Python: Found {} results",
+            python_server.len()
+        );
+        for result in &python_server {
+            println!(
+                "  - Symbol ID: {:?}, Kind: {:?}",
+                result.symbol_id, result.kind
+            );
+        }
+        assert_eq!(
+            python_server.len(),
+            1,
+            "Should find 1 Python Handler in server module"
+        );
+        assert_eq!(python_server[0].symbol_id, SymbolId::new(21).unwrap());
+
+        println!("=== All combined filter tests completed ===\n");
     }
 }
