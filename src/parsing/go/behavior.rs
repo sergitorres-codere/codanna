@@ -594,6 +594,7 @@ impl GoBehavior {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parsing::registry::LanguageId;
     use crate::Visibility;
     use std::path::Path;
 

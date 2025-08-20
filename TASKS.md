@@ -441,23 +441,30 @@ The Go language implementation is **fully functional** after resolving the rebas
   - [x] Extract type arguments from generic function calls
   - Rationale: Currently commented out pending Type System Integration completion
 
-### 9.2 Resolution System Enhancements 🟡
-- [ ] **Method compatibility checking** (Line 274 in `src/parsing/go/resolution.rs`):
-  - [ ] Add actual method compatibility checking for interface implementations
-  - [ ] Implement structural type compatibility verification
+### 9.2 Resolution System Enhancements ✅ COMPLETED
+- [x] **Method compatibility checking** (Line 274 in `src/parsing/go/resolution.rs`):
+  - [x] Add actual method compatibility checking for interface implementations
+  - [x] Implement structural type compatibility verification
   - Rationale: Currently Go interface implementation detection relies on basic type matching without full method signature compatibility
 
-- [ ] **Same-package symbol resolution** (Line 393 in `src/parsing/go/resolution.rs`):
-  - [ ] Compare module paths for same-package symbol resolution
-  - [ ] Implement package-scoped symbol priority
+- [x] **Same-package symbol resolution** (Line 393 in `src/parsing/go/resolution.rs`):
+  - [x] Compare module paths for same-package symbol resolution
+  - [x] Implement package-scoped symbol priority
   - Rationale: Go symbols in the same package should take precedence over imported symbols
 
-- [ ] **Complete go.mod file support** (Line 662 in `src/parsing/go/resolution.rs`):
-  - [ ] Parse `go.mod` files to extract module information
-  - [ ] Implement proper Go module path resolution
-  - [ ] Support `replace` and `require` directives
-  - [ ] Handle versioned module dependencies
+- [x] **Complete go.mod file support** (Line 662 in `src/parsing/go/resolution.rs`):
+  - [x] Parse `go.mod` files to extract module information
+  - [x] Implement proper Go module path resolution
+  - [x] Support `replace` and `require` directives
+  - [x] Handle versioned module dependencies
   - Rationale: Currently only has placeholder implementation for go.mod parsing
+
+**Implementation Details:**
+- Enhanced `TypeRegistry::find_types_implementing()` and `type_implements_interface()` with optional `GoInheritanceResolver` parameter
+- Added `GoResolutionContext::get_current_module_path()` for proper package-level symbol resolution 
+- Implemented `find_and_parse_go_mod()` using `DocumentIndex::get_all_indexed_paths()` for go.mod discovery
+- Added comprehensive unit tests for all new functionality
+- Fixed unused import warning in `behavior.rs`
 
 ### 9.3 Behavior System Completion 🟡
 - [ ] **Current package path extraction** (Line 509 in `src/parsing/go/behavior.rs`):

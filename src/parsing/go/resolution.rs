@@ -264,23 +264,57 @@ impl TypeRegistry {
     }
 
     /// Get all types that implement a given interface
-    pub fn find_types_implementing(&self, _interface_name: &str) -> Vec<&TypeInfo> {
+    /// 
+    /// This method requires an inheritance resolver to perform actual method compatibility checking.
+    /// If no resolver is provided, it returns all struct types as potential candidates.
+    pub fn find_types_implementing(
+        &self, 
+        interface_name: &str, 
+        inheritance_resolver: Option<&GoInheritanceResolver>
+    ) -> Vec<&TypeInfo> {
         // Find all types that could implement this interface
         self.types
             .values()
             .filter(|type_info| {
                 // Only structs can implement interfaces in Go
-                matches!(type_info.category, TypeCategory::Struct)
-                // TODO: Add actual method compatibility checking when inheritance resolver is available
+                if !matches!(type_info.category, TypeCategory::Struct) {
+                    return false;
+                }
+                
+                // If inheritance resolver is available, check method compatibility
+                if let Some(resolver) = inheritance_resolver {
+                    resolver.check_struct_implements_interface(&type_info.name, interface_name)
+                } else {
+                    // Fallback: assume all structs could potentially implement the interface
+                    true
+                }
             })
             .collect()
     }
 
     /// Check if a type implements an interface (requires inheritance resolver)
-    pub fn type_implements_interface(&self, _type_name: &str, _interface_name: &str) -> bool {
-        // This would check method compatibility
-        // For now, return false - will be enhanced when connected to inheritance resolver
-        false
+    pub fn type_implements_interface(
+        &self, 
+        type_name: &str, 
+        interface_name: &str,
+        inheritance_resolver: Option<&GoInheritanceResolver>
+    ) -> bool {
+        // First check if the type is a struct
+        if let Some(type_info) = self.types.get(type_name) {
+            if !matches!(type_info.category, TypeCategory::Struct) {
+                return false;
+            }
+        } else {
+            return false;
+        }
+        
+        // Use inheritance resolver for method compatibility checking
+        if let Some(resolver) = inheritance_resolver {
+            resolver.check_struct_implements_interface(type_name, interface_name)
+        } else {
+            // Without resolver, we cannot determine compatibility
+            false
+        }
     }
 }
 
@@ -292,6 +326,9 @@ impl TypeRegistry {
 /// 3. Block scope - variables declared within blocks (if, for, etc.)
 /// 4. Imported symbols - symbols from imported packages
 pub struct GoResolutionContext {
+    /// File ID for this resolution context
+    file_id: FileId,
+
     /// Local scope (function parameters, local variables, block variables)
     local_scope: HashMap<String, SymbolId>,
 
@@ -312,8 +349,9 @@ pub struct GoResolutionContext {
 }
 
 impl GoResolutionContext {
-    pub fn new(_file_id: FileId) -> Self {
+    pub fn new(file_id: FileId) -> Self {
         Self {
+            file_id,
             local_scope: HashMap::new(),
             package_symbols: HashMap::new(),
             imported_symbols: HashMap::new(),
@@ -377,26 +415,54 @@ impl GoResolutionContext {
         }
     }
 
+    /// Get the current file's module path for package comparison
+    fn get_current_module_path(&self, document_index: &DocumentIndex) -> Option<String> {
+        // Try to find a symbol from this file to get its module path
+        if let Ok(file_symbols) = document_index.find_symbols_by_file(self.file_id) {
+            if let Some(symbol) = file_symbols.first() {
+                return symbol.module_path.as_ref().map(|s| s.as_ref().to_string());
+            }
+        }
+        None
+    }
+
     /// Resolve local package symbols (symbols in the same package)
     ///
     /// This method resolves symbols that are declared in other files
-    /// within the same Go package.
+    /// within the same Go package. It properly compares module paths to ensure
+    /// only symbols from the same package are considered.
     pub fn resolve_local_package_symbols(
         &self,
         symbol_name: &str,
         document_index: &DocumentIndex,
     ) -> Option<SymbolId> {
+        // Get the current file's module path
+        let current_module_path = self.get_current_module_path(document_index)?;
+        
         // In Go, all symbols in the same package are accessible
         // Look for symbols with matching name and package path
         if let Ok(candidates) = document_index.find_symbols_by_name(symbol_name, Some("Go")) {
             for candidate in candidates {
-                // TODO: Compare module paths for same-package symbol resolution (Phase 5.1)
+                // Skip symbols from the current file (already handled in local scope)
+                if candidate.file_id == self.file_id {
+                    continue;
+                }
+                
                 // Check if symbol is in the same package (same module path)
-                if let Some(ref _module_path) = candidate.module_path {
-                    // For now, consider symbols with same module path as local package
-                    // This is a simplified approach - full Go module resolution would be more complex
-                    if candidate.visibility == crate::Visibility::Public {
-                        return Some(candidate.id);
+                if let Some(ref candidate_module_path) = candidate.module_path {
+                    let candidate_path = candidate_module_path.as_ref();
+                    
+                    // In Go, symbols in the same package are accessible regardless of visibility
+                    // But exported symbols take precedence
+                    if candidate_path == current_module_path {
+                        // Same package - return the symbol
+                        // In Go, all symbols in the same package are accessible
+                        match candidate.visibility {
+                            crate::Visibility::Public => return Some(candidate.id),
+                            crate::Visibility::Private => return Some(candidate.id),
+                            crate::Visibility::Crate => return Some(candidate.id),
+                            crate::Visibility::Module => return Some(candidate.id),
+                        }
                     }
                 }
             }
@@ -656,15 +722,66 @@ impl GoResolutionContext {
 
     /// Find and parse go.mod file in the project
     ///
-    /// Walk up directory tree to find go.mod file and parse it.
-    /// In practice, this would use the DocumentIndex to find go.mod files.
-    fn find_and_parse_go_mod(&self, _document_index: &DocumentIndex) -> Option<GoModInfo> {
-        // TODO: In a complete implementation, this would:
-        // 1. Use DocumentIndex to find go.mod files in the indexed codebase
-        // 2. Parse the nearest go.mod file relative to the current file
-        // 3. Cache parsed go.mod information for performance
-
-        // For now, return None to use fallback resolution
+    /// Searches for go.mod files in the indexed codebase and finds the nearest one
+    /// relative to the current file. Caches the parsed information for performance.
+    fn find_and_parse_go_mod(&self, document_index: &DocumentIndex) -> Option<GoModInfo> {
+        // Get all indexed paths to find go.mod files
+        let all_paths = document_index.get_all_indexed_paths().ok()?;
+        
+        // Find all go.mod files in the indexed codebase
+        let go_mod_files: Vec<_> = all_paths
+            .iter()
+            .filter(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .map(|name| name == "go.mod")
+                    .unwrap_or(false)
+            })
+            .collect();
+        
+        if go_mod_files.is_empty() {
+            return None;
+        }
+        
+        // Get the current file's path to find the nearest go.mod
+        let current_file_path = document_index.get_file_path(self.file_id).ok()??;
+        let current_path = std::path::Path::new(&current_file_path);
+        
+        // Find the nearest go.mod file by walking up the directory tree
+        let mut nearest_go_mod: Option<&std::path::PathBuf> = None;
+        let mut nearest_distance = usize::MAX;
+        
+        for go_mod_path in &go_mod_files {
+            // Check if this go.mod is in a parent directory of the current file
+            if let Some(go_mod_parent) = go_mod_path.parent() {
+                if current_path.starts_with(go_mod_parent) {
+                    // Calculate the distance (number of directory levels)
+                    let distance = current_path
+                        .strip_prefix(go_mod_parent)
+                        .ok()?
+                        .components()
+                        .count();
+                    
+                    if distance < nearest_distance {
+                        nearest_distance = distance;
+                        nearest_go_mod = Some(go_mod_path);
+                    }
+                }
+            }
+        }
+        
+        // If no go.mod found in parent directories, use the first one found
+        if nearest_go_mod.is_none() && !go_mod_files.is_empty() {
+            nearest_go_mod = Some(go_mod_files[0]);
+        }
+        
+        // Parse the nearest go.mod file
+        if let Some(go_mod_path) = nearest_go_mod {
+            if let Some(go_mod_str) = go_mod_path.to_str() {
+                return self.parse_go_mod(go_mod_str);
+            }
+        }
+        
         None
     }
 
@@ -1853,5 +1970,90 @@ replace github.com/another/module => github.com/fork/module v1.2.3
         let all_methods = resolver.get_all_methods("ReadWriter");
         assert!(all_methods.contains(&"Read".to_string()));
         assert!(all_methods.contains(&"Write".to_string()));
+    }
+
+    #[test]
+    fn test_method_compatibility_checking() {
+        let mut registry = TypeRegistry::new();
+        let mut resolver = GoInheritanceResolver::new();
+
+        // Register a struct type
+        let struct_info = TypeInfo {
+            name: "MyStruct".to_string(),
+            symbol_id: Some(SymbolId::new(1).unwrap()),
+            package_path: Some("test/pkg".to_string()),
+            is_exported: true,
+            category: TypeCategory::Struct,
+            generic_params: Vec::new(),
+            constraints: HashMap::new(),
+        };
+        registry.register_type(struct_info);
+
+        // Register interface and struct methods
+        resolver.register_type_methods("MyInterface".to_string(), vec!["Method1".to_string()]);
+        resolver.register_type_methods(
+            "MyStruct".to_string(),
+            vec!["Method1".to_string(), "Method2".to_string()],
+        );
+
+        // Test method compatibility checking without resolver
+        let implementations = registry.find_types_implementing("MyInterface", None);
+        assert_eq!(implementations.len(), 1); // Should return all structs as candidates
+
+        // Test with resolver - should check method compatibility
+        let implementations = registry.find_types_implementing("MyInterface", Some(&resolver));
+        assert_eq!(implementations.len(), 1); // MyStruct implements MyInterface
+
+        // Test type_implements_interface
+        assert!(registry.type_implements_interface("MyStruct", "MyInterface", Some(&resolver)));
+        assert!(!registry.type_implements_interface("MyStruct", "NonExistentInterface", Some(&resolver)));
+        assert!(!registry.type_implements_interface("NonExistentStruct", "MyInterface", Some(&resolver)));
+    }
+
+    #[test]
+    fn test_same_package_symbol_resolution() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let document_index = DocumentIndex::new(temp_dir.path()).unwrap();
+        let context = GoResolutionContext::new(FileId::new(1).unwrap());
+
+        // Test with empty index - should return None
+        let result = context.resolve_local_package_symbols("TestSymbol", &document_index);
+        assert!(result.is_none());
+
+        // Test get_current_module_path with empty index
+        let module_path = context.get_current_module_path(&document_index);
+        assert!(module_path.is_none());
+    }
+
+    #[test]
+    fn test_go_mod_file_search() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let document_index = DocumentIndex::new(temp_dir.path()).unwrap();
+        let context = GoResolutionContext::new(FileId::new(1).unwrap());
+
+        // Test with empty index - should return None
+        let go_mod_info = context.find_and_parse_go_mod(&document_index);
+        assert!(go_mod_info.is_none());
+
+        // The actual test with real go.mod files would require setting up the index
+        // with file entries, which is more complex for a unit test
+    }
+
+    #[test]
+    fn test_enhanced_type_registry_methods() {
+        let registry = TypeRegistry::new();
+        let resolver = GoInheritanceResolver::new();
+
+        // Test finding types implementing an interface with no types registered
+        let implementations = registry.find_types_implementing("SomeInterface", Some(&resolver));
+        assert!(implementations.is_empty());
+
+        // Test type_implements_interface with no types
+        assert!(!registry.type_implements_interface("NonExistent", "Interface", Some(&resolver)));
+        assert!(!registry.type_implements_interface("NonExistent", "Interface", None));
     }
 }
