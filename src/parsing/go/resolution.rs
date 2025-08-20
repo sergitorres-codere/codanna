@@ -388,7 +388,7 @@ impl GoResolutionContext {
     ) -> Option<SymbolId> {
         // In Go, all symbols in the same package are accessible
         // Look for symbols with matching name and package path
-        if let Ok(candidates) = document_index.find_symbols_by_name(symbol_name) {
+        if let Ok(candidates) = document_index.find_symbols_by_name(symbol_name, Some("Go")) {
             for candidate in candidates {
                 // TODO: Compare module paths for same-package symbol resolution (Phase 5.1)
                 // Check if symbol is in the same package (same module path)
@@ -508,7 +508,7 @@ impl GoResolutionContext {
         let vendor_path = format!("{project_root}/vendor/{import_path}");
 
         // Look for symbols from this vendor path
-        if let Ok(candidates) = document_index.find_symbols_by_name("*") {
+        if let Ok(candidates) = document_index.find_symbols_by_name("*", Some("Go")) {
             for candidate in candidates {
                 if let Some(ref module_path) = candidate.module_path {
                     let module_str: &str = module_path.as_ref();
@@ -716,7 +716,7 @@ impl GoResolutionContext {
         symbol_name: &str,
         document_index: &DocumentIndex,
     ) -> Option<SymbolId> {
-        if let Ok(candidates) = document_index.find_symbols_by_name(symbol_name) {
+        if let Ok(candidates) = document_index.find_symbols_by_name(symbol_name, Some("Go")) {
             for candidate in candidates {
                 if let Some(ref module_path) = candidate.module_path {
                     let module_str: &str = module_path.as_ref();

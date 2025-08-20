@@ -1,6 +1,6 @@
 //! Go-specific language behavior implementation
 
-use crate::parsing::LanguageBehavior;
+use crate::parsing::{LanguageBehavior, LanguageId};
 use crate::parsing::behavior_state::{BehaviorState, StatefulBehavior};
 use crate::parsing::resolution::{InheritanceResolver, ResolutionScope};
 use crate::storage::DocumentIndex;
@@ -553,7 +553,7 @@ impl GoBehavior {
         // Check if it's a standard library package
         if context.is_standard_library_package(package_name) {
             // For standard library packages, look for symbols directly
-            if let Ok(candidates) = document_index.find_symbols_by_name(symbol_name) {
+            if let Ok(candidates) = document_index.find_symbols_by_name(symbol_name, Some("Go")) {
                 for candidate in candidates {
                     if let Some(ref module_path) = candidate.module_path {
                         let module_str = module_path.as_ref();
@@ -751,6 +751,7 @@ mod tests {
             doc_comment: None,
             visibility: Visibility::Private, // Will be updated by configure_symbol
             scope_context: None,
+            language_id: Some(LanguageId::new("go")),
         };
 
         behavior.configure_symbol(&mut symbol, Some("pkg/utils"));
@@ -778,6 +779,7 @@ mod tests {
             doc_comment: None,
             visibility: Visibility::Public, // Will be updated by configure_symbol
             scope_context: None,
+            language_id: Some(LanguageId::new("go")),
         };
 
         behavior.configure_symbol(&mut symbol, None);
