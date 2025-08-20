@@ -1492,13 +1492,17 @@ mod tests {
         let file_id = FileId::new(1).unwrap();
 
         let code = r#"
-import { Component, useState } from 'react';
-import React from 'react';
-import * as utils from './utils';
-import type { Props } from './types';
-import './styles.css';
-export { Button } from './Button';
-export * from './common';
+package main
+
+import (
+    "fmt"
+    "strings"
+    "net/http"
+    utils "github.com/user/repo/utils"
+    . "encoding/json"
+    _ "database/sql"
+    "path/filepath"
+)
 "#;
 
         println!("Test code:\n{code}");
@@ -1508,54 +1512,47 @@ export * from './common';
         println!("\nExtracted {} imports:", imports.len());
         for (i, import) in imports.iter().enumerate() {
             println!(
-                "  {}. {} -> {:?} (glob: {})",
+                "  {}. {} -> {:?} (type_only: {})",
                 i + 1,
                 import.path,
                 import.alias,
-                import.is_glob
+                import.is_type_only
             );
         }
 
-        // Verify counts
+        // Verify counts - Go should extract 7 imports
         assert_eq!(imports.len(), 7, "Should extract 7 imports");
 
         // Verify specific imports
-        // Named import creates one import with no alias
+        // Standard library import
         assert!(
             imports
                 .iter()
-                .any(|i| i.path == "react" && i.alias.is_none())
+                .any(|i| i.path == "fmt" && i.alias.is_none())
         );
-        // Default import has alias
+        
+        // Aliased import
         assert!(
             imports
                 .iter()
-                .any(|i| i.path == "react" && i.alias == Some("React".to_string()))
+                .any(|i| i.path == "github.com/user/repo/utils" && i.alias == Some("utils".to_string()))
         );
-        // Namespace import has alias and is_glob
+        
+        // Dot import (not implemented as alias, but should be present)
         assert!(
             imports
                 .iter()
-                .any(|i| i.path == "./utils" && i.alias == Some("utils".to_string()) && i.is_glob)
+                .any(|i| i.path == "encoding/json")
         );
-        // Type import (named)
+        
+        // Blank import
         assert!(
             imports
                 .iter()
-                .any(|i| i.path == "./types" && i.alias.is_none())
+                .any(|i| i.path == "database/sql")
         );
-        // Side-effect import
-        assert!(
-            imports
-                .iter()
-                .any(|i| i.path == "./styles.css" && i.alias.is_none())
-        );
-        // Re-export
-        assert!(imports.iter().any(|i| i.path == "./Button"));
-        // Re-export all
-        assert!(imports.iter().any(|i| i.path == "./common" && i.is_glob));
 
-        println!("\n✅ Import extraction test passed");
+        println!("=== PASSED ===\n");
     }
 
     #[test]

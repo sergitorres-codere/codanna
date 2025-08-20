@@ -66,9 +66,7 @@ impl LanguageBehavior for GoBehavior {
         let path = relative_path.to_str()?;
 
         // Remove Go file extension and get directory
-        let module_path = path
-            .trim_start_matches("./")
-            .trim_end_matches(".go");
+        let module_path = path.trim_start_matches("./").trim_end_matches(".go");
 
         // Get directory path (Go packages are directories)
         let dir_path = if let Some(parent) = Path::new(module_path).parent() {
@@ -88,15 +86,19 @@ impl LanguageBehavior for GoBehavior {
     fn parse_visibility(&self, signature: &str) -> Visibility {
         // Go uses capitalization for visibility
         // Extract the symbol name from the signature and check if it starts with uppercase
-        
+
         // Try to extract the symbol name from different signature patterns
         let symbol_name = if let Some(func_start) = signature.find("func ") {
             // Function signature: "func FunctionName(" or "func (receiver) MethodName("
-            let after_func = &signature[func_start + 5..];
-            if let Some(receiver_end) = after_func.find(") ") {
+            let after_func = &signature[func_start + 5..].trim_start();
+            if after_func.starts_with('(') {
                 // Method with receiver: "func (r *Type) MethodName("
-                let after_receiver = &after_func[receiver_end + 2..];
-                after_receiver.split('(').next().unwrap_or("").trim()
+                if let Some(receiver_end) = after_func.find(") ") {
+                    let after_receiver = &after_func[receiver_end + 2..].trim_start();
+                    after_receiver.split('(').next().unwrap_or("").trim()
+                } else {
+                    ""
+                }
             } else {
                 // Regular function: "func FunctionName("
                 after_func.split('(').next().unwrap_or("").trim()
@@ -115,7 +117,8 @@ impl LanguageBehavior for GoBehavior {
             after_const.split_whitespace().next().unwrap_or("")
         } else {
             // Fallback: take the first word that looks like an identifier
-            signature.split_whitespace()
+            signature
+                .split_whitespace()
                 .find(|word| word.chars().next().map_or(false, |c| c.is_alphabetic()))
                 .unwrap_or("")
         };
@@ -133,11 +136,11 @@ impl LanguageBehavior for GoBehavior {
     }
 
     fn supports_traits(&self) -> bool {
-        true // Go has interfaces
+        false // Go has interfaces, not traits (traits are a Rust concept)
     }
 
     fn supports_inherent_methods(&self) -> bool {
-        true // Go has class methods
+        true // Go has methods on types
     }
 
     // Go-specific resolution overrides
@@ -151,9 +154,9 @@ impl LanguageBehavior for GoBehavior {
     }
 
     fn inheritance_relation_name(&self) -> &'static str {
-        // Go uses both "extends" and "implements"
-        // Default to "extends" as it's more general
-        "extends"
+        // Go uses interface implementation (implicit)
+        // There's no explicit "extends" or "implements" in Go
+        "implements"
     }
 
     fn map_relationship(&self, language_specific: &str) -> crate::relationship::RelationKind {
@@ -260,19 +263,18 @@ impl LanguageBehavior for GoBehavior {
         Ok(Box::new(context))
     }
 
-    // Go-specific: Support hoisting
+    // Go-specific: Symbol resolution rules
     fn is_resolvable_symbol(&self, symbol: &crate::Symbol) -> bool {
         use crate::SymbolKind;
         use crate::symbol::ScopeContext;
 
-        // Go hoists function declarations and class declarations
-        // They can be used before their definition in the file
-        let hoisted = matches!(
+        // Go allows forward references for functions, types, and constants at package level
+        let package_level_symbol = matches!(
             symbol.kind,
-            SymbolKind::Function | SymbolKind::Class | SymbolKind::Interface | SymbolKind::Enum
+            SymbolKind::Function | SymbolKind::Struct | SymbolKind::Interface | SymbolKind::Constant | SymbolKind::TypeAlias
         );
 
-        if hoisted {
+        if package_level_symbol {
             return true;
         }
 
@@ -281,13 +283,13 @@ impl LanguageBehavior for GoBehavior {
             return true;
         }
 
-        // Check scope_context for non-hoisted symbols
+        // Check scope_context for other symbols
         if let Some(ref scope_context) = symbol.scope_context {
             match scope_context {
                 ScopeContext::Module | ScopeContext::Global | ScopeContext::Package => true,
                 ScopeContext::Local { .. } | ScopeContext::Parameter => false,
                 ScopeContext::ClassMember => {
-                    // Class members are resolvable if public or exported
+                    // Struct/interface members are resolvable if exported (uppercase)
                     matches!(symbol.visibility, Visibility::Public)
                 }
             }
@@ -295,32 +297,101 @@ impl LanguageBehavior for GoBehavior {
             // Fallback for symbols without scope_context
             matches!(
                 symbol.kind,
-                SymbolKind::TypeAlias | SymbolKind::Constant | SymbolKind::Variable
+                SymbolKind::TypeAlias | SymbolKind::Variable
             )
         }
     }
 
-    // Go-specific: Handle ES module imports
+    // Go-specific: Handle Go package imports
     fn resolve_import(
         &self,
         import: &crate::indexing::Import,
         document_index: &DocumentIndex,
     ) -> Option<SymbolId> {
         // Go imports can be:
-        // 1. Relative imports: ./foo, ../bar, ./utils/helper
-        // 2. Absolute imports: @app/utils, lodash
-        // 3. Named imports: import { foo } from './bar'
-        // 4. Default imports: import foo from './bar'
-        // 5. Namespace imports: import * as foo from './bar'
+        // 1. Relative imports: ./foo, ../bar (rare in Go)
+        // 2. Standard library: fmt, strings, net/http
+        // 3. External packages: github.com/user/repo/package
+        // 4. Local packages: myproject/internal/utils
 
-        // For now, use basic resolution
-        // TODO: Implement full ES module resolution algorithm
+        // Create a temporary resolution context to use the new methods
+        let context = crate::parsing::go::resolution::GoResolutionContext::new(
+            FileId::new(1).unwrap() // Temporary file ID for resolution
+        );
+
+        // First check if it's a standard library package
+        if context.is_standard_library_package(&import.path) {
+            // For standard library packages, we look for any existing symbol
+            // that matches the package name (this is simplified - in practice
+            // standard library symbols would be pre-indexed)
+            let package_name = import.path.split('/').last().unwrap_or(&import.path);
+            return self.resolve_import_path(&import.path, document_index);
+        }
+
+        // For module paths, use the enhanced resolution
+        if let Some(_resolved_path) = context.handle_go_module_paths(&import.path, document_index) {
+            // Try to find a symbol representing this package/module
+            return self.resolve_import_path(&import.path, document_index);
+        }
+
+        // Fall back to basic resolution for compatibility
         self.resolve_import_path(&import.path, document_index)
     }
 
     fn get_module_path_for_file(&self, file_id: FileId) -> Option<String> {
         // Use the BehaviorState to get module path (O(1) lookup)
         self.state.get_module_path(file_id)
+    }
+
+    fn resolve_symbol(
+        &self,
+        name: &str,
+        context: &dyn ResolutionScope,
+        document_index: &DocumentIndex,
+    ) -> Option<SymbolId> {
+        // Go symbol resolution order:
+        // 1. Local scope (parameters, local variables)
+        // 2. Package scope (functions, types, variables in same package)
+        // 3. Imported symbols (qualified imports like fmt.Println)
+        
+        // First try the standard resolution context
+        if let Some(symbol_id) = context.resolve(name) {
+            return Some(symbol_id);
+        }
+        
+        // For Go, try package-qualified names (e.g., "fmt.Println")
+        if name.contains('.') {
+            if let Some((package_name, symbol_name)) = name.split_once('.') {
+                // Try to resolve the package first
+                if let Some(_package_symbol_id) = context.resolve(package_name) {
+                    // If we found the package, try to find the symbol within it
+                    // This would require more sophisticated import resolution
+                    // For now, fall back to basic resolution
+                    return self.resolve_qualified_symbol(package_name, symbol_name, document_index);
+                }
+            }
+        }
+        
+        None
+    }
+
+    fn configure_symbol(&self, symbol: &mut crate::Symbol, module_path: Option<&str>) {
+        // Apply Go-specific module path formatting
+        if let Some(path) = module_path {
+            // Go uses package paths, not including symbol names
+            symbol.module_path = Some(path.to_string().into());
+        }
+
+        // Apply Go visibility parsing based on capitalization
+        if let Some(ref sig) = symbol.signature {
+            symbol.visibility = self.parse_visibility(sig);
+        }
+
+        // Set Go-specific symbol properties
+        // Go symbols are package-scoped by default
+        if symbol.module_path.is_none() {
+            symbol.module_path = Some(".".to_string().into()); // Current package
+        }
     }
 
     fn import_matches_symbol(
@@ -382,23 +453,263 @@ impl LanguageBehavior for GoBehavior {
 
         // Case 2: Only do complex matching if we have the importing module context
         if let Some(importing_mod) = importing_module {
-            // Go import resolution differs from Rust:
+            // Go import resolution:
             // - Relative imports start with './' or '../'
-            // - Absolute imports are package names or path aliases
+            // - Absolute imports are package paths like "fmt", "github.com/user/repo/package"
 
             if import_path.starts_with("./") || import_path.starts_with("../") {
                 // Resolve relative path to absolute module path
                 let resolved = resolve_relative_path(import_path, importing_mod);
 
-                // Check if it matches (with or without index)
-                if matches_with_index(&resolved, symbol_module_path) {
+                // Check if it matches exactly
+                if resolved == symbol_module_path {
                     return true;
                 }
             }
-            // else: bare module imports and scoped packages
-            // These need exact match for now (TODO: implement proper resolution)
+            // else: absolute package imports like "fmt", "github.com/user/repo"
+            // These should match exactly (no complex resolution needed for Go packages)
         }
 
         false
+    }
+}
+
+impl GoBehavior {
+    /// Helper method to resolve qualified symbol names (e.g., "fmt.Println")
+    fn resolve_qualified_symbol(
+        &self,
+        package_name: &str,
+        symbol_name: &str,
+        document_index: &DocumentIndex,
+    ) -> Option<SymbolId> {
+        // Create a temporary resolution context to use the enhanced methods
+        let context = crate::parsing::go::resolution::GoResolutionContext::new(
+            FileId::new(1).unwrap() // Temporary file ID for resolution
+        );
+
+        // First try to resolve using the enhanced package resolution
+        if let Some(symbol_id) = context.resolve_imported_package_symbols(
+            package_name, 
+            symbol_name, 
+            document_index
+        ) {
+            return Some(symbol_id);
+        }
+
+        // Check if it's a standard library package
+        if context.is_standard_library_package(package_name) {
+            // For standard library packages, look for symbols directly
+            if let Ok(candidates) = document_index.find_symbols_by_name(symbol_name) {
+                for candidate in candidates {
+                    if let Some(ref module_path) = candidate.module_path {
+                        let module_str = module_path.as_ref();
+                        if (module_str == package_name || 
+                            module_str.split('/').last() == Some(package_name)) &&
+                           candidate.visibility == crate::Visibility::Public {
+                            return Some(candidate.id);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fall back to the original implementation for compatibility
+        // Try to find symbols that match the package.symbol pattern
+        if let Ok(symbols) = document_index.get_all_symbols(1000) {
+            for symbol in symbols {
+                // Check if the symbol's module path matches the package
+                if let Some(ref module_path) = symbol.module_path {
+                    // Handle both exact package matches and last component matches
+                    let module_str = module_path.as_ref();
+                    if (module_str == package_name || 
+                        module_str.split('/').last() == Some(package_name)) &&
+                       symbol.name.as_ref() == symbol_name &&
+                       symbol.visibility == crate::Visibility::Public {
+                        return Some(symbol.id);
+                    }
+                }
+            }
+        }
+        
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+    use crate::Visibility;
+
+    #[test]
+    fn test_module_separator() {
+        let behavior = GoBehavior::new();
+        assert_eq!(behavior.module_separator(), "/");
+    }
+
+    #[test]
+    fn test_module_path_from_file() {
+        let behavior = GoBehavior::new();
+        let project_root = Path::new("/home/user/project");
+        
+        // Test basic Go file
+        let file_path = Path::new("/home/user/project/pkg/utils/helper.go");
+        assert_eq!(
+            behavior.module_path_from_file(file_path, project_root),
+            Some("pkg/utils".to_string())
+        );
+
+        // Test root level file
+        let file_path = Path::new("/home/user/project/main.go");
+        assert_eq!(
+            behavior.module_path_from_file(file_path, project_root),
+            Some(".".to_string())
+        );
+
+        // Test nested package
+        let file_path = Path::new("/home/user/project/internal/api/server.go");
+        assert_eq!(
+            behavior.module_path_from_file(file_path, project_root),
+            Some("internal/api".to_string())
+        );
+    }
+
+    #[test]
+    fn test_format_module_path() {
+        let behavior = GoBehavior::new();
+        // Go doesn't append symbol names to module paths like Rust does
+        assert_eq!(
+            behavior.format_module_path("pkg/utils", "Helper"),
+            "pkg/utils"
+        );
+    }
+
+    #[test]
+    fn test_parse_visibility() {
+        let behavior = GoBehavior::new();
+        
+        // Test function signatures
+        assert_eq!(
+            behavior.parse_visibility("func PublicFunction() error"),
+            Visibility::Public
+        );
+        assert_eq!(
+            behavior.parse_visibility("func privateFunction() error"),
+            Visibility::Private
+        );
+
+        // Test method signatures
+        assert_eq!(
+            behavior.parse_visibility("func (s *Server) HandleRequest() error"),
+            Visibility::Public
+        );
+        assert_eq!(
+            behavior.parse_visibility("func (s *Server) handleInternal() error"),
+            Visibility::Private
+        );
+
+        // Test type signatures
+        assert_eq!(
+            behavior.parse_visibility("type PublicStruct struct"),
+            Visibility::Public
+        );
+        assert_eq!(
+            behavior.parse_visibility("type privateStruct struct"),
+            Visibility::Private
+        );
+
+        // Test variable signatures
+        assert_eq!(
+            behavior.parse_visibility("var GlobalVar string"),
+            Visibility::Public
+        );
+        assert_eq!(
+            behavior.parse_visibility("var localVar string"),
+            Visibility::Private
+        );
+
+        // Test constant signatures
+        assert_eq!(
+            behavior.parse_visibility("const MaxRetries = 3"),
+            Visibility::Public
+        );
+        assert_eq!(
+            behavior.parse_visibility("const timeout = 30"),
+            Visibility::Private
+        );
+    }
+
+    #[test]
+    fn test_supports_traits() {
+        let behavior = GoBehavior::new();
+        assert!(!behavior.supports_traits()); // Go has interfaces, not traits
+    }
+
+    #[test]
+    fn test_supports_inherent_methods() {
+        let behavior = GoBehavior::new();
+        assert!(behavior.supports_inherent_methods()); // Go has methods on types
+    }
+
+    #[test]
+    fn test_import_matches_symbol() {
+        let behavior = GoBehavior::new();
+        
+        // Test exact matches
+        assert!(behavior.import_matches_symbol("fmt", "fmt", None));
+        assert!(behavior.import_matches_symbol("github.com/user/repo", "github.com/user/repo", None));
+        
+        // Test relative imports
+        assert!(behavior.import_matches_symbol("./utils", "pkg/utils", Some("pkg")));
+        assert!(behavior.import_matches_symbol("../shared", "pkg/shared", Some("pkg/api")));
+        
+        // Test non-matches
+        assert!(!behavior.import_matches_symbol("fmt", "strings", None));
+        assert!(!behavior.import_matches_symbol("./utils", "pkg/other", Some("pkg")));
+    }
+
+    #[test]
+    fn test_configure_symbol() {
+        use crate::{Symbol, SymbolKind, SymbolId, FileId, Visibility, Range};
+
+        let behavior = GoBehavior::new();
+        
+        // Test function with public signature
+        let mut symbol = Symbol {
+            id: SymbolId::new(1).unwrap(),
+            name: "PublicFunction".into(),
+            kind: SymbolKind::Function,
+            signature: Some("func PublicFunction() error".into()),
+            module_path: None,
+            file_id: FileId::new(1).unwrap(),
+            range: Range { start_line: 1, start_column: 1, end_line: 1, end_column: 10 },
+            doc_comment: None,
+            visibility: Visibility::Private, // Will be updated by configure_symbol
+            scope_context: None,
+        };
+
+        behavior.configure_symbol(&mut symbol, Some("pkg/utils"));
+
+        assert_eq!(symbol.module_path.as_ref().map(|s| s.as_ref()), Some("pkg/utils"));
+        assert_eq!(symbol.visibility, Visibility::Public); // Should be public due to capitalization
+
+        // Test variable with private signature
+        let mut symbol = Symbol {
+            id: SymbolId::new(2).unwrap(),
+            name: "privateVar".into(),
+            kind: SymbolKind::Variable,
+            signature: Some("var privateVar string".into()),
+            module_path: None,
+            file_id: FileId::new(1).unwrap(),
+            range: Range { start_line: 1, start_column: 1, end_line: 1, end_column: 10 },
+            doc_comment: None,
+            visibility: Visibility::Public, // Will be updated by configure_symbol
+            scope_context: None,
+        };
+
+        behavior.configure_symbol(&mut symbol, None);
+
+        assert_eq!(symbol.module_path.as_ref().map(|s| s.as_ref()), Some(".")); // Default to current package
+        assert_eq!(symbol.visibility, Visibility::Private); // Should be private due to lowercase
     }
 }
