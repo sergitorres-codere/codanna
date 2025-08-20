@@ -20,7 +20,7 @@ Languages self-register via the modular registry system. Each language lives in 
 - **TypeScript** - Interfaces, type aliases, generics, inheritance tracking
 - **Python** - Classes, functions, type hints, inheritance
 - **PHP** - Classes, traits, interfaces, namespaces
-- **Go** - TODO
+- **Go** - Structs, interfaces, methods, generics (1.18+), package visibility
 
 **🎯 Ready for new languages** - The architecture is mature and well-tested.
 
@@ -234,7 +234,7 @@ Every language test should explore:
 - **`src/parsing/typescript/`** - Full TypeScript with interfaces, type aliases, inheritance tracking, and complex type resolution
 - **`src/parsing/python/`** - Python with class inheritance, type hints, scope tracking, and parent context
 - **`src/parsing/php/`** - PHP with namespaces, traits, interfaces, and complete signature support
-- **`src/parsing/go/`** - Go with TODO
+- **`src/parsing/go/`** - Go with structs, interfaces, generics, methods, package-level visibility, and comprehensive symbol extraction
 
 All parsers follow the same patterns for signature extraction, scope tracking, and resolution API integration.
 
