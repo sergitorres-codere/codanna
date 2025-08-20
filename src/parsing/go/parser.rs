@@ -103,12 +103,19 @@ impl GoParser {
 
                 // Process function parameters
                 if let Some(params) = node.child_by_field_name("parameters") {
-                    self.process_method_parameters(params, code, file_id, counter, symbols, module_path);
+                    self.process_method_parameters(
+                        params,
+                        code,
+                        file_id,
+                        counter,
+                        symbols,
+                        module_path,
+                    );
                 }
 
                 // Process children for nested functions and body
                 for child in node.children(&mut node.walk()) {
-                    if child.kind() != "identifier" 
+                    if child.kind() != "identifier"
                         && child.kind() != "parameter_list"
                         && child.kind() != "parameters"
                     {
@@ -153,20 +160,35 @@ impl GoParser {
 
                 // Process method receiver to add receiver scope
                 if let Some(receiver) = node.child_by_field_name("receiver") {
-                    self.process_method_receiver(receiver, code, file_id, counter, symbols, module_path);
+                    self.process_method_receiver(
+                        receiver,
+                        code,
+                        file_id,
+                        counter,
+                        symbols,
+                        module_path,
+                    );
                 }
 
                 // Process method parameters
                 if let Some(params) = node.child_by_field_name("parameters") {
-                    self.process_method_parameters(params, code, file_id, counter, symbols, module_path);
+                    self.process_method_parameters(
+                        params,
+                        code,
+                        file_id,
+                        counter,
+                        symbols,
+                        module_path,
+                    );
                 }
 
                 // Process children (body, etc.)
                 for child in node.children(&mut node.walk()) {
-                    if child.kind() != "identifier" 
-                        && child.kind() != "parameter_list" 
+                    if child.kind() != "identifier"
+                        && child.kind() != "parameter_list"
                         && child.kind() != "parameters"
-                        && child.kind() != "receiver" // Skip receiver, already processed
+                        && child.kind() != "receiver"
+                    // Skip receiver, already processed
                     {
                         self.extract_symbols_from_node(
                             child,
@@ -196,7 +218,7 @@ impl GoParser {
             "if_statement" => {
                 // Enter block scope for if statement
                 self.context.enter_scope(ScopeType::Block);
-                
+
                 // Process if statement parts (condition, body, else)
                 for child in node.children(&mut node.walk()) {
                     self.extract_symbols_from_node(
@@ -208,17 +230,24 @@ impl GoParser {
                         module_path,
                     );
                 }
-                
+
                 self.context.exit_scope();
             }
             "for_statement" => {
                 // Enter block scope for for loop
                 self.context.enter_scope(ScopeType::Block);
-                
+
                 // Check for range clause specifically
                 for child in node.children(&mut node.walk()) {
                     if child.kind() == "range_clause" {
-                        self.process_range_clause(child, code, file_id, counter, symbols, module_path);
+                        self.process_range_clause(
+                            child,
+                            code,
+                            file_id,
+                            counter,
+                            symbols,
+                            module_path,
+                        );
                     } else {
                         self.extract_symbols_from_node(
                             child,
@@ -230,13 +259,13 @@ impl GoParser {
                         );
                     }
                 }
-                
+
                 self.context.exit_scope();
             }
             "switch_statement" | "type_switch_statement" => {
                 // Enter block scope for switch statement
                 self.context.enter_scope(ScopeType::Block);
-                
+
                 // Process switch statement parts
                 for child in node.children(&mut node.walk()) {
                     self.extract_symbols_from_node(
@@ -248,13 +277,13 @@ impl GoParser {
                         module_path,
                     );
                 }
-                
+
                 self.context.exit_scope();
             }
             "expression_case" | "default_case" | "type_case" => {
                 // Enter block scope for switch case
                 self.context.enter_scope(ScopeType::Block);
-                
+
                 // Process case body
                 for child in node.children(&mut node.walk()) {
                     self.extract_symbols_from_node(
@@ -266,13 +295,13 @@ impl GoParser {
                         module_path,
                     );
                 }
-                
+
                 self.context.exit_scope();
             }
             "block" => {
                 // Enter block scope for bare blocks
                 self.context.enter_scope(ScopeType::Block);
-                
+
                 // Process block contents
                 for child in node.children(&mut node.walk()) {
                     self.extract_symbols_from_node(
@@ -284,12 +313,19 @@ impl GoParser {
                         module_path,
                     );
                 }
-                
+
                 self.context.exit_scope();
             }
             "short_var_declaration" => {
                 // Process short variable declarations (:=) in current scope
-                self.process_short_var_declaration(node, code, file_id, counter, symbols, module_path);
+                self.process_short_var_declaration(
+                    node,
+                    code,
+                    file_id,
+                    counter,
+                    symbols,
+                    module_path,
+                );
             }
             _ => {
                 // For unhandled node types, recursively process children
@@ -886,7 +922,7 @@ impl GoParser {
     ) {
         // short_var_declaration format: identifiers := expressions
         let mut var_names = Vec::new();
-        
+
         // Extract variable names (left side of :=)
         for child in node.children(&mut node.walk()) {
             match child.kind() {
@@ -952,13 +988,13 @@ impl GoParser {
     ) {
         // Method receivers in Go are parameter lists: func (r *Type) method()
         // Process each receiver parameter in the receiver scope
-        
+
         for child in receiver_node.children(&mut receiver_node.walk()) {
             if child.kind() == "parameter_declaration" {
                 // Extract receiver name and type
                 let mut receiver_name = None;
                 let mut receiver_type = None;
-                
+
                 for param_child in child.children(&mut child.walk()) {
                     match param_child.kind() {
                         "identifier" => {
@@ -970,14 +1006,14 @@ impl GoParser {
                         _ => {}
                     }
                 }
-                
+
                 if let Some(name) = receiver_name {
                     let visibility = self.determine_go_visibility(name);
                     let signature = match receiver_type {
                         Some(typ) => format!("{name} {typ}"),
                         None => name.to_string(),
                     };
-                    
+
                     let mut symbol = self.create_symbol(
                         counter.next_id(),
                         name.to_string(),
@@ -997,7 +1033,7 @@ impl GoParser {
 
                     // Mark as method receiver parameter
                     symbol.scope_context = Some(crate::symbol::ScopeContext::Parameter);
-                    
+
                     symbols.push(symbol);
                 }
             }
@@ -1016,25 +1052,26 @@ impl GoParser {
     ) {
         // Method parameters in Go are parameter lists: func Method(param1 Type, param2 Type)
         // Process each parameter in the parameter scope
-        
+
         for child in params_node.children(&mut params_node.walk()) {
             if child.kind() == "parameter_declaration" {
                 // Extract parameter name and type
                 let mut param_names = Vec::new();
                 let mut param_type = None;
-                
+
                 for param_child in child.children(&mut child.walk()) {
                     match param_child.kind() {
                         "identifier" => {
                             param_names.push(&code[param_child.byte_range()]);
                         }
-                        "type_identifier" | "pointer_type" | "array_type" | "slice_type" | "map_type" | "channel_type" => {
+                        "type_identifier" | "pointer_type" | "array_type" | "slice_type"
+                        | "map_type" | "channel_type" => {
                             param_type = Some(&code[param_child.byte_range()]);
                         }
                         _ => {}
                     }
                 }
-                
+
                 // Create symbols for each parameter name
                 for param_name in param_names {
                     let visibility = self.determine_go_visibility(param_name);
@@ -1042,7 +1079,7 @@ impl GoParser {
                         Some(typ) => format!("{param_name} {typ}"),
                         None => param_name.to_string(),
                     };
-                    
+
                     let mut symbol = self.create_symbol(
                         counter.next_id(),
                         param_name.to_string(),
@@ -1062,7 +1099,7 @@ impl GoParser {
 
                     // Mark as method/function parameter
                     symbol.scope_context = Some(crate::symbol::ScopeContext::Parameter);
-                    
+
                     symbols.push(symbol);
                 }
             }
@@ -1082,7 +1119,7 @@ impl GoParser {
         // Range clause format: index, value := range items
         // Extract the variable names from the left side
         let mut range_vars = Vec::new();
-        
+
         for child in range_node.children(&mut range_node.walk()) {
             match child.kind() {
                 "expression_list" => {

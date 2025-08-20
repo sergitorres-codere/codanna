@@ -1,8 +1,8 @@
-use codanna::parsing::go::parser::GoParser;
 use codanna::parsing::LanguageParser;
+use codanna::parsing::go::parser::GoParser;
+use codanna::symbol::ScopeContext;
 use codanna::types::SymbolCounter;
 use codanna::{FileId, SymbolKind};
-use codanna::symbol::ScopeContext;
 
 #[test]
 fn test_go_scope_resolution() {
@@ -69,52 +69,61 @@ func ProcessData(input string) {
     }
 
     // Verify package-level symbols
-    assert!(symbols.iter().any(|s| s.name.as_ref() == "globalVar" 
+    assert!(symbols.iter().any(|s| s.name.as_ref() == "globalVar"
         && matches!(s.kind, SymbolKind::Variable)
         && matches!(s.scope_context, Some(ScopeContext::Module) | None)));
 
-    assert!(symbols.iter().any(|s| s.name.as_ref() == "CONSTANT" 
-        && matches!(s.kind, SymbolKind::Constant)));
+    assert!(
+        symbols
+            .iter()
+            .any(|s| s.name.as_ref() == "CONSTANT" && matches!(s.kind, SymbolKind::Constant))
+    );
 
-    assert!(symbols.iter().any(|s| s.name.as_ref() == "MyStruct" 
-        && matches!(s.kind, SymbolKind::Struct)));
+    assert!(
+        symbols
+            .iter()
+            .any(|s| s.name.as_ref() == "MyStruct" && matches!(s.kind, SymbolKind::Struct))
+    );
 
     // Verify method and receiver
-    assert!(symbols.iter().any(|s| s.name.as_ref() == "Method" 
-        && matches!(s.kind, SymbolKind::Method)));
+    assert!(
+        symbols
+            .iter()
+            .any(|s| s.name.as_ref() == "Method" && matches!(s.kind, SymbolKind::Method))
+    );
 
-    assert!(symbols.iter().any(|s| s.name.as_ref() == "m" 
+    assert!(symbols.iter().any(|s| s.name.as_ref() == "m"
         && matches!(s.kind, SymbolKind::Parameter)
         && matches!(s.scope_context, Some(ScopeContext::Parameter))));
 
     // Verify function-level variables (short declarations)
-    assert!(symbols.iter().any(|s| s.name.as_ref() == "localVar" 
+    assert!(symbols.iter().any(|s| s.name.as_ref() == "localVar"
         && matches!(s.kind, SymbolKind::Variable)
         && matches!(s.scope_context, Some(ScopeContext::Local { .. }))));
 
-    assert!(symbols.iter().any(|s| s.name.as_ref() == "result" 
+    assert!(symbols.iter().any(|s| s.name.as_ref() == "result"
         && matches!(s.kind, SymbolKind::Variable)
         && matches!(s.scope_context, Some(ScopeContext::Local { .. }))));
 
     // Verify block-scoped variables
-    assert!(symbols.iter().any(|s| s.name.as_ref() == "blockVar" 
+    assert!(symbols.iter().any(|s| s.name.as_ref() == "blockVar"
         && matches!(s.kind, SymbolKind::Variable)
         && matches!(s.scope_context, Some(ScopeContext::Local { .. }))));
 
-    assert!(symbols.iter().any(|s| s.name.as_ref() == "temp" 
+    assert!(symbols.iter().any(|s| s.name.as_ref() == "temp"
         && matches!(s.kind, SymbolKind::Variable)
         && matches!(s.scope_context, Some(ScopeContext::Local { .. }))));
 
-    assert!(symbols.iter().any(|s| s.name.as_ref() == "caseVar" 
+    assert!(symbols.iter().any(|s| s.name.as_ref() == "caseVar"
         && matches!(s.kind, SymbolKind::Variable)
         && matches!(s.scope_context, Some(ScopeContext::Local { .. }))));
 
     // Verify loop variables
-    assert!(symbols.iter().any(|s| s.name.as_ref() == "i" 
+    assert!(symbols.iter().any(|s| s.name.as_ref() == "i"
         && matches!(s.kind, SymbolKind::Variable)
         && matches!(s.scope_context, Some(ScopeContext::Local { .. }))));
 
-    assert!(symbols.iter().any(|s| s.name.as_ref() == "loopVar" 
+    assert!(symbols.iter().any(|s| s.name.as_ref() == "loopVar"
         && matches!(s.kind, SymbolKind::Variable)
         && matches!(s.scope_context, Some(ScopeContext::Local { .. }))));
 
@@ -150,7 +159,8 @@ func ProcessData() {
     let symbols = parser.parse(code, file_id, &mut symbol_counter);
 
     // Find all count variables - should have multiple with different scopes
-    let count_vars: Vec<_> = symbols.iter()
+    let count_vars: Vec<_> = symbols
+        .iter()
         .filter(|s| s.name.as_ref() == "count")
         .collect();
 
@@ -169,10 +179,17 @@ func ProcessData() {
     // 2. Function-level count := 5
     // 3. Block-level count := 1
     // 4. If-block-level count := 2
-    assert!(count_vars.len() >= 4, "Should have at least 4 'count' variables for shadowing test");
+    assert!(
+        count_vars.len() >= 4,
+        "Should have at least 4 'count' variables for shadowing test"
+    );
 
     // Verify we have both Variable and Variable kinds
-    assert!(count_vars.iter().any(|s| matches!(s.kind, SymbolKind::Variable)));
+    assert!(
+        count_vars
+            .iter()
+            .any(|s| matches!(s.kind, SymbolKind::Variable))
+    );
 
     println!("✅ Go variable shadowing test passed");
 }
@@ -229,33 +246,36 @@ func (c Config) Process(data []string) {
     }
 
     // Verify receiver
-    assert!(symbols.iter().any(|s| s.name.as_ref() == "c" 
+    assert!(symbols.iter().any(|s| s.name.as_ref() == "c"
         && matches!(s.kind, SymbolKind::Parameter)
         && matches!(s.scope_context, Some(ScopeContext::Parameter))));
 
     // Verify method parameter
-    assert!(symbols.iter().any(|s| s.name.as_ref() == "data" 
-        && matches!(s.kind, SymbolKind::Parameter)));
+    assert!(
+        symbols
+            .iter()
+            .any(|s| s.name.as_ref() == "data" && matches!(s.kind, SymbolKind::Parameter))
+    );
 
     // Verify range variables
-    assert!(symbols.iter().any(|s| s.name.as_ref() == "index" 
+    assert!(symbols.iter().any(|s| s.name.as_ref() == "index"
         && matches!(s.kind, SymbolKind::Variable)
         && matches!(s.scope_context, Some(ScopeContext::Local { .. }))));
 
-    assert!(symbols.iter().any(|s| s.name.as_ref() == "value" 
+    assert!(symbols.iter().any(|s| s.name.as_ref() == "value"
         && matches!(s.kind, SymbolKind::Variable)
         && matches!(s.scope_context, Some(ScopeContext::Local { .. }))));
 
     // Verify nested scoped variables
-    assert!(symbols.iter().any(|s| s.name.as_ref() == "processed" 
+    assert!(symbols.iter().any(|s| s.name.as_ref() == "processed"
         && matches!(s.kind, SymbolKind::Variable)
         && matches!(s.scope_context, Some(ScopeContext::Local { .. }))));
 
-    assert!(symbols.iter().any(|s| s.name.as_ref() == "truncated" 
+    assert!(symbols.iter().any(|s| s.name.as_ref() == "truncated"
         && matches!(s.kind, SymbolKind::Variable)
         && matches!(s.scope_context, Some(ScopeContext::Local { .. }))));
 
-    assert!(symbols.iter().any(|s| s.name.as_ref() == "first" 
+    assert!(symbols.iter().any(|s| s.name.as_ref() == "first"
         && matches!(s.kind, SymbolKind::Variable)
         && matches!(s.scope_context, Some(ScopeContext::Local { .. }))));
 

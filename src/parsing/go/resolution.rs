@@ -514,7 +514,7 @@ impl GoResolutionContext {
                     let module_str: &str = module_path.as_ref();
                     if module_str.starts_with(&vendor_path)
                         || (module_str.contains("vendor/")
-                            && module_str.ends_with(&import_path.replace('/', "/")))
+                            && module_str.ends_with(&import_path))
                     {
                         return Some(candidate.id);
                     }
