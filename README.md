@@ -256,6 +256,8 @@ With good comments, semantic search can find this function when prompted for:
 
 This encourages better documentation → better AI understanding → more motivation to document.
 
+**Mixed-Language Codebases:** When identical documentation exists across multiple languages (e.g., Python backend and TypeScript frontend with similar auth functions), use language filtering to get language-specific results: `lang:python` or `lang:typescript`.
+
 ### CLI Commands
 
 #### Core Commands
@@ -316,13 +318,25 @@ Available tools when using the MCP server. All tools support `--json` flag for s
 | `semantic_search_docs` | Search using natural language queries | `codanna mcp semantic_search_docs query:"error handling" limit:5` |
 | `semantic_search_with_context` | Search with enhanced context | `codanna mcp semantic_search_with_context query:"parse files" threshold:0.7` |
 
+#### Language Filtering (Mixed Codebases)
+Semantic search tools support language filtering to reduce noise in mixed-language projects:
+```bash
+# Search only in Rust code
+codanna mcp semantic_search_docs query:"authentication" lang:rust limit:5
+
+# Search only in TypeScript code  
+codanna mcp semantic_search_with_context query:"parse config" lang:typescript limit:3
+```
+
+Language filtering eliminates duplicate results when similar documentation exists across multiple languages, reducing result sets by up to 75% while maintaining identical similarity scores.
+
 #### Parameters Reference
 | Tool | Parameters |
 |------|------------|
 | `find_symbol` | `name` (required) |
 | `search_symbols` | `query`, `limit`, `kind`, `module` |
-| `semantic_search_docs` | `query`, `limit`, `threshold` |
-| `semantic_search_with_context` | `query`, `limit`, `threshold` |
+| `semantic_search_docs` | `query`, `limit`, `threshold`, `lang` |
+| `semantic_search_with_context` | `query`, `limit`, `threshold`, `lang` |
 | `get_calls` | `function_name` |
 | `find_callers` | `function_name` |
 | `analyze_impact` | `symbol_name`, `max_depth` |
@@ -366,6 +380,8 @@ codanna benchmark python       # Test specific language
 **Lock-free concurrency**: DashMap for concurrent symbol reads, write coordination via single writer lock.
 
 **Single-pass indexing**: Symbols, relationships, and embeddings extracted in one AST traversal.
+
+**Language-aware semantic search**: Embeddings track source language, enabling filtering before similarity computation. No score redistribution - identical docs produce identical scores regardless of filtering.
 
 **Hot reload**: File watcher with 500ms debounce triggers re-indexing of changed files only.
 
