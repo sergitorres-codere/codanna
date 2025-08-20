@@ -8,12 +8,12 @@
 //! - Error handling and edge cases
 //! - Performance benchmarks
 
-use anyhow::Result;
 use crate::SymbolKind;
 use crate::parsing::go::test_helpers::{
-    parse_go_code, filter_by_kind, assert_symbol_exists, 
-    assert_symbol_signature, assert_symbol_visibility, GoCodeBuilder, snippets
+    GoCodeBuilder, assert_symbol_exists, assert_symbol_signature, assert_symbol_visibility,
+    filter_by_kind, parse_go_code, snippets,
 };
+use anyhow::Result;
 
 /// Test 1: Function Symbol Extraction
 /// Goal: Verify parser correctly extracts Go function declarations
@@ -24,18 +24,24 @@ fn test_function_symbol_extraction() -> Result<()> {
     let code = GoCodeBuilder::new()
         .with_package("main")
         .with_import(r#""fmt""#)
-        .with_function(r#"// PublicFunction is an exported function
+        .with_function(
+            r#"// PublicFunction is an exported function
 func PublicFunction(name string, age int) (string, error) {
     return fmt.Sprintf("Name: %s, Age: %d", name, age), nil
-}"#)
-        .with_function(r#"// privateFunction is an unexported function
+}"#,
+        )
+        .with_function(
+            r#"// privateFunction is an unexported function
 func privateFunction() int {
     return 42
-}"#)
-        .with_function(r#"func main() {
+}"#,
+        )
+        .with_function(
+            r#"func main() {
     result, _ := PublicFunction("Alice", 30)
     fmt.Println(result)
-}"#)
+}"#,
+        )
         .build();
 
     println!("Test code:\n{code}");
@@ -53,7 +59,7 @@ func privateFunction() int {
     // Test visibility
     assert_symbol_visibility(&symbols, "PublicFunction", true)?;
     assert_symbol_visibility(&symbols, "privateFunction", false)?;
-    
+
     // Note: main function can be either exported or unexported, depends on implementation
     // assert_symbol_visibility(&symbols, "main", false)?;
 
@@ -78,26 +84,36 @@ fn test_method_symbol_extraction() -> Result<()> {
     let code = GoCodeBuilder::new()
         .with_package("main")
         .with_import(r#""fmt""#)
-        .with_type(r#"type Person struct {
+        .with_type(
+            r#"type Person struct {
     Name string
     Age  int
-}"#)
-        .with_function(r#"// GetName returns the person's name (value receiver)
+}"#,
+        )
+        .with_function(
+            r#"// GetName returns the person's name (value receiver)
 func (p Person) GetName() string {
     return p.Name
-}"#)
-        .with_function(r#"// SetAge sets the person's age (pointer receiver)
+}"#,
+        )
+        .with_function(
+            r#"// SetAge sets the person's age (pointer receiver)
 func (p *Person) SetAge(age int) {
     p.Age = age
-}"#)
-        .with_function(r#"// String implements the Stringer interface
+}"#,
+        )
+        .with_function(
+            r#"// String implements the Stringer interface
 func (p Person) String() string {
     return fmt.Sprintf("Person{Name: %s, Age: %d}", p.Name, p.Age)
-}"#)
-        .with_function(r#"// validate is an unexported method
+}"#,
+        )
+        .with_function(
+            r#"// validate is an unexported method
 func (p *Person) validate() bool {
     return p.Name != "" && p.Age >= 0
-}"#)
+}"#,
+        )
         .build();
 
     println!("Test code:\n{code}");
@@ -120,7 +136,7 @@ func (p *Person) validate() bool {
     assert_symbol_visibility(&symbols, "validate", false)?;
 
     // Test method signatures include receiver information
-    assert_symbol_signature(&symbols, "GetName", "Person")?;  // Value receiver
+    assert_symbol_signature(&symbols, "GetName", "Person")?; // Value receiver
     assert_symbol_signature(&symbols, "SetAge", "*Person")?; // Pointer receiver
 
     println!("✓ Found {} methods", methods.len());
@@ -139,25 +155,31 @@ fn test_struct_symbol_extraction() -> Result<()> {
 
     let code = GoCodeBuilder::new()
         .with_package("main")
-        .with_type(r#"// User represents a user in the system
+        .with_type(
+            r#"// User represents a user in the system
 type User struct {
     ID       int64     `json:"id"`
     Name     string    `json:"name"`
     Email    string    `json:"email"`
     Created  time.Time `json:"created_at"`
     profile  *Profile  // unexported field
-}"#)
-        .with_type(r#"// Profile contains user profile information
+}"#,
+        )
+        .with_type(
+            r#"// Profile contains user profile information
 type Profile struct {
     Bio       string
     AvatarURL string
     settings  map[string]interface{} // unexported field
-}"#)
-        .with_type(r#"// config is an unexported struct
+}"#,
+        )
+        .with_type(
+            r#"// config is an unexported struct
 type config struct {
     apiKey    string
     apiSecret string
-}"#)
+}"#,
+        )
         .build();
 
     println!("Test code:\n{code}");
@@ -200,27 +222,35 @@ fn test_interface_symbol_extraction() -> Result<()> {
     let code = GoCodeBuilder::new()
         .with_package("main")
         .with_import(r#""io""#)
-        .with_type(r#"// Reader defines reading operations
+        .with_type(
+            r#"// Reader defines reading operations
 type Reader interface {
     Read([]byte) (int, error)
     Close() error
-}"#)
-        .with_type(r#"// Writer defines writing operations
+}"#,
+        )
+        .with_type(
+            r#"// Writer defines writing operations
 type Writer interface {
     Write([]byte) (int, error)
     Flush() error
-}"#)
-        .with_type(r#"// ReadWriter embeds both Reader and Writer
+}"#,
+        )
+        .with_type(
+            r#"// ReadWriter embeds both Reader and Writer
 type ReadWriter interface {
     Reader
     Writer
     Sync() error
-}"#)
-        .with_type(r#"// processor is an unexported interface
+}"#,
+        )
+        .with_type(
+            r#"// processor is an unexported interface
 type processor interface {
     process(data []byte) error
     cleanup()
-}"#)
+}"#,
+        )
         .build();
 
     println!("Test code:\n{code}");
@@ -228,7 +258,10 @@ type processor interface {
     let symbols = parse_go_code(&code)?;
     let interfaces = filter_by_kind(&symbols, SymbolKind::Interface);
 
-    assert!(interfaces.len() >= 4, "Should extract at least 4 interfaces");
+    assert!(
+        interfaces.len() >= 4,
+        "Should extract at least 4 interfaces"
+    );
 
     // Test interface existence
     assert_symbol_exists(&symbols, "Reader", SymbolKind::Interface)?;
@@ -262,27 +295,35 @@ fn test_variable_constant_extraction() -> Result<()> {
 
     let code = GoCodeBuilder::new()
         .with_package("main")
-        .with_const(r#"// Exported constants
+        .with_const(
+            r#"// Exported constants
 const (
     Version     = "1.0.0"
     MaxRetries  = 3
     DefaultPort = 8080
-)"#)
-        .with_const(r#"// unexported constants
+)"#,
+        )
+        .with_const(
+            r#"// unexported constants
 const (
     bufferSize = 1024
     timeout    = 30
-)"#)
-        .with_var(r#"// Exported variables
+)"#,
+        )
+        .with_var(
+            r#"// Exported variables
 var (
     GlobalConfig *Config
     Logger       *log.Logger
-)"#)
-        .with_var(r#"// unexported variables
+)"#,
+        )
+        .with_var(
+            r#"// unexported variables
 var (
     cache   map[string]interface{}
     isDebug bool
-)"#)
+)"#,
+        )
         .build();
 
     println!("Test code:\n{code}");
@@ -316,7 +357,7 @@ var (
         // Only test if we actually found variables
         let global_config = symbols.iter().any(|s| s.name.as_ref() == "GlobalConfig");
         let cache = symbols.iter().any(|s| s.name.as_ref() == "cache");
-        
+
         if global_config {
             assert_symbol_visibility(&symbols, "GlobalConfig", true)?;
         }
@@ -387,26 +428,36 @@ fn test_generic_symbol_extraction() -> Result<()> {
 
     let code = GoCodeBuilder::new()
         .with_package("main")
-        .with_function(r#"// Identity returns the input value unchanged
+        .with_function(
+            r#"// Identity returns the input value unchanged
 func Identity[T any](value T) T {
     return value
-}"#)
-        .with_function(r#"// Compare compares two values of the same type
+}"#,
+        )
+        .with_function(
+            r#"// Compare compares two values of the same type
 func Compare[T comparable](a, b T) bool {
     return a == b
-}"#)
-        .with_type(r#"// Container holds items of any type
+}"#,
+        )
+        .with_type(
+            r#"// Container holds items of any type
 type Container[T any] struct {
     items []T
-}"#)
-        .with_function(r#"// Add adds an item to the container
+}"#,
+        )
+        .with_function(
+            r#"// Add adds an item to the container
 func (c *Container[T]) Add(item T) {
     c.items = append(c.items, item)
-}"#)
-        .with_type(r#"// Processor processes items of any type
+}"#,
+        )
+        .with_type(
+            r#"// Processor processes items of any type
 type Processor[T any] interface {
     Process(T) error
-}"#)
+}"#,
+        )
         .build();
 
     println!("Test code:\n{code}");
@@ -414,17 +465,26 @@ type Processor[T any] interface {
     let symbols = parse_go_code(&code)?;
 
     // Look for generic symbols by checking signatures
-    let generic_functions: Vec<_> = symbols.iter()
-        .filter(|s| matches!(s.kind, SymbolKind::Function | SymbolKind::Method) &&
-                   s.signature.as_ref().map_or(false, |sig| sig.contains("[")))
+    let generic_functions: Vec<_> = symbols
+        .iter()
+        .filter(|s| {
+            matches!(s.kind, SymbolKind::Function | SymbolKind::Method)
+                && s.signature.as_ref().is_some_and(|sig| sig.contains("["))
+        })
         .collect();
 
-    let generic_types: Vec<_> = symbols.iter()
-        .filter(|s| matches!(s.kind, SymbolKind::Struct | SymbolKind::Interface) &&
-                   s.signature.as_ref().map_or(false, |sig| sig.contains("[")))
+    let generic_types: Vec<_> = symbols
+        .iter()
+        .filter(|s| {
+            matches!(s.kind, SymbolKind::Struct | SymbolKind::Interface)
+                && s.signature.as_ref().is_some_and(|sig| sig.contains("["))
+        })
         .collect();
 
-    assert!(!generic_functions.is_empty(), "Should find generic functions");
+    assert!(
+        !generic_functions.is_empty(),
+        "Should find generic functions"
+    );
     assert!(!generic_types.is_empty(), "Should find generic types");
 
     // Test specific generic symbols
@@ -453,7 +513,10 @@ fn test_error_handling() -> Result<()> {
 
     // Test 1: Empty file
     let empty_symbols = parse_go_code("")?;
-    assert!(empty_symbols.is_empty(), "Empty code should produce no symbols");
+    assert!(
+        empty_symbols.is_empty(),
+        "Empty code should produce no symbols"
+    );
 
     // Test 2: Package only
     let package_only = parse_go_code("package main")?;
@@ -464,12 +527,15 @@ fn test_error_handling() -> Result<()> {
     let incomplete_func = r#"
 package main
 func IncompleteFunc("#;
-    
+
     // This should not panic, even with incomplete code
     let incomplete_symbols = parse_go_code(incomplete_func);
     match incomplete_symbols {
-        Ok(symbols) => println!("Incomplete function code produced {} symbols", symbols.len()),
-        Err(e) => println!("Incomplete function code produced error: {}", e),
+        Ok(symbols) => println!(
+            "Incomplete function code produced {} symbols",
+            symbols.len()
+        ),
+        Err(e) => println!("Incomplete function code produced error: {e}"),
     }
 
     // Test 4: Syntax errors
@@ -479,11 +545,11 @@ func BadSyntax() {
     return "unclosed string
 }
 "#;
-    
+
     let syntax_symbols = parse_go_code(syntax_error);
     match syntax_symbols {
         Ok(symbols) => println!("Syntax error code produced {} symbols", symbols.len()),
-        Err(e) => println!("Syntax error code produced error: {}", e),
+        Err(e) => println!("Syntax error code produced error: {e}"),
     }
 
     println!("✓ Parser handles empty files gracefully");
@@ -655,7 +721,7 @@ func (s *Server) deleteUser(w http.ResponseWriter, r *http.Request, id string) {
     println!("Test code: [Complex real-world server implementation]");
 
     let symbols = parse_go_code(code)?;
-    
+
     // Analyze symbol distribution
     let structs = filter_by_kind(&symbols, SymbolKind::Struct);
     let interfaces = filter_by_kind(&symbols, SymbolKind::Interface);
@@ -664,8 +730,8 @@ func (s *Server) deleteUser(w http.ResponseWriter, r *http.Request, id string) {
     let _fields = filter_by_kind(&symbols, SymbolKind::Field);
 
     assert!(structs.len() >= 2, "Should find multiple structs");
-    assert!(interfaces.len() >= 1, "Should find interfaces");
-    assert!(functions.len() >= 1, "Should find functions");
+    assert!(!interfaces.is_empty(), "Should find interfaces");
+    assert!(!functions.is_empty(), "Should find functions");
     assert!(methods.len() >= 5, "Should find multiple methods");
 
     // Test specific high-level symbols
@@ -679,8 +745,13 @@ func (s *Server) deleteUser(w http.ResponseWriter, r *http.Request, id string) {
     assert_symbol_exists(&symbols, "Shutdown", SymbolKind::Method)?;
 
     println!("✓ Found {} total symbols in complex code", symbols.len());
-    println!("✓ Structs: {}, Interfaces: {}, Functions: {}, Methods: {}", 
-             structs.len(), interfaces.len(), functions.len(), methods.len());
+    println!(
+        "✓ Structs: {}, Interfaces: {}, Functions: {}, Methods: {}",
+        structs.len(),
+        interfaces.len(),
+        functions.len(),
+        methods.len()
+    );
     println!("✓ Complex real-world code parsed successfully");
     println!("=== PASSED ===\n");
 
@@ -701,7 +772,7 @@ mod performance_tests {
         println!("\n=== Test 10: Performance Benchmark ===");
 
         // Generate multiple code samples for testing
-        let samples = vec![
+        let samples = [
             snippets::BASIC_FUNCTIONS,
             snippets::STRUCT_WITH_METHODS,
             snippets::INTERFACES,
@@ -725,17 +796,18 @@ mod performance_tests {
             total_symbols * 1000 / elapsed.as_millis().max(1) as usize
         };
 
-        println!("✓ Parsed {} symbols in {:?}", total_symbols, elapsed);
-        println!("✓ Performance: {} symbols/second", symbols_per_sec);
+        println!("✓ Parsed {total_symbols} symbols in {elapsed:?}");
+        println!("✓ Performance: {symbols_per_sec} symbols/second");
 
         // Performance assertion
         assert!(
             symbols_per_sec >= PERFORMANCE_TARGET_SYMBOLS_PER_SEC,
-            "Parser performance {} symbols/sec is below target {} symbols/sec",
-            symbols_per_sec, PERFORMANCE_TARGET_SYMBOLS_PER_SEC
+            "Parser performance {symbols_per_sec} symbols/sec is below target {PERFORMANCE_TARGET_SYMBOLS_PER_SEC} symbols/sec"
         );
 
-        println!("✓ Meets performance target of {} symbols/second", PERFORMANCE_TARGET_SYMBOLS_PER_SEC);
+        println!(
+            "✓ Meets performance target of {PERFORMANCE_TARGET_SYMBOLS_PER_SEC} symbols/second"
+        );
         println!("=== PASSED ===\n");
 
         Ok(())

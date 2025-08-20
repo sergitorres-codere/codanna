@@ -356,11 +356,16 @@ Current TypeScript nodes → Go equivalents:
   - [x] Fixture file performance testing (bench_go_fixture_files)
   - [x] Criterion integration with HTML reports
 
-### 7.4 Regression Tests 🟢
-- [ ] **Ensure no breakage**:
-  - [ ] All existing language parsers still work
-  - [ ] Go parser properly registered
-  - [ ] MCP server recognizes Go files
+### 7.4 Regression Tests 🟢 ✅ COMPLETED
+- [x] **Ensure no breakage**:
+  - [x] All existing language parsers still work
+  - [x] Go parser properly registered
+  - [x] MCP server recognizes Go files
+  - [x] Created `test_language_regression.rs` with comprehensive regression tests
+  - [x] Created `test_regression_quick.rs` with fast regression verification
+  - [x] Verified all 5 languages (Rust, Python, TypeScript, PHP, Go) are properly registered
+  - [x] Verified all parsers can be created successfully
+  - [x] Verified Go extension mapping works correctly
 
 ---
 

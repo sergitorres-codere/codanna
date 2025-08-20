@@ -679,7 +679,7 @@ func privateFunc() int {
 
 /// Test 10: Error handling and edge cases
 /// Goal: Verify parser handles malformed Go code gracefully
-#[test] 
+#[test]
 fn test_go_parser_error_handling() -> Result<()> {
     println!("\n=== Test 10: Error Handling and Edge Cases ===");
 
@@ -697,31 +697,41 @@ fn test_go_parser_error_handling() -> Result<()> {
         ("Only whitespace", "   \n\t  \n"),
         ("Incomplete function", "func incomplete("),
         ("Invalid syntax", "this is not go code!"),
-        ("Unmatched braces", "package main\nfunc test() {\n// missing closing brace"),
+        (
+            "Unmatched braces",
+            "package main\nfunc test() {\n// missing closing brace",
+        ),
     ];
 
     for (case_name, malformed_code) in malformed_cases {
         let mut symbol_counter = SymbolCounter::new();
         let file_id = FileId::new(1).expect("Failed to create file ID");
-        
+
         // Parser should not panic, but may return empty or partial results
         let symbols = parser.parse(malformed_code, file_id, &mut symbol_counter);
-        
-        println!("✓ Parser handled '{}' gracefully ({} symbols found)", case_name, symbols.len());
+
+        println!(
+            "✓ Parser handled '{}' gracefully ({} symbols found)",
+            case_name,
+            symbols.len()
+        );
     }
 
     // Test with very large function signatures
     let large_signature = format!(
-        "package main\nfunc VeryLongFunctionName{}(param1 string, param2 int, param3 bool) (string, error) {{ return \"\", nil }}", 
+        "package main\nfunc VeryLongFunctionName{}(param1 string, param2 int, param3 bool) (string, error) {{ return \"\", nil }}",
         "WithManyParameters".repeat(10)
     );
-    
+
     let mut symbol_counter = SymbolCounter::new();
     let file_id = FileId::new(1).expect("Failed to create file ID");
     let symbols = parser.parse(&large_signature, file_id, &mut symbol_counter);
-    
-    assert!(!symbols.is_empty(), "Should handle large function signatures");
-    
+
+    assert!(
+        !symbols.is_empty(),
+        "Should handle large function signatures"
+    );
+
     println!("✓ Large function signatures handled correctly");
     println!("=== PASSED ===\n");
 
@@ -859,44 +869,58 @@ func main() {
     let symbols = extract_symbols_from_source(complex_go_code)?;
 
     // Verify we extracted expected complex constructs
-    let generic_types: Vec<_> = symbols.iter()
+    let generic_types: Vec<_> = symbols
+        .iter()
         .filter(|s| s.signature.contains("[") && (s.kind == "struct" || s.kind == "interface"))
         .collect();
-    
+
     assert!(
         !generic_types.is_empty(),
         "Should find generic types and interfaces"
     );
 
-    let methods_with_receivers: Vec<_> = symbols.iter()
+    let methods_with_receivers: Vec<_> = symbols
+        .iter()
         .filter(|s| s.kind == "method" && s.signature.contains("func ("))
         .collect();
-    
+
     assert!(
         methods_with_receivers.len() >= 3,
         "Should find methods with receivers"
     );
 
-    let channel_related: Vec<_> = symbols.iter()
-        .filter(|s| s.signature.contains("chan ") || s.signature.contains("<-chan") || s.signature.contains("chan<-"))
+    let channel_related: Vec<_> = symbols
+        .iter()
+        .filter(|s| {
+            s.signature.contains("chan ")
+                || s.signature.contains("<-chan")
+                || s.signature.contains("chan<-")
+        })
         .collect();
-    
+
     assert!(
         !channel_related.is_empty(),
         "Should find channel-related symbols"
     );
 
-    let embedded_interfaces: Vec<_> = symbols.iter()
+    let embedded_interfaces: Vec<_> = symbols
+        .iter()
         .filter(|s| s.kind == "interface" && s.signature.contains("http.Handler"))
         .collect();
-    
+
     assert!(
         !embedded_interfaces.is_empty(),
         "Should find interfaces with embedded interfaces"
     );
 
-    println!("✓ Found {} generic types and interfaces", generic_types.len());
-    println!("✓ Found {} methods with receivers", methods_with_receivers.len());
+    println!(
+        "✓ Found {} generic types and interfaces",
+        generic_types.len()
+    );
+    println!(
+        "✓ Found {} methods with receivers",
+        methods_with_receivers.len()
+    );
     println!("✓ Found {} channel-related symbols", channel_related.len());
     println!("✓ Found {} embedded interfaces", embedded_interfaces.len());
     println!("✓ Total symbols extracted: {}", symbols.len());
@@ -916,36 +940,36 @@ fn test_go_parser_regression_tests() -> Result<()> {
         (
             "Empty interface",
             "package main\ntype Empty interface {}\nfunc main() {}",
-            "Should handle empty interfaces"
+            "Should handle empty interfaces",
         ),
         (
             "Method with pointer receiver",
             "package main\ntype T struct{}\nfunc (t *T) Method() {}\nfunc main() {}",
-            "Should correctly parse pointer receivers"
+            "Should correctly parse pointer receivers",
         ),
         (
             "Multiple return values",
             "package main\nfunc multiReturn() (string, int, error) { return \"\", 0, nil }\nfunc main() {}",
-            "Should handle multiple return values"
+            "Should handle multiple return values",
         ),
         (
             "Generic function with constraints",
             "package main\nfunc Process[T any](item T) T { return item }\nfunc main() {}",
-            "Should handle generic functions with constraints"
+            "Should handle generic functions with constraints",
         ),
         (
             "Method on generic type",
             "package main\ntype List[T any] []T\nfunc (l List[T]) Len() int { return len(l) }\nfunc main() {}",
-            "Should handle methods on generic types"
+            "Should handle methods on generic types",
         ),
     ];
 
     for (case_name, test_code, expectation) in regression_cases {
         let symbols = extract_symbols_from_source(test_code)?;
-        
+
         assert!(
             !symbols.is_empty(),
-            "Regression case '{}' failed: {}", case_name, expectation
+            "Regression case '{case_name}' failed: {expectation}"
         );
 
         // Specific validations based on case
@@ -956,7 +980,10 @@ fn test_go_parser_regression_tests() -> Result<()> {
             }
             "Method with pointer receiver" => {
                 let methods = filter_symbols_by_kind(&symbols, "method");
-                assert!(!methods.is_empty(), "Should find method with pointer receiver");
+                assert!(
+                    !methods.is_empty(),
+                    "Should find method with pointer receiver"
+                );
                 assert!(
                     methods.iter().any(|m| m.signature.contains("*T")),
                     "Should preserve pointer receiver in signature"
@@ -964,7 +991,8 @@ fn test_go_parser_regression_tests() -> Result<()> {
             }
             "Multiple return values" => {
                 let functions = filter_symbols_by_kind(&symbols, "function");
-                let multi_return = functions.iter()
+                let multi_return = functions
+                    .iter()
                     .find(|f| f.name == "multiReturn")
                     .expect("Should find multiReturn function");
                 assert!(
@@ -977,7 +1005,7 @@ fn test_go_parser_regression_tests() -> Result<()> {
             }
         }
 
-        println!("✓ Regression test '{}' passed", case_name);
+        println!("✓ Regression test '{case_name}' passed");
     }
 
     println!("=== PASSED ===\n");
@@ -1036,10 +1064,7 @@ fn extract_symbols_from_fixture(fixture_path: &str) -> Result<Vec<GoSymbolInfo>>
                 _ => "unknown",
             };
 
-            let is_exported = match sym.visibility {
-                codanna::Visibility::Public => true,
-                _ => false,
-            };
+            let is_exported = matches!(sym.visibility, codanna::Visibility::Public);
 
             Ok(GoSymbolInfo {
                 name: sym.name.to_string(),
@@ -1137,8 +1162,8 @@ fn parse_import_line(line: &str) -> Result<Option<GoImportInfo>> {
     }
 
     // Remove "import " prefix if present
-    let import_part = if trimmed.starts_with("import ") {
-        &trimmed[7..]
+    let import_part = if let Some(stripped) = trimmed.strip_prefix("import ") {
+        stripped
     } else {
         trimmed
     };
@@ -1154,9 +1179,9 @@ fn parse_import_line(line: &str) -> Result<Option<GoImportInfo>> {
             is_dot_import: false,
             is_blank_import: false,
         }))
-    } else if import_part.starts_with("_ ") {
+    } else if let Some(stripped) = import_part.strip_prefix("_ ") {
         // Blank import: _ "database/sql"
-        if let Some(path) = extract_quoted_string(&import_part[2..]) {
+        if let Some(path) = extract_quoted_string(stripped) {
             Ok(Some(GoImportInfo {
                 path,
                 alias: None,
@@ -1166,9 +1191,9 @@ fn parse_import_line(line: &str) -> Result<Option<GoImportInfo>> {
         } else {
             Ok(None)
         }
-    } else if import_part.starts_with(". ") {
+    } else if let Some(stripped) = import_part.strip_prefix(". ") {
         // Dot import: . "math"
-        if let Some(path) = extract_quoted_string(&import_part[2..]) {
+        if let Some(path) = extract_quoted_string(stripped) {
             Ok(Some(GoImportInfo {
                 path,
                 alias: None,
@@ -1241,10 +1266,7 @@ fn extract_symbols_from_source(source_code: &str) -> Result<Vec<GoSymbolInfo>> {
                 _ => "unknown",
             };
 
-            let is_exported = match sym.visibility {
-                codanna::Visibility::Public => true,
-                _ => false,
-            };
+            let is_exported = matches!(sym.visibility, codanna::Visibility::Public);
 
             Ok(GoSymbolInfo {
                 name: sym.name.to_string(),

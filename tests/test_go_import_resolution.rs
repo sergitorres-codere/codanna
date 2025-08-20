@@ -145,9 +145,11 @@ fn test_go_behavior_import_resolution() {
 fn test_go_mod_info_structure() {
     use codanna::parsing::go::resolution::GoModInfo;
 
-    let mut info = GoModInfo::default();
-    info.module_name = Some("test/module".to_string());
-    info.go_version = Some("1.21".to_string());
+    let mut info = GoModInfo {
+        module_name: Some("test/module".to_string()),
+        go_version: Some("1.21".to_string()),
+        ..Default::default()
+    };
     info.dependencies
         .insert("dep1".to_string(), "v1.0.0".to_string());
     info.replacements

@@ -1,16 +1,16 @@
 //! Test helpers for Go parser unit tests
-//! 
+//!
 //! This module provides utilities for creating test data, assertions, and common
 //! test patterns used across Go parser tests.
 
 use anyhow::Result;
-use thiserror::Error;
 use std::num::NonZeroU32;
+use thiserror::Error;
 
-use crate::{FileId, Symbol, SymbolKind, Visibility};
-use crate::types::SymbolCounter;
-use crate::parsing::LanguageParser;
 use super::parser::GoParser;
+use crate::parsing::LanguageParser;
+use crate::types::SymbolCounter;
+use crate::{FileId, Symbol, SymbolKind, Visibility};
 
 /// Errors specific to Go parser testing
 #[derive(Error, Debug)]
@@ -175,9 +175,8 @@ impl GoCodeBuilder {
 
 /// Helper function to parse Go code and extract symbols
 pub fn parse_go_code(code: &str) -> Result<Vec<Symbol>, GoTestError> {
-    let mut parser = GoParser::new().map_err(|e| {
-        GoTestError::InitializationFailed(format!("Failed to create parser: {e}"))
-    })?;
+    let mut parser = GoParser::new()
+        .map_err(|e| GoTestError::InitializationFailed(format!("Failed to create parser: {e}")))?;
 
     let mut symbol_counter = SymbolCounter::new();
     let file_id = FileId::new(1).expect("Failed to create file ID");
@@ -190,7 +189,7 @@ pub fn parse_go_code(code: &str) -> Result<Vec<Symbol>, GoTestError> {
 pub fn to_test_symbol(symbol: &Symbol) -> TestSymbol {
     TestSymbol {
         name: symbol.name.to_string(),
-        kind: symbol.kind.clone(),
+        kind: symbol.kind,
         signature: symbol.signature.as_ref().map(|s| s.to_string()),
         is_exported: matches!(symbol.visibility, Visibility::Public),
         doc_comment: symbol.doc_comment.as_ref().map(|s| s.to_string()),
@@ -204,13 +203,15 @@ pub fn filter_by_kind(symbols: &[Symbol], kind: SymbolKind) -> Vec<&Symbol> {
 
 /// Filter symbols by visibility
 pub fn filter_exported(symbols: &[Symbol]) -> Vec<&Symbol> {
-    symbols.iter()
+    symbols
+        .iter()
         .filter(|s| matches!(s.visibility, Visibility::Public))
         .collect()
 }
 
 pub fn filter_unexported(symbols: &[Symbol]) -> Vec<&Symbol> {
-    symbols.iter()
+    symbols
+        .iter()
         .filter(|s| !matches!(s.visibility, Visibility::Public))
         .collect()
 }
@@ -221,56 +222,71 @@ pub fn find_symbol_by_name<'a>(symbols: &'a [Symbol], name: &str) -> Option<&'a 
 }
 
 /// Assert that a symbol exists with the given name and kind
-pub fn assert_symbol_exists(symbols: &[Symbol], name: &str, kind: SymbolKind) -> Result<(), GoTestError> {
+pub fn assert_symbol_exists(
+    symbols: &[Symbol],
+    name: &str,
+    kind: SymbolKind,
+) -> Result<(), GoTestError> {
     let symbol = find_symbol_by_name(symbols, name)
-        .ok_or_else(|| GoTestError::AssertionFailed(
-            format!("Symbol '{name}' not found")
-        ))?;
-    
+        .ok_or_else(|| GoTestError::AssertionFailed(format!("Symbol '{name}' not found")))?;
+
     if symbol.kind != kind {
-        return Err(GoTestError::AssertionFailed(
-            format!("Symbol '{name}' has kind {:?}, expected {:?}", symbol.kind, kind)
-        ));
+        return Err(GoTestError::AssertionFailed(format!(
+            "Symbol '{name}' has kind {:?}, expected {:?}",
+            symbol.kind, kind
+        )));
     }
 
     Ok(())
 }
 
 /// Assert that a symbol has the expected signature
-pub fn assert_symbol_signature(symbols: &[Symbol], name: &str, expected_signature: &str) -> Result<(), GoTestError> {
+pub fn assert_symbol_signature(
+    symbols: &[Symbol],
+    name: &str,
+    expected_signature: &str,
+) -> Result<(), GoTestError> {
     let symbol = find_symbol_by_name(symbols, name)
-        .ok_or_else(|| GoTestError::AssertionFailed(
-            format!("Symbol '{name}' not found")
-        ))?;
-    
-    let signature = symbol.signature.as_ref()
-        .ok_or_else(|| GoTestError::AssertionFailed(
-            format!("Symbol '{name}' has no signature")
-        ))?;
-    
+        .ok_or_else(|| GoTestError::AssertionFailed(format!("Symbol '{name}' not found")))?;
+
+    let signature = symbol
+        .signature
+        .as_ref()
+        .ok_or_else(|| GoTestError::AssertionFailed(format!("Symbol '{name}' has no signature")))?;
+
     if !signature.contains(expected_signature) {
-        return Err(GoTestError::AssertionFailed(
-            format!("Symbol '{name}' signature '{signature}' does not contain '{expected_signature}'")
-        ));
+        return Err(GoTestError::AssertionFailed(format!(
+            "Symbol '{name}' signature '{signature}' does not contain '{expected_signature}'"
+        )));
     }
 
     Ok(())
 }
 
 /// Assert that a symbol has the expected visibility
-pub fn assert_symbol_visibility(symbols: &[Symbol], name: &str, is_exported: bool) -> Result<(), GoTestError> {
+pub fn assert_symbol_visibility(
+    symbols: &[Symbol],
+    name: &str,
+    is_exported: bool,
+) -> Result<(), GoTestError> {
     let symbol = find_symbol_by_name(symbols, name)
-        .ok_or_else(|| GoTestError::AssertionFailed(
-            format!("Symbol '{name}' not found")
-        ))?;
-    
+        .ok_or_else(|| GoTestError::AssertionFailed(format!("Symbol '{name}' not found")))?;
+
     let actual_exported = matches!(symbol.visibility, Visibility::Public);
     if actual_exported != is_exported {
-        return Err(GoTestError::AssertionFailed(
-            format!("Symbol '{name}' visibility is {}, expected {}", 
-                   if actual_exported { "exported" } else { "unexported" },
-                   if is_exported { "exported" } else { "unexported" })
-        ));
+        return Err(GoTestError::AssertionFailed(format!(
+            "Symbol '{name}' visibility is {}, expected {}",
+            if actual_exported {
+                "exported"
+            } else {
+                "unexported"
+            },
+            if is_exported {
+                "exported"
+            } else {
+                "unexported"
+            }
+        )));
     }
 
     Ok(())
@@ -460,7 +476,7 @@ mod tests {
     #[test]
     fn test_parse_basic_functions() -> Result<()> {
         let symbols = parse_go_code(snippets::BASIC_FUNCTIONS)?;
-        
+
         // Should find at least 3 functions
         let functions = filter_by_kind(&symbols, SymbolKind::Function);
         assert!(functions.len() >= 3, "Should find at least 3 functions");
@@ -483,12 +499,16 @@ mod tests {
         let test_symbols: Vec<TestSymbol> = symbols.iter().map(to_test_symbol).collect();
 
         assert!(!test_symbols.is_empty(), "Should convert symbols");
-        
-        let exported_func = test_symbols.iter()
+
+        let exported_func = test_symbols
+            .iter()
             .find(|s| s.name == "ExportedFunction")
             .expect("Should find ExportedFunction");
-        
-        assert!(exported_func.is_exported, "ExportedFunction should be exported");
+
+        assert!(
+            exported_func.is_exported,
+            "ExportedFunction should be exported"
+        );
         assert_eq!(exported_func.kind, SymbolKind::Function);
 
         Ok(())

@@ -1,15 +1,15 @@
 //! Go Parser Performance Benchmarks
-//! 
+//!
 //! This benchmark suite validates that the Go parser meets performance targets:
 //! - >10,000 symbols/second extraction speed
 //! - Memory usage within acceptable limits
 //! - Performance comparable to other language parsers
 //! - Scalability with large codebases
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use codanna::parsing::LanguageParser;
 use codanna::parsing::go::GoParser;
 use codanna::types::{FileId, SymbolCounter};
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use std::fs;
 use std::path::PathBuf;
 
@@ -24,7 +24,7 @@ const BENCHMARK_ITERATIONS: usize = 100;
 /// Benchmark basic Go symbol extraction performance
 fn bench_go_symbol_extraction(c: &mut Criterion) {
     let mut group = c.benchmark_group("go_symbol_extraction");
-    
+
     // Test with different Go code samples of varying complexity
     let test_cases = vec![
         ("basic_go", create_basic_go_code()),
@@ -36,7 +36,7 @@ fn bench_go_symbol_extraction(c: &mut Criterion) {
     for (name, source_code) in test_cases {
         let symbol_count = count_expected_symbols(&source_code);
         group.throughput(Throughput::Elements(symbol_count as u64));
-        
+
         group.bench_with_input(
             BenchmarkId::new("symbol_extraction", name),
             &source_code,
@@ -51,27 +51,27 @@ fn bench_go_symbol_extraction(c: &mut Criterion) {
             },
         );
     }
-    
+
     group.finish();
 }
 
 /// Benchmark Go parser performance with fixture files
 fn bench_go_fixture_files(c: &mut Criterion) {
     let mut group = c.benchmark_group("go_fixture_files");
-    
+
     // Find Go fixture files
     let fixture_files = find_go_fixtures();
-    
+
     for fixture_path in fixture_files {
         if let Ok(source_code) = fs::read_to_string(&fixture_path) {
             let file_name = fixture_path
                 .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or("unknown");
-            
+
             let symbol_count = count_expected_symbols(&source_code);
             group.throughput(Throughput::Elements(symbol_count as u64));
-            
+
             group.bench_with_input(
                 BenchmarkId::new("fixture_parsing", file_name),
                 &source_code,
@@ -87,21 +87,21 @@ fn bench_go_fixture_files(c: &mut Criterion) {
             );
         }
     }
-    
+
     group.finish();
 }
 
 /// Benchmark memory usage patterns
 fn bench_go_memory_usage(c: &mut Criterion) {
     let mut group = c.benchmark_group("go_memory_usage");
-    
+
     // Test memory usage with increasingly large Go files
     let sizes = vec![100, 500, 1000, 2000, 5000];
-    
+
     for size in sizes {
         let source_code = create_large_go_file(size);
         group.throughput(Throughput::Elements(size as u64));
-        
+
         group.bench_with_input(
             BenchmarkId::new("large_file_parsing", size),
             &source_code,
@@ -116,28 +116,28 @@ fn bench_go_memory_usage(c: &mut Criterion) {
             },
         );
     }
-    
+
     group.finish();
 }
 
 /// Benchmark parser initialization overhead
 fn bench_parser_initialization(c: &mut Criterion) {
     let mut group = c.benchmark_group("parser_initialization");
-    
+
     group.bench_function("go_parser_creation", |b| {
         b.iter(|| {
             let parser = GoParser::new();
             black_box(parser)
         });
     });
-    
+
     group.finish();
 }
 
 /// Benchmark specific Go language constructs
 fn bench_go_language_constructs(c: &mut Criterion) {
     let mut group = c.benchmark_group("go_language_constructs");
-    
+
     let construct_tests = vec![
         ("functions", create_many_functions(100)),
         ("structs", create_many_structs(50)),
@@ -145,11 +145,11 @@ fn bench_go_language_constructs(c: &mut Criterion) {
         ("methods", create_many_methods(100)),
         ("generics", create_many_generics(25)),
     ];
-    
+
     for (construct_name, source_code) in construct_tests {
         let symbol_count = count_expected_symbols(&source_code);
         group.throughput(Throughput::Elements(symbol_count as u64));
-        
+
         group.bench_with_input(
             BenchmarkId::new("construct_parsing", construct_name),
             &source_code,
@@ -164,7 +164,7 @@ fn bench_go_language_constructs(c: &mut Criterion) {
             },
         );
     }
-    
+
     group.finish();
 }
 
@@ -192,7 +192,8 @@ func main() {
     person := &Person{Name: "Alice", Age: 30}
     fmt.Println(person.Greet())
 }
-"#.to_string()
+"#
+    .to_string()
 }
 
 /// Create medium complexity Go code
@@ -257,7 +258,8 @@ func (ws *WebService) Stop() error {
 func (ws *WebService) Health() bool {
     return true
 }
-"#.to_string()
+"#
+    .to_string()
 }
 
 /// Create complex Go code with advanced features
@@ -383,7 +385,8 @@ func (wp *WorkerPool[T]) Stop() {
     wp.wg.Wait()
     close(wp.results)
 }
-"#.to_string()
+"#
+    .to_string()
 }
 
 /// Create real-world Go code pattern
@@ -502,50 +505,51 @@ func main() {
         fmt.Printf("Server shutdown error: %v\n", err)
     }
 }
-"#.to_string()
+"#
+    .to_string()
 }
 
 /// Generate a large Go file with specified number of symbols
 fn create_large_go_file(symbol_count: usize) -> String {
     let mut code = String::from("package main\n\nimport \"fmt\"\n\n");
-    
+
     // Add structs
     for i in 0..(symbol_count / 4) {
         code.push_str(&format!(
             "type Struct{i} struct {{\n    Field1 string\n    Field2 int\n}}\n\n"
         ));
     }
-    
+
     // Add interfaces
     for i in 0..(symbol_count / 8) {
         code.push_str(&format!(
             "type Interface{i} interface {{\n    Method{i}() string\n}}\n\n"
         ));
     }
-    
+
     // Add functions
     for i in 0..(symbol_count / 2) {
         code.push_str(&format!(
             "func Function{i}(param string) string {{\n    return fmt.Sprintf(\"Function{i}: %s\", param)\n}}\n\n"
         ));
     }
-    
+
     // Add main function
     code.push_str("func main() {\n    fmt.Println(\"Generated code\")\n}\n");
-    
+
     code
 }
 
 /// Create many functions for benchmarking
 fn create_many_functions(count: usize) -> String {
     let mut code = String::from("package main\n\nimport \"fmt\"\n\n");
-    
+
     for i in 0..count {
         code.push_str(&format!(
             "func Function{i}(param{i} string) (string, error) {{\n    return fmt.Sprintf(\"Result: %s\", param{i}), nil\n}}\n\n"
         ));
     }
-    
+
     code.push_str("func main() {}\n");
     code
 }
@@ -553,13 +557,13 @@ fn create_many_functions(count: usize) -> String {
 /// Create many structs for benchmarking
 fn create_many_structs(count: usize) -> String {
     let mut code = String::from("package main\n\n");
-    
+
     for i in 0..count {
         code.push_str(&format!(
             "type Struct{i} struct {{\n    Field1{i} string\n    Field2{i} int\n    Field3{i} bool\n}}\n\n"
         ));
     }
-    
+
     code.push_str("func main() {}\n");
     code
 }
@@ -567,13 +571,13 @@ fn create_many_structs(count: usize) -> String {
 /// Create many interfaces for benchmarking
 fn create_many_interfaces(count: usize) -> String {
     let mut code = String::from("package main\n\n");
-    
+
     for i in 0..count {
         code.push_str(&format!(
             "type Interface{i} interface {{\n    Method1{i}() string\n    Method2{i}(param string) error\n    Method3{i}(a, b int) (int, bool)\n}}\n\n"
         ));
     }
-    
+
     code.push_str("func main() {}\n");
     code
 }
@@ -581,7 +585,7 @@ fn create_many_interfaces(count: usize) -> String {
 /// Create many methods for benchmarking
 fn create_many_methods(count: usize) -> String {
     let mut code = String::from("package main\n\ntype TestStruct struct { value string }\n\n");
-    
+
     for i in 0..count {
         if i % 2 == 0 {
             code.push_str(&format!(
@@ -593,7 +597,7 @@ fn create_many_methods(count: usize) -> String {
             ));
         }
     }
-    
+
     code.push_str("func main() {}\n");
     code
 }
@@ -601,19 +605,19 @@ fn create_many_methods(count: usize) -> String {
 /// Create many generic constructs for benchmarking
 fn create_many_generics(count: usize) -> String {
     let mut code = String::from("package main\n\n");
-    
+
     for i in 0..count {
         // Generic functions
         code.push_str(&format!(
             "func GenericFunc{i}[T any](item T) T {{\n    return item\n}}\n\n"
         ));
-        
+
         // Generic structs
         code.push_str(&format!(
             "type GenericStruct{i}[T comparable] struct {{\n    Value T\n    Items map[T]string\n}}\n\n"
         ));
     }
-    
+
     code.push_str("func main() {}\n");
     code
 }
@@ -622,37 +626,35 @@ fn create_many_generics(count: usize) -> String {
 fn find_go_fixtures() -> Vec<PathBuf> {
     let mut fixtures = Vec::new();
     let fixtures_dir = PathBuf::from("tests/fixtures/go");
-    
+
     if fixtures_dir.exists() {
         if let Ok(entries) = fs::read_dir(fixtures_dir) {
-            for entry in entries {
-                if let Ok(entry) = entry {
-                    let path = entry.path();
-                    if path.is_file() && path.extension().map_or(false, |ext| ext == "go") {
-                        fixtures.push(path);
-                    }
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() && path.extension().is_some_and(|ext| ext == "go") {
+                    fixtures.push(path);
                 }
             }
         }
     }
-    
+
     fixtures
 }
 
 /// Count expected symbols in Go source code (rough estimate)
 fn count_expected_symbols(source_code: &str) -> usize {
     let mut count = 0;
-    
+
     // Count function declarations
     count += source_code.matches("func ").count();
-    
+
     // Count type declarations
     count += source_code.matches("type ").count();
-    
+
     // Count const/var declarations
     count += source_code.matches("const ").count();
     count += source_code.matches("var ").count();
-    
+
     // Return at least 1 to avoid division by zero in benchmarks
     count.max(1)
 }

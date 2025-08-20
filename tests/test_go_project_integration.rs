@@ -55,7 +55,7 @@ fn test_complete_go_project_indexing() -> Result<()> {
 
     // Test the module_project fixture
     let project_path = PathBuf::from("tests/fixtures/go/module_project");
-    
+
     if !project_path.exists() {
         println!("⚠ Skipping test: module_project fixture not found");
         return Ok(());
@@ -75,21 +75,22 @@ fn test_complete_go_project_indexing() -> Result<()> {
     );
 
     // Verify all expected files were indexed
-    let expected_files = vec![
-        "main.go",
-        "pkg/utils/utils.go", 
-        "internal/config/config.go",
-    ];
+    let expected_files = vec!["main.go", "pkg/utils/utils.go", "internal/config/config.go"];
 
     for expected_file in expected_files {
         assert!(
-            index_result.indexed_files.iter().any(|f| f.ends_with(expected_file)),
+            index_result
+                .indexed_files
+                .iter()
+                .any(|f| f.ends_with(expected_file)),
             "Should have indexed {expected_file}"
         );
     }
 
     // Check for specific symbols we expect to find
-    let symbol_names: Vec<String> = index_result.symbols.iter()
+    let symbol_names: Vec<String> = index_result
+        .symbols
+        .iter()
         .map(|s| s.name.clone())
         .collect();
 
@@ -99,19 +100,26 @@ fn test_complete_go_project_indexing() -> Result<()> {
         "Should find main function"
     );
 
-    // From pkg/utils/utils.go  
+    // From pkg/utils/utils.go
     assert!(
-        symbol_names.iter().any(|name| name.contains("Utils") || name.contains("util")),
+        symbol_names
+            .iter()
+            .any(|name| name.contains("Utils") || name.contains("util")),
         "Should find utility functions/types"
     );
 
     // From internal/config/config.go
     assert!(
-        symbol_names.iter().any(|name| name.contains("Config") || name.contains("config")),
+        symbol_names
+            .iter()
+            .any(|name| name.contains("Config") || name.contains("config")),
         "Should find configuration-related symbols"
     );
 
-    println!("✓ Indexed {} files with {} symbols", index_result.total_files, index_result.total_symbols);
+    println!(
+        "✓ Indexed {} files with {} symbols",
+        index_result.total_files, index_result.total_symbols
+    );
     println!("✓ Found expected symbols across packages");
     println!("=== PASSED ===\n");
 
@@ -125,7 +133,7 @@ fn test_cross_package_symbol_resolution() -> Result<()> {
     println!("\n=== Test 2: Cross-Package Symbol Resolution ===");
 
     let project_path = PathBuf::from("tests/fixtures/go/module_project");
-    
+
     if !project_path.exists() {
         println!("⚠ Skipping test: module_project fixture not found");
         return Ok(());
@@ -160,18 +168,25 @@ fn test_cross_package_symbol_resolution() -> Result<()> {
     );
 
     // Test that internal packages are handled correctly
-    let internal_symbols: Vec<_> = index_result.symbols.iter()
+    let internal_symbols: Vec<_> = index_result
+        .symbols
+        .iter()
         .filter(|s| s.file_path.contains("internal/"))
         .collect();
-    
+
     assert!(
         !internal_symbols.is_empty(),
         "Should index symbols from internal packages"
     );
 
-    println!("✓ Resolved {} imports across packages", resolution_results.imports_resolved);
-    println!("✓ Found {} exported and {} unexported symbols", 
-             resolution_results.exported_symbols, resolution_results.unexported_symbols);
+    println!(
+        "✓ Resolved {} imports across packages",
+        resolution_results.imports_resolved
+    );
+    println!(
+        "✓ Found {} exported and {} unexported symbols",
+        resolution_results.exported_symbols, resolution_results.unexported_symbols
+    );
     println!("✓ Internal package handling verified");
     println!("=== PASSED ===\n");
 
@@ -185,7 +200,7 @@ fn test_vendor_directory_support() -> Result<()> {
     println!("\n=== Test 3: Vendor Directory Support ===");
 
     let project_path = PathBuf::from("tests/fixtures/go/vendor_project");
-    
+
     if !project_path.exists() {
         println!("⚠ Skipping test: vendor_project fixture not found");
         return Ok(());
@@ -195,7 +210,9 @@ fn test_vendor_directory_support() -> Result<()> {
     let index_result = index_go_project(&project_path)?;
 
     // Verify vendor files were indexed
-    let vendor_symbols: Vec<_> = index_result.symbols.iter()
+    let vendor_symbols: Vec<_> = index_result
+        .symbols
+        .iter()
         .filter(|s| s.file_path.contains("vendor/"))
         .collect();
 
@@ -205,25 +222,30 @@ fn test_vendor_directory_support() -> Result<()> {
     );
 
     // Verify main project can resolve vendor symbols
-    let main_symbols: Vec<_> = index_result.symbols.iter()
+    let main_symbols: Vec<_> = index_result
+        .symbols
+        .iter()
         .filter(|s| s.file_path.contains("main.go") && !s.file_path.contains("vendor/"))
         .collect();
 
-    assert!(
-        !main_symbols.is_empty(),
-        "Should find symbols in main.go"
-    );
+    assert!(!main_symbols.is_empty(), "Should find symbols in main.go");
 
     // Test vendor import resolution
     let vendor_imports = test_vendor_imports(&index_result)?;
-    
+
     assert!(
         vendor_imports.vendor_imports_found > 0,
         "Should find imports from vendor packages"
     );
 
-    println!("✓ Indexed {} symbols from vendor directory", vendor_symbols.len());
-    println!("✓ Found {} vendor imports", vendor_imports.vendor_imports_found);
+    println!(
+        "✓ Indexed {} symbols from vendor directory",
+        vendor_symbols.len()
+    );
+    println!(
+        "✓ Found {} vendor imports",
+        vendor_imports.vendor_imports_found
+    );
     println!("=== PASSED ===\n");
 
     Ok(())
@@ -236,7 +258,7 @@ fn test_go_module_system_integration() -> Result<()> {
     println!("\n=== Test 4: Go Module System Integration ===");
 
     let project_path = PathBuf::from("tests/fixtures/go/module_project");
-    
+
     if !project_path.exists() {
         println!("⚠ Skipping test: module_project fixture not found");
         return Ok(());
@@ -250,10 +272,9 @@ fn test_go_module_system_integration() -> Result<()> {
     }
 
     // Read and validate go.mod
-    let go_mod_content = std::fs::read_to_string(&go_mod_path)
-        .map_err(|e| GoProjectIntegrationError::ModuleSystemFailed(
-            format!("Failed to read go.mod: {e}")
-        ))?;
+    let go_mod_content = std::fs::read_to_string(&go_mod_path).map_err(|e| {
+        GoProjectIntegrationError::ModuleSystemFailed(format!("Failed to read go.mod: {e}"))
+    })?;
 
     assert!(
         go_mod_content.contains("module "),
@@ -272,7 +293,10 @@ fn test_go_module_system_integration() -> Result<()> {
     );
 
     println!("✓ Found go.mod with module declaration");
-    println!("✓ Resolved {} module imports", module_results.module_imports_resolved);
+    println!(
+        "✓ Resolved {} module imports",
+        module_results.module_imports_resolved
+    );
     println!("=== PASSED ===\n");
 
     Ok(())
@@ -288,7 +312,7 @@ fn test_large_codebase_performance() -> Result<()> {
 
     // Collect all available Go fixture files
     let fixture_paths = collect_all_go_fixtures()?;
-    
+
     if fixture_paths.is_empty() {
         println!("⚠ Skipping test: no Go fixtures found");
         return Ok(());
@@ -302,7 +326,7 @@ fn test_large_codebase_performance() -> Result<()> {
     let mut total_files = 0;
 
     for fixture_path in &fixture_paths {
-        if fixture_path.is_file() && fixture_path.extension().map_or(false, |ext| ext == "go") {
+        if fixture_path.is_file() && fixture_path.extension().is_some_and(|ext| ext == "go") {
             let file_result = index_single_go_file(fixture_path)?;
             total_symbols += file_result.symbol_count;
             total_files += 1;
@@ -334,13 +358,17 @@ fn test_large_codebase_performance() -> Result<()> {
 
     println!("✓ Processed {total_files} files with {total_symbols} symbols in {elapsed:?}");
     println!("✓ Performance: {symbols_per_sec} symbols/sec, {files_per_sec} files/sec");
-    
+
     if total_symbols >= LARGE_CODEBASE_MIN_SYMBOLS {
-        println!("✓ Meets performance target of {PERFORMANCE_TARGET_SYMBOLS_PER_SEC} symbols/second");
+        println!(
+            "✓ Meets performance target of {PERFORMANCE_TARGET_SYMBOLS_PER_SEC} symbols/second"
+        );
     } else {
-        println!("ℹ Performance target validation skipped (codebase too small: {total_symbols} < {LARGE_CODEBASE_MIN_SYMBOLS} symbols)");
+        println!(
+            "ℹ Performance target validation skipped (codebase too small: {total_symbols} < {LARGE_CODEBASE_MIN_SYMBOLS} symbols)"
+        );
     }
-    
+
     println!("=== PASSED ===\n");
 
     Ok(())
@@ -403,10 +431,10 @@ fn test_mcp_server_integration() -> Result<()> {
     {
         // Verify that symbols are extracted in a format suitable for semantic search
         let fixture_path = PathBuf::from("tests/fixtures/go/basic.go");
-        
+
         if fixture_path.exists() {
             let file_result = index_single_go_file(&fixture_path)?;
-            
+
             assert!(
                 file_result.symbol_count > 0,
                 "Should extract symbols for semantic search"
@@ -419,7 +447,9 @@ fn test_mcp_server_integration() -> Result<()> {
             );
 
             // Check that symbols have proper signatures (needed for find_symbol, etc.)
-            let symbols_with_signatures = file_result.symbols.iter()
+            let symbols_with_signatures = file_result
+                .symbols
+                .iter()
                 .filter(|s| !s.signature.is_empty())
                 .count();
 
@@ -485,22 +515,26 @@ struct SingleFileResult {
 /// Index a complete Go project directory
 fn index_go_project(project_path: &Path) -> Result<ProjectIndexResult> {
     use codanna::indexing::SimpleIndexer;
-    
+
     // Create indexer
     let mut indexer = SimpleIndexer::new();
-    
+
     // Index the directory
-    let stats = indexer.index_directory(project_path, false, false)
-        .map_err(|e| GoProjectIntegrationError::ProjectIndexingFailed(
-            format!("Failed to index directory {}: {e}", project_path.display())
-        ))?;
+    let stats = indexer
+        .index_directory(project_path, false, false)
+        .map_err(|e| {
+            GoProjectIntegrationError::ProjectIndexingFailed(format!(
+                "Failed to index directory {}: {e}",
+                project_path.display()
+            ))
+        })?;
 
     // Extract results (simplified - in real implementation, would query the index)
     let indexed_files = collect_go_files_in_directory(project_path)?;
     let symbols = extract_symbols_from_files(&indexed_files)?;
 
     Ok(ProjectIndexResult {
-        total_files: stats.files_indexed as usize,
+        total_files: stats.files_indexed,
         total_symbols: symbols.len(),
         indexed_files,
         symbols,
@@ -515,16 +549,17 @@ fn index_single_go_file(file_path: &Path) -> Result<SingleFileResult> {
     use std::fs;
 
     // Read the file
-    let source_code = fs::read_to_string(file_path)
-        .map_err(|e| GoProjectIntegrationError::ProjectIndexingFailed(
-            format!("Failed to read {}: {e}", file_path.display())
-        ))?;
+    let source_code = fs::read_to_string(file_path).map_err(|e| {
+        GoProjectIntegrationError::ProjectIndexingFailed(format!(
+            "Failed to read {}: {e}",
+            file_path.display()
+        ))
+    })?;
 
     // Create parser
-    let mut parser = GoParser::new()
-        .map_err(|e| GoProjectIntegrationError::ProjectIndexingFailed(
-            format!("Failed to create parser: {e}")
-        ))?;
+    let mut parser = GoParser::new().map_err(|e| {
+        GoProjectIntegrationError::ProjectIndexingFailed(format!("Failed to create parser: {e}"))
+    })?;
 
     // Parse the file
     let mut symbol_counter = SymbolCounter::new();
@@ -532,15 +567,16 @@ fn index_single_go_file(file_path: &Path) -> Result<SingleFileResult> {
     let symbols = parser.parse(&source_code, file_id, &mut symbol_counter);
 
     // Convert symbols to SymbolInfo
-    let symbol_infos: Vec<SymbolInfo> = symbols.into_iter().map(|sym| {
-        SymbolInfo {
+    let symbol_infos: Vec<SymbolInfo> = symbols
+        .into_iter()
+        .map(|sym| SymbolInfo {
             name: sym.name.to_string(),
             kind: format!("{:?}", sym.kind).to_lowercase(),
             signature: sym.signature.map(|s| s.to_string()).unwrap_or_default(),
             file_path: file_path.to_string_lossy().to_string(),
             is_exported: matches!(sym.visibility, codanna::Visibility::Public),
-        }
-    }).collect();
+        })
+        .collect();
 
     Ok(SingleFileResult {
         symbol_count: symbol_infos.len(),
@@ -575,11 +611,13 @@ fn test_symbol_resolution(index_result: &ProjectIndexResult) -> Result<SymbolRes
 
     // Estimate imports based on cross-package symbol usage
     // (This is a simplified heuristic for integration testing)
-    let package_count = index_result.indexed_files.iter()
+    let package_count = index_result
+        .indexed_files
+        .iter()
         .filter_map(|path| path.parent())
         .collect::<std::collections::HashSet<_>>()
         .len();
-    
+
     if package_count > 1 {
         imports_resolved += package_count - 1; // Estimate cross-package imports
     }
@@ -594,7 +632,9 @@ fn test_symbol_resolution(index_result: &ProjectIndexResult) -> Result<SymbolRes
 
 /// Test vendor import resolution
 fn test_vendor_imports(index_result: &ProjectIndexResult) -> Result<VendorImportResult> {
-    let vendor_imports_found = index_result.indexed_files.iter()
+    let vendor_imports_found = index_result
+        .indexed_files
+        .iter()
         .filter(|path| path.to_string_lossy().contains("vendor/"))
         .count();
 
@@ -604,14 +644,19 @@ fn test_vendor_imports(index_result: &ProjectIndexResult) -> Result<VendorImport
 }
 
 /// Test module system imports
-fn test_module_imports(index_result: &ProjectIndexResult, _go_mod_content: &str) -> Result<ModuleImportResult> {
+fn test_module_imports(
+    index_result: &ProjectIndexResult,
+    _go_mod_content: &str,
+) -> Result<ModuleImportResult> {
     // Simplified module import resolution test
-    let module_imports_resolved = index_result.symbols.iter()
+    let module_imports_resolved = index_result
+        .symbols
+        .iter()
         .filter(|symbol| {
             // Look for symbols that might indicate module imports
-            symbol.signature.contains("github.com/") || 
-            symbol.signature.contains("golang.org/") ||
-            symbol.file_path.contains("pkg/")
+            symbol.signature.contains("github.com/")
+                || symbol.signature.contains("golang.org/")
+                || symbol.file_path.contains("pkg/")
         })
         .count();
 
@@ -623,41 +668,43 @@ fn test_module_imports(index_result: &ProjectIndexResult, _go_mod_content: &str)
 /// Collect all Go files in a directory recursively
 fn collect_go_files_in_directory(dir: &Path) -> Result<Vec<PathBuf>> {
     let mut go_files = Vec::new();
-    
+
     if dir.is_dir() {
-        for entry in std::fs::read_dir(dir)
-            .map_err(|e| GoProjectIntegrationError::ProjectIndexingFailed(
-                format!("Failed to read directory {}: {e}", dir.display())
-            ))? 
-        {
-            let entry = entry
-                .map_err(|e| GoProjectIntegrationError::ProjectIndexingFailed(
-                    format!("Failed to read directory entry: {e}")
-                ))?;
+        for entry in std::fs::read_dir(dir).map_err(|e| {
+            GoProjectIntegrationError::ProjectIndexingFailed(format!(
+                "Failed to read directory {}: {e}",
+                dir.display()
+            ))
+        })? {
+            let entry = entry.map_err(|e| {
+                GoProjectIntegrationError::ProjectIndexingFailed(format!(
+                    "Failed to read directory entry: {e}"
+                ))
+            })?;
             let path = entry.path();
-            
+
             if path.is_dir() {
                 // Recursively collect from subdirectories
                 let mut subdir_files = collect_go_files_in_directory(&path)?;
                 go_files.append(&mut subdir_files);
-            } else if path.extension().map_or(false, |ext| ext == "go") {
+            } else if path.extension().is_some_and(|ext| ext == "go") {
                 go_files.push(path);
             }
         }
     }
-    
+
     Ok(go_files)
 }
 
 /// Extract symbols from a list of Go files
 fn extract_symbols_from_files(file_paths: &[PathBuf]) -> Result<Vec<SymbolInfo>> {
     let mut all_symbols = Vec::new();
-    
+
     for file_path in file_paths {
         let file_result = index_single_go_file(file_path)?;
         all_symbols.extend(file_result.symbols);
     }
-    
+
     Ok(all_symbols)
 }
 
@@ -665,10 +712,10 @@ fn extract_symbols_from_files(file_paths: &[PathBuf]) -> Result<Vec<SymbolInfo>>
 fn collect_all_go_fixtures() -> Result<Vec<PathBuf>> {
     let fixtures_dir = PathBuf::from("tests/fixtures/go");
     let mut all_fixtures = Vec::new();
-    
+
     if fixtures_dir.exists() {
         all_fixtures.extend(collect_go_files_in_directory(&fixtures_dir)?);
     }
-    
+
     Ok(all_fixtures)
 }

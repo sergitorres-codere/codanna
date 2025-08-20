@@ -2126,29 +2126,41 @@ func main() {
         }
 
         // Verify that generic functions are captured
-        let generic_functions: Vec<_> = symbols.iter()
-            .filter(|s| matches!(s.kind, SymbolKind::Function) && 
-                       s.signature.as_ref().map_or(false, |sig| sig.contains("[")))
+        let generic_functions: Vec<_> = symbols
+            .iter()
+            .filter(|s| {
+                matches!(s.kind, SymbolKind::Function)
+                    && s.signature.as_ref().is_some_and(|sig| sig.contains("["))
+            })
             .collect();
 
-        assert!(!generic_functions.is_empty(), "Should find generic functions");
+        assert!(
+            !generic_functions.is_empty(),
+            "Should find generic functions"
+        );
 
         // Verify specific generic symbols
         assert!(
-            symbols.iter().any(|s| s.name.as_ref() == "Identity" && 
-                              s.signature.as_ref().map_or(false, |sig| sig.contains("[T any]"))),
+            symbols.iter().any(|s| s.name.as_ref() == "Identity"
+                && s.signature
+                    .as_ref()
+                    .is_some_and(|sig| sig.contains("[T any]"))),
             "Should find Identity generic function"
         );
 
         assert!(
-            symbols.iter().any(|s| s.name.as_ref() == "Container" && 
-                              s.signature.as_ref().map_or(false, |sig| sig.contains("[T any]"))),
+            symbols.iter().any(|s| s.name.as_ref() == "Container"
+                && s.signature
+                    .as_ref()
+                    .is_some_and(|sig| sig.contains("[T any]"))),
             "Should find Container generic struct"
         );
 
         assert!(
-            symbols.iter().any(|s| s.name.as_ref() == "Processor" && 
-                              s.signature.as_ref().map_or(false, |sig| sig.contains("[T any]"))),
+            symbols.iter().any(|s| s.name.as_ref() == "Processor"
+                && s.signature
+                    .as_ref()
+                    .is_some_and(|sig| sig.contains("[T any]"))),
             "Should find Processor generic interface"
         );
 
@@ -2280,21 +2292,34 @@ func main() {
         assert!(imports.len() >= 6, "Should have at least 6 imports");
 
         // Check for standard library imports
-        assert!(imports.iter().any(|i| i.path == "fmt"), "Should find fmt import");
-        assert!(imports.iter().any(|i| i.path == "net/http"), "Should find net/http import");
+        assert!(
+            imports.iter().any(|i| i.path == "fmt"),
+            "Should find fmt import"
+        );
+        assert!(
+            imports.iter().any(|i| i.path == "net/http"),
+            "Should find net/http import"
+        );
 
         // Check for aliased import
         assert!(
-            imports.iter().any(|i| i.path == "net/http/httputil" && 
-                              i.alias == Some("httputil".to_string())),
+            imports
+                .iter()
+                .any(|i| i.path == "net/http/httputil" && i.alias == Some("httputil".to_string())),
             "Should find aliased httputil import"
         );
 
         // Check for dot import
-        assert!(imports.iter().any(|i| i.path == "math"), "Should find math import");
+        assert!(
+            imports.iter().any(|i| i.path == "math"),
+            "Should find math import"
+        );
 
         // Check for blank import
-        assert!(imports.iter().any(|i| i.path == "net/http/pprof"), "Should find pprof import");
+        assert!(
+            imports.iter().any(|i| i.path == "net/http/pprof"),
+            "Should find pprof import"
+        );
 
         // Check for external module
         assert!(
@@ -2416,32 +2441,47 @@ func (p *privateStruct) privateMethod() {
                 Visibility::Public => "public",
                 _ => "private",
             };
-            println!("  - {} ({:?}) -> {}", symbol.name, symbol.kind, visibility_str);
+            println!(
+                "  - {} ({:?}) -> {}",
+                symbol.name, symbol.kind, visibility_str
+            );
         }
 
         // Check for exported symbols
-        let exported_symbols: Vec<_> = symbols.iter()
+        let exported_symbols: Vec<_> = symbols
+            .iter()
             .filter(|s| matches!(s.visibility, Visibility::Public))
             .collect();
-        
-        let unexported_symbols: Vec<_> = symbols.iter()
+
+        let unexported_symbols: Vec<_> = symbols
+            .iter()
             .filter(|s| !matches!(s.visibility, Visibility::Public))
             .collect();
 
         assert!(!exported_symbols.is_empty(), "Should find exported symbols");
-        assert!(!unexported_symbols.is_empty(), "Should find unexported symbols");
+        assert!(
+            !unexported_symbols.is_empty(),
+            "Should find unexported symbols"
+        );
 
         // Check specific exported symbols
-        assert!(symbols.iter().any(|s| s.name.as_ref() == "PublicFunction" && 
-                                   matches!(s.visibility, Visibility::Public)));
-        assert!(symbols.iter().any(|s| s.name.as_ref() == "PublicStruct" && 
-                                   matches!(s.visibility, Visibility::Public)));
+        assert!(
+            symbols.iter().any(|s| s.name.as_ref() == "PublicFunction"
+                && matches!(s.visibility, Visibility::Public))
+        );
+        assert!(symbols.iter().any(
+            |s| s.name.as_ref() == "PublicStruct" && matches!(s.visibility, Visibility::Public)
+        ));
 
         // Check specific unexported symbols
-        assert!(symbols.iter().any(|s| s.name.as_ref() == "privateFunction" && 
-                                   !matches!(s.visibility, Visibility::Public)));
-        assert!(symbols.iter().any(|s| s.name.as_ref() == "privateStruct" && 
-                                   !matches!(s.visibility, Visibility::Public)));
+        assert!(
+            symbols.iter().any(|s| s.name.as_ref() == "privateFunction"
+                && !matches!(s.visibility, Visibility::Public))
+        );
+        assert!(
+            symbols.iter().any(|s| s.name.as_ref() == "privateStruct"
+                && !matches!(s.visibility, Visibility::Public))
+        );
 
         println!("✅ Go visibility variations handled correctly");
     }
