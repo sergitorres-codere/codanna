@@ -264,13 +264,13 @@ impl TypeRegistry {
     }
 
     /// Get all types that implement a given interface
-    /// 
+    ///
     /// This method requires an inheritance resolver to perform actual method compatibility checking.
     /// If no resolver is provided, it returns all struct types as potential candidates.
     pub fn find_types_implementing(
-        &self, 
-        interface_name: &str, 
-        inheritance_resolver: Option<&GoInheritanceResolver>
+        &self,
+        interface_name: &str,
+        inheritance_resolver: Option<&GoInheritanceResolver>,
     ) -> Vec<&TypeInfo> {
         // Find all types that could implement this interface
         self.types
@@ -280,7 +280,7 @@ impl TypeRegistry {
                 if !matches!(type_info.category, TypeCategory::Struct) {
                     return false;
                 }
-                
+
                 // If inheritance resolver is available, check method compatibility
                 if let Some(resolver) = inheritance_resolver {
                     resolver.check_struct_implements_interface(&type_info.name, interface_name)
@@ -294,10 +294,10 @@ impl TypeRegistry {
 
     /// Check if a type implements an interface (requires inheritance resolver)
     pub fn type_implements_interface(
-        &self, 
-        type_name: &str, 
+        &self,
+        type_name: &str,
         interface_name: &str,
-        inheritance_resolver: Option<&GoInheritanceResolver>
+        inheritance_resolver: Option<&GoInheritanceResolver>,
     ) -> bool {
         // First check if the type is a struct
         if let Some(type_info) = self.types.get(type_name) {
@@ -307,7 +307,7 @@ impl TypeRegistry {
         } else {
             return false;
         }
-        
+
         // Use inheritance resolver for method compatibility checking
         if let Some(resolver) = inheritance_resolver {
             resolver.check_struct_implements_interface(type_name, interface_name)
@@ -438,7 +438,7 @@ impl GoResolutionContext {
     ) -> Option<SymbolId> {
         // Get the current file's module path
         let current_module_path = self.get_current_module_path(document_index)?;
-        
+
         // In Go, all symbols in the same package are accessible
         // Look for symbols with matching name and package path
         if let Ok(candidates) = document_index.find_symbols_by_name(symbol_name, Some("Go")) {
@@ -447,11 +447,11 @@ impl GoResolutionContext {
                 if candidate.file_id == self.file_id {
                     continue;
                 }
-                
+
                 // Check if symbol is in the same package (same module path)
                 if let Some(ref candidate_module_path) = candidate.module_path {
                     let candidate_path = candidate_module_path.as_ref();
-                    
+
                     // In Go, symbols in the same package are accessible regardless of visibility
                     // But exported symbols take precedence
                     if candidate_path == current_module_path {
@@ -727,7 +727,7 @@ impl GoResolutionContext {
     fn find_and_parse_go_mod(&self, document_index: &DocumentIndex) -> Option<GoModInfo> {
         // Get all indexed paths to find go.mod files
         let all_paths = document_index.get_all_indexed_paths().ok()?;
-        
+
         // Find all go.mod files in the indexed codebase
         let go_mod_files: Vec<_> = all_paths
             .iter()
@@ -738,19 +738,19 @@ impl GoResolutionContext {
                     .unwrap_or(false)
             })
             .collect();
-        
+
         if go_mod_files.is_empty() {
             return None;
         }
-        
+
         // Get the current file's path to find the nearest go.mod
         let current_file_path = document_index.get_file_path(self.file_id).ok()??;
         let current_path = std::path::Path::new(&current_file_path);
-        
+
         // Find the nearest go.mod file by walking up the directory tree
         let mut nearest_go_mod: Option<&std::path::PathBuf> = None;
         let mut nearest_distance = usize::MAX;
-        
+
         for go_mod_path in &go_mod_files {
             // Check if this go.mod is in a parent directory of the current file
             if let Some(go_mod_parent) = go_mod_path.parent() {
@@ -761,7 +761,7 @@ impl GoResolutionContext {
                         .ok()?
                         .components()
                         .count();
-                    
+
                     if distance < nearest_distance {
                         nearest_distance = distance;
                         nearest_go_mod = Some(go_mod_path);
@@ -769,19 +769,19 @@ impl GoResolutionContext {
                 }
             }
         }
-        
+
         // If no go.mod found in parent directories, use the first one found
         if nearest_go_mod.is_none() && !go_mod_files.is_empty() {
             nearest_go_mod = Some(go_mod_files[0]);
         }
-        
+
         // Parse the nearest go.mod file
         if let Some(go_mod_path) = nearest_go_mod {
             if let Some(go_mod_str) = go_mod_path.to_str() {
                 return self.parse_go_mod(go_mod_str);
             }
         }
-        
+
         None
     }
 
@@ -2006,8 +2006,16 @@ replace github.com/another/module => github.com/fork/module v1.2.3
 
         // Test type_implements_interface
         assert!(registry.type_implements_interface("MyStruct", "MyInterface", Some(&resolver)));
-        assert!(!registry.type_implements_interface("MyStruct", "NonExistentInterface", Some(&resolver)));
-        assert!(!registry.type_implements_interface("NonExistentStruct", "MyInterface", Some(&resolver)));
+        assert!(!registry.type_implements_interface(
+            "MyStruct",
+            "NonExistentInterface",
+            Some(&resolver)
+        ));
+        assert!(!registry.type_implements_interface(
+            "NonExistentStruct",
+            "MyInterface",
+            Some(&resolver)
+        ));
     }
 
     #[test]

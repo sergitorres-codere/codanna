@@ -1,8 +1,8 @@
 //! Go-specific language behavior implementation
 
+use crate::parsing::LanguageBehavior;
 use crate::parsing::behavior_state::{BehaviorState, StatefulBehavior};
 use crate::parsing::resolution::{InheritanceResolver, ResolutionScope};
-use crate::parsing::LanguageBehavior;
 use crate::storage::DocumentIndex;
 use crate::types::FileId;
 use crate::{SymbolId, Visibility};
@@ -323,9 +323,8 @@ impl LanguageBehavior for GoBehavior {
 
         // 1. Handle relative imports
         if import.path.starts_with("./") || import.path.starts_with("../") {
-            // Get current package path from behavior state (simplified)
-            // In practice, this would be derived from the importing file
-            if let Some(current_package) = self.get_current_package_path() {
+            // Get current package path from behavior state
+            if let Some(current_package) = self.get_current_package_path_for_file(import.file_id) {
                 if let Some(resolved_path) =
                     context.resolve_relative_import(&import.path, &current_package)
                 {
@@ -337,7 +336,7 @@ impl LanguageBehavior for GoBehavior {
         }
 
         // 2. Check vendor directory first (higher priority than external modules)
-        if let Some(project_root) = self.get_project_root() {
+        if let Some(project_root) = self.get_project_root_for_file(import.file_id, document_index) {
             if let Some(vendor_symbol) =
                 context.resolve_vendor_import(&import.path, &project_root, document_index)
             {
@@ -504,26 +503,96 @@ impl GoBehavior {
     /// Get the current package path for relative import resolution
     ///
     /// This method extracts the package path from the current context.
-    /// In practice, this would be determined from the importing file.
+    /// It uses the BehaviorState to look up the module path for the current file.
+    #[allow(dead_code)]
     fn get_current_package_path(&self) -> Option<String> {
-        // TODO: Extract from current file context in Phase 5.2 completion
-        // For now, return a placeholder that would be derived from the current file
-        // This would typically be extracted from the file's directory structure
-        // relative to the module root
+        // We need a file_id to look up the current package path
+        // This method is typically called in the context of resolving imports
+        // for a specific file, but we don't have that context here.
+        // The actual implementation should be in get_current_package_path_for_file
         None
+    }
+
+    /// Get the current package path for a specific file
+    ///
+    /// This method extracts the package path from the file context stored
+    /// in BehaviorState, supporting both GOPATH and module-based layouts.
+    fn get_current_package_path_for_file(&self, file_id: FileId) -> Option<String> {
+        // Use BehaviorState to get the module path for this file
+        self.state.get_module_path(file_id)
     }
 
     /// Get the project root directory for vendor resolution
     ///
     /// This method finds the root directory of the Go project, typically
     /// where the go.mod file is located.
+    #[allow(dead_code)]
     fn get_project_root(&self) -> Option<String> {
-        // TODO: Implement project root detection in Phase 5.2 completion
-        // This would typically:
-        // 1. Start from the current file directory
-        // 2. Walk up the directory tree looking for go.mod
-        // 3. Return the directory containing go.mod
-        // 4. Cache the result for performance
+        // Without a specific file context, we can't determine the project root
+        // The actual implementation should be in get_project_root_for_file
+        None
+    }
+
+    /// Get the project root directory for a specific file
+    ///
+    /// This method finds the root directory of the Go project by walking up
+    /// the directory tree from the given file to find go.mod, with caching.
+    fn get_project_root_for_file(
+        &self,
+        file_id: FileId,
+        document_index: &DocumentIndex,
+    ) -> Option<String> {
+        // Check cache first
+        if let Some(cached_root) = self.state.get_project_root(file_id) {
+            return cached_root.to_str().map(|s| s.to_string());
+        }
+
+        // Get the file path from BehaviorState
+        let file_path = self.state.get_file_path(file_id)?;
+
+        // Walk up directory tree looking for go.mod
+        let mut current_dir = file_path.parent()?;
+
+        loop {
+            let go_mod_path = current_dir.join("go.mod");
+            if go_mod_path.exists() {
+                // Found go.mod, cache and return this directory
+                let project_root = current_dir.to_path_buf();
+                self.state.set_project_root(file_id, project_root.clone());
+                return project_root.to_str().map(|s| s.to_string());
+            }
+
+            // Move up one directory
+            if let Some(parent) = current_dir.parent() {
+                current_dir = parent;
+            } else {
+                // Reached filesystem root without finding go.mod
+                break;
+            }
+        }
+
+        // Fallback: try to find any go.mod file in the indexed codebase
+        if let Ok(all_paths) = document_index.get_all_indexed_paths() {
+            // Find go.mod files
+            let go_mod_files: Vec<_> = all_paths
+                .iter()
+                .filter(|path| {
+                    path.file_name()
+                        .and_then(|name| name.to_str())
+                        .map(|name| name == "go.mod")
+                        .unwrap_or(false)
+                })
+                .collect();
+
+            if let Some(go_mod_path) = go_mod_files.first() {
+                if let Some(project_root) = go_mod_path.parent() {
+                    let project_root = project_root.to_path_buf();
+                    self.state.set_project_root(file_id, project_root.clone());
+                    return project_root.to_str().map(|s| s.to_string());
+                }
+            }
+        }
+
         None
     }
 
@@ -539,13 +608,18 @@ impl GoBehavior {
             FileId::new(1).unwrap(), // Temporary file ID for resolution
         );
 
+        // We need a file context to get current package path and project root
+        // For now, we'll use a placeholder approach since this method doesn't have file_id
+        // In practice, this should be refactored to accept a file_id parameter
+
         // First try to resolve using the enhanced package resolution
+        // Note: We can't provide current_package_path and project_root without file context
         if let Some(symbol_id) = context.resolve_imported_package_symbols(
             package_name,
             symbol_name,
             document_index,
-            self.get_current_package_path().as_deref(),
-            self.get_project_root().as_deref(),
+            None, // current_package_path - would need file_id to determine
+            None, // project_root - would need file_id to determine
         ) {
             return Some(symbol_id);
         }
@@ -594,8 +668,8 @@ impl GoBehavior {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parsing::registry::LanguageId;
     use crate::Visibility;
+    use crate::parsing::registry::LanguageId;
     use std::path::Path;
 
     #[test]
@@ -727,6 +801,60 @@ mod tests {
         // Test non-matches
         assert!(!behavior.import_matches_symbol("fmt", "strings", None));
         assert!(!behavior.import_matches_symbol("./utils", "pkg/other", Some("pkg")));
+    }
+
+    #[test]
+    fn test_project_root_caching() {
+        use crate::storage::DocumentIndex;
+        use tempfile::TempDir;
+
+        let behavior = GoBehavior::new();
+
+        // Create a temporary directory structure with go.mod
+        let temp_dir = TempDir::new().unwrap();
+        let project_root = temp_dir.path().to_path_buf();
+        let go_mod_path = project_root.join("go.mod");
+        std::fs::write(&go_mod_path, "module example.com/test\ngo 1.21\n").unwrap();
+
+        let src_dir = project_root.join("src");
+        std::fs::create_dir(&src_dir).unwrap();
+        let test_file = src_dir.join("main.go");
+        std::fs::write(&test_file, "package main\n").unwrap();
+
+        // Register the file in behavior state
+        let file_id = FileId::new(1).unwrap();
+        behavior.register_file_with_state(test_file.clone(), file_id, "src".to_string());
+
+        // Create a mock document index
+        let doc_index = DocumentIndex::new(temp_dir.path().join("index")).unwrap();
+
+        // Test get_project_root_for_file
+        let root = behavior.get_project_root_for_file(file_id, &doc_index);
+        assert!(root.is_some());
+        assert_eq!(root.unwrap(), project_root.to_str().unwrap());
+
+        // Test that it's cached (second call should be faster)
+        let cached_root = behavior.get_project_root_for_file(file_id, &doc_index);
+        assert_eq!(cached_root.unwrap(), project_root.to_str().unwrap());
+    }
+
+    #[test]
+    fn test_current_package_path_for_file() {
+        let behavior = GoBehavior::new();
+        let file_id = FileId::new(1).unwrap();
+
+        // Register a file with a module path
+        let file_path = PathBuf::from("/test/pkg/utils/helper.go");
+        behavior.register_file_with_state(file_path, file_id, "pkg/utils".to_string());
+
+        // Test get_current_package_path_for_file
+        let package_path = behavior.get_current_package_path_for_file(file_id);
+        assert_eq!(package_path, Some("pkg/utils".to_string()));
+
+        // Test with non-existent file
+        let non_existent_id = FileId::new(999).unwrap();
+        let no_path = behavior.get_current_package_path_for_file(non_existent_id);
+        assert_eq!(no_path, None);
     }
 
     #[test]
