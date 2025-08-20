@@ -12,10 +12,13 @@ use crate::{FileId, Range, Symbol, SymbolKind, Visibility};
 use std::any::Any;
 use tree_sitter::{Node, Parser};
 
+use super::resolution::GoResolutionContext;
+
 /// Go language parser
 pub struct GoParser {
     parser: Parser,
     context: ParserContext,
+    resolution_context: Option<GoResolutionContext>,
 }
 
 impl GoParser {
@@ -62,6 +65,7 @@ impl GoParser {
         Ok(Self {
             parser,
             context: ParserContext::new(),
+            resolution_context: None,
         })
     }
 
@@ -97,9 +101,17 @@ impl GoParser {
                 // Set current function for parent tracking BEFORE processing children
                 self.context.set_current_function(func_name.clone());
 
-                // Process children for nested functions
+                // Process function parameters
+                if let Some(params) = node.child_by_field_name("parameters") {
+                    self.process_method_parameters(params, code, file_id, counter, symbols, module_path);
+                }
+
+                // Process children for nested functions and body
                 for child in node.children(&mut node.walk()) {
-                    if child.kind() != "identifier" && child.kind() != "parameter_list" {
+                    if child.kind() != "identifier" 
+                        && child.kind() != "parameter_list"
+                        && child.kind() != "parameters"
+                    {
                         self.extract_symbols_from_node(
                             child,
                             code,
@@ -129,6 +141,7 @@ impl GoParser {
                 {
                     symbols.push(symbol);
                 }
+
                 // Enter method scope for processing nested symbols
                 self.context.enter_scope(ScopeType::hoisting_function());
 
@@ -138,9 +151,23 @@ impl GoParser {
                 // Set current function for parent tracking
                 self.context.set_current_function(method_name.clone());
 
-                // Process children
+                // Process method receiver to add receiver scope
+                if let Some(receiver) = node.child_by_field_name("receiver") {
+                    self.process_method_receiver(receiver, code, file_id, counter, symbols, module_path);
+                }
+
+                // Process method parameters
+                if let Some(params) = node.child_by_field_name("parameters") {
+                    self.process_method_parameters(params, code, file_id, counter, symbols, module_path);
+                }
+
+                // Process children (body, etc.)
                 for child in node.children(&mut node.walk()) {
-                    if child.kind() != "identifier" && child.kind() != "parameter_list" {
+                    if child.kind() != "identifier" 
+                        && child.kind() != "parameter_list" 
+                        && child.kind() != "parameters"
+                        && child.kind() != "receiver" // Skip receiver, already processed
+                    {
                         self.extract_symbols_from_node(
                             child,
                             code,
@@ -165,6 +192,104 @@ impl GoParser {
             }
             "const_declaration" => {
                 self.process_const_declaration(node, code, file_id, counter, symbols, module_path);
+            }
+            "if_statement" => {
+                // Enter block scope for if statement
+                self.context.enter_scope(ScopeType::Block);
+                
+                // Process if statement parts (condition, body, else)
+                for child in node.children(&mut node.walk()) {
+                    self.extract_symbols_from_node(
+                        child,
+                        code,
+                        file_id,
+                        counter,
+                        symbols,
+                        module_path,
+                    );
+                }
+                
+                self.context.exit_scope();
+            }
+            "for_statement" => {
+                // Enter block scope for for loop
+                self.context.enter_scope(ScopeType::Block);
+                
+                // Check for range clause specifically
+                for child in node.children(&mut node.walk()) {
+                    if child.kind() == "range_clause" {
+                        self.process_range_clause(child, code, file_id, counter, symbols, module_path);
+                    } else {
+                        self.extract_symbols_from_node(
+                            child,
+                            code,
+                            file_id,
+                            counter,
+                            symbols,
+                            module_path,
+                        );
+                    }
+                }
+                
+                self.context.exit_scope();
+            }
+            "switch_statement" | "type_switch_statement" => {
+                // Enter block scope for switch statement
+                self.context.enter_scope(ScopeType::Block);
+                
+                // Process switch statement parts
+                for child in node.children(&mut node.walk()) {
+                    self.extract_symbols_from_node(
+                        child,
+                        code,
+                        file_id,
+                        counter,
+                        symbols,
+                        module_path,
+                    );
+                }
+                
+                self.context.exit_scope();
+            }
+            "expression_case" | "default_case" | "type_case" => {
+                // Enter block scope for switch case
+                self.context.enter_scope(ScopeType::Block);
+                
+                // Process case body
+                for child in node.children(&mut node.walk()) {
+                    self.extract_symbols_from_node(
+                        child,
+                        code,
+                        file_id,
+                        counter,
+                        symbols,
+                        module_path,
+                    );
+                }
+                
+                self.context.exit_scope();
+            }
+            "block" => {
+                // Enter block scope for bare blocks
+                self.context.enter_scope(ScopeType::Block);
+                
+                // Process block contents
+                for child in node.children(&mut node.walk()) {
+                    self.extract_symbols_from_node(
+                        child,
+                        code,
+                        file_id,
+                        counter,
+                        symbols,
+                        module_path,
+                    );
+                }
+                
+                self.context.exit_scope();
+            }
+            "short_var_declaration" => {
+                // Process short variable declarations (:=) in current scope
+                self.process_short_var_declaration(node, code, file_id, counter, symbols, module_path);
             }
             _ => {
                 // For unhandled node types, recursively process children
@@ -262,8 +387,13 @@ impl GoParser {
                 let doc_comment = self.extract_doc_comment(&node, code);
                 let visibility = self.determine_go_visibility(name);
 
+                let symbol_id = counter.next_id();
+
+                // Extract generic params before borrowing issues
+                let generic_params = self.extract_generic_params_from_signature(&signature);
+
                 let symbol = self.create_symbol(
-                    counter.next_id(),
+                    symbol_id,
                     name.to_string(),
                     SymbolKind::Struct,
                     file_id,
@@ -278,6 +408,22 @@ impl GoParser {
                     module_path,
                     visibility,
                 );
+
+                // Register type in resolution context
+                if let Some(ref mut res_ctx) = self.resolution_context {
+                    use super::resolution::{TypeCategory, TypeInfo};
+                    let type_info = TypeInfo {
+                        name: name.to_string(),
+                        symbol_id: Some(symbol_id),
+                        package_path: Some(module_path.to_string()),
+                        is_exported: visibility == Visibility::Public,
+                        category: TypeCategory::Struct,
+                        generic_params,
+                        constraints: std::collections::HashMap::new(),
+                    };
+                    res_ctx.register_type(type_info);
+                }
+
                 symbols.push(symbol);
 
                 // Extract struct fields
@@ -297,8 +443,13 @@ impl GoParser {
                 let doc_comment = self.extract_doc_comment(&node, code);
                 let visibility = self.determine_go_visibility(name);
 
+                let symbol_id = counter.next_id();
+
+                // Extract generic params before borrowing issues
+                let generic_params = self.extract_generic_params_from_signature(&signature);
+
                 let symbol = self.create_symbol(
-                    counter.next_id(),
+                    symbol_id,
                     name.to_string(),
                     SymbolKind::Interface,
                     file_id,
@@ -313,6 +464,22 @@ impl GoParser {
                     module_path,
                     visibility,
                 );
+
+                // Register type in resolution context
+                if let Some(ref mut res_ctx) = self.resolution_context {
+                    use super::resolution::{TypeCategory, TypeInfo};
+                    let type_info = TypeInfo {
+                        name: name.to_string(),
+                        symbol_id: Some(symbol_id),
+                        package_path: Some(module_path.to_string()),
+                        is_exported: visibility == Visibility::Public,
+                        category: TypeCategory::Interface,
+                        generic_params,
+                        constraints: std::collections::HashMap::new(),
+                    };
+                    res_ctx.register_type(type_info);
+                }
+
                 symbols.push(symbol);
 
                 // Extract interface methods
@@ -332,8 +499,13 @@ impl GoParser {
                 let doc_comment = self.extract_doc_comment(&node, code);
                 let visibility = self.determine_go_visibility(name);
 
+                let symbol_id = counter.next_id();
+
+                // Extract generic params before borrowing issues
+                let generic_params = self.extract_generic_params_from_signature(signature);
+
                 let symbol = self.create_symbol(
-                    counter.next_id(),
+                    symbol_id,
                     name.to_string(),
                     SymbolKind::TypeAlias,
                     file_id,
@@ -348,6 +520,22 @@ impl GoParser {
                     module_path,
                     visibility,
                 );
+
+                // Register type in resolution context
+                if let Some(ref mut res_ctx) = self.resolution_context {
+                    use super::resolution::{TypeCategory, TypeInfo};
+                    let type_info = TypeInfo {
+                        name: name.to_string(),
+                        symbol_id: Some(symbol_id),
+                        package_path: Some(module_path.to_string()),
+                        is_exported: visibility == Visibility::Public,
+                        category: TypeCategory::Alias,
+                        generic_params,
+                        constraints: std::collections::HashMap::new(),
+                    };
+                    res_ctx.register_type(type_info);
+                }
+
                 symbols.push(symbol);
             }
         }
@@ -682,6 +870,280 @@ impl GoParser {
                 module_path,
                 visibility,
             );
+            symbols.push(symbol);
+        }
+    }
+
+    /// Process Go short variable declarations (:=)
+    fn process_short_var_declaration(
+        &mut self,
+        node: Node,
+        code: &str,
+        file_id: FileId,
+        counter: &mut SymbolCounter,
+        symbols: &mut Vec<Symbol>,
+        module_path: &str,
+    ) {
+        // short_var_declaration format: identifiers := expressions
+        let mut var_names = Vec::new();
+        
+        // Extract variable names (left side of :=)
+        for child in node.children(&mut node.walk()) {
+            match child.kind() {
+                "expression_list" => {
+                    // Handle multiple variables: a, b := 1, 2
+                    for expr_child in child.children(&mut child.walk()) {
+                        if expr_child.kind() == "identifier" {
+                            var_names.push(&code[expr_child.byte_range()]);
+                        }
+                    }
+                }
+                "identifier" => {
+                    // Handle single variable: a := 1
+                    var_names.push(&code[child.byte_range()]);
+                }
+                _ => {}
+            }
+        }
+
+        // Create symbols for each variable in the short declaration
+        // These variables are created in the current scope (function/block scope)
+        for var_name in var_names {
+            let visibility = self.determine_go_visibility(var_name);
+            let signature = format!("{var_name} := ...");
+
+            let mut symbol = self.create_symbol(
+                counter.next_id(),
+                var_name.to_string(),
+                SymbolKind::Variable,
+                file_id,
+                Range::new(
+                    node.start_position().row as u32,
+                    node.start_position().column as u16,
+                    node.end_position().row as u32,
+                    node.end_position().column as u16,
+                ),
+                Some(signature),
+                None,
+                module_path,
+                visibility,
+            );
+
+            // Mark as local variable (block or function scope)
+            symbol.scope_context = Some(crate::symbol::ScopeContext::Local {
+                hoisted: false, // Go doesn't have hoisting
+                parent_name: self.context.current_function().map(|s| s.into()),
+                parent_kind: Some(SymbolKind::Function),
+            });
+
+            symbols.push(symbol);
+        }
+    }
+
+    /// Process method receiver to track receiver scope
+    fn process_method_receiver(
+        &mut self,
+        receiver_node: Node,
+        code: &str,
+        file_id: FileId,
+        counter: &mut SymbolCounter,
+        symbols: &mut Vec<Symbol>,
+        module_path: &str,
+    ) {
+        // Method receivers in Go are parameter lists: func (r *Type) method()
+        // Process each receiver parameter in the receiver scope
+        
+        for child in receiver_node.children(&mut receiver_node.walk()) {
+            if child.kind() == "parameter_declaration" {
+                // Extract receiver name and type
+                let mut receiver_name = None;
+                let mut receiver_type = None;
+                
+                for param_child in child.children(&mut child.walk()) {
+                    match param_child.kind() {
+                        "identifier" => {
+                            receiver_name = Some(&code[param_child.byte_range()]);
+                        }
+                        "type_identifier" | "pointer_type" => {
+                            receiver_type = Some(&code[param_child.byte_range()]);
+                        }
+                        _ => {}
+                    }
+                }
+                
+                if let Some(name) = receiver_name {
+                    let visibility = self.determine_go_visibility(name);
+                    let signature = match receiver_type {
+                        Some(typ) => format!("{name} {typ}"),
+                        None => name.to_string(),
+                    };
+                    
+                    let mut symbol = self.create_symbol(
+                        counter.next_id(),
+                        name.to_string(),
+                        SymbolKind::Parameter,
+                        file_id,
+                        Range::new(
+                            child.start_position().row as u32,
+                            child.start_position().column as u16,
+                            child.end_position().row as u32,
+                            child.end_position().column as u16,
+                        ),
+                        Some(signature),
+                        None,
+                        module_path,
+                        visibility,
+                    );
+
+                    // Mark as method receiver parameter
+                    symbol.scope_context = Some(crate::symbol::ScopeContext::Parameter);
+                    
+                    symbols.push(symbol);
+                }
+            }
+        }
+    }
+
+    /// Process method parameters to track parameter scope
+    fn process_method_parameters(
+        &mut self,
+        params_node: Node,
+        code: &str,
+        file_id: FileId,
+        counter: &mut SymbolCounter,
+        symbols: &mut Vec<Symbol>,
+        module_path: &str,
+    ) {
+        // Method parameters in Go are parameter lists: func Method(param1 Type, param2 Type)
+        // Process each parameter in the parameter scope
+        
+        for child in params_node.children(&mut params_node.walk()) {
+            if child.kind() == "parameter_declaration" {
+                // Extract parameter name and type
+                let mut param_names = Vec::new();
+                let mut param_type = None;
+                
+                for param_child in child.children(&mut child.walk()) {
+                    match param_child.kind() {
+                        "identifier" => {
+                            param_names.push(&code[param_child.byte_range()]);
+                        }
+                        "type_identifier" | "pointer_type" | "array_type" | "slice_type" | "map_type" | "channel_type" => {
+                            param_type = Some(&code[param_child.byte_range()]);
+                        }
+                        _ => {}
+                    }
+                }
+                
+                // Create symbols for each parameter name
+                for param_name in param_names {
+                    let visibility = self.determine_go_visibility(param_name);
+                    let signature = match param_type {
+                        Some(typ) => format!("{param_name} {typ}"),
+                        None => param_name.to_string(),
+                    };
+                    
+                    let mut symbol = self.create_symbol(
+                        counter.next_id(),
+                        param_name.to_string(),
+                        SymbolKind::Parameter,
+                        file_id,
+                        Range::new(
+                            child.start_position().row as u32,
+                            child.start_position().column as u16,
+                            child.end_position().row as u32,
+                            child.end_position().column as u16,
+                        ),
+                        Some(signature),
+                        None,
+                        module_path,
+                        visibility,
+                    );
+
+                    // Mark as method/function parameter
+                    symbol.scope_context = Some(crate::symbol::ScopeContext::Parameter);
+                    
+                    symbols.push(symbol);
+                }
+            }
+        }
+    }
+
+    /// Process range clause to extract range variables (for index, value := range items)
+    fn process_range_clause(
+        &mut self,
+        range_node: Node,
+        code: &str,
+        file_id: FileId,
+        counter: &mut SymbolCounter,
+        symbols: &mut Vec<Symbol>,
+        module_path: &str,
+    ) {
+        // Range clause format: index, value := range items
+        // Extract the variable names from the left side
+        let mut range_vars = Vec::new();
+        
+        for child in range_node.children(&mut range_node.walk()) {
+            match child.kind() {
+                "expression_list" => {
+                    // Multiple variables: index, value
+                    for expr_child in child.children(&mut child.walk()) {
+                        if expr_child.kind() == "identifier" {
+                            range_vars.push(&code[expr_child.byte_range()]);
+                        }
+                    }
+                }
+                "identifier" => {
+                    // Single variable: index
+                    range_vars.push(&code[child.byte_range()]);
+                }
+                _ => {
+                    // Also process non-range parts (e.g., the iterable expression)
+                    self.extract_symbols_from_node(
+                        child,
+                        code,
+                        file_id,
+                        counter,
+                        symbols,
+                        module_path,
+                    );
+                }
+            }
+        }
+
+        // Create symbols for range variables (these are in for loop block scope)
+        for (i, var_name) in range_vars.iter().enumerate() {
+            let visibility = self.determine_go_visibility(var_name);
+            let signature = if i == 0 {
+                format!("{var_name} := range (index)")
+            } else {
+                format!("{var_name} := range (value)")
+            };
+
+            let mut symbol = self.create_symbol(
+                counter.next_id(),
+                var_name.to_string(),
+                SymbolKind::Variable,
+                file_id,
+                Range::new(
+                    range_node.start_position().row as u32,
+                    range_node.start_position().column as u16,
+                    range_node.end_position().row as u32,
+                    range_node.end_position().column as u16,
+                ),
+                Some(signature),
+                None,
+                module_path,
+                visibility,
+            );
+
+            // Mark as local variable in for loop scope
+            symbol.scope_context = Some(crate::symbol::ScopeContext::Local {
+                hoisted: false, // Go doesn't have hoisting
+                parent_name: self.context.current_function().map(|s| s.into()),
+                parent_kind: Some(SymbolKind::Function),
+            });
+
             symbols.push(symbol);
         }
     }
@@ -1291,6 +1753,34 @@ impl GoParser {
             _ => None,
         }
     }
+
+    /// Extract generic type parameters from a signature
+    /// Returns a list of type parameter names like ["T", "K", "V"]
+    fn extract_generic_params_from_signature(&self, signature: &str) -> Vec<String> {
+        let mut params = Vec::new();
+
+        // Look for generic parameter section like [T any, K comparable, V SomeInterface]
+        if let Some(start) = signature.find('[') {
+            if let Some(end) = signature[start..].find(']') {
+                let generic_section = &signature[start + 1..start + end];
+
+                // Parse parameters separated by commas
+                for param in generic_section.split(',') {
+                    let param = param.trim();
+                    if param.is_empty() {
+                        continue;
+                    }
+
+                    // Extract just the parameter name (first word)
+                    if let Some(param_name) = param.split_whitespace().next() {
+                        params.push(param_name.to_string());
+                    }
+                }
+            }
+        }
+
+        params
+    }
 }
 
 impl LanguageParser for GoParser {
@@ -1302,6 +1792,7 @@ impl LanguageParser for GoParser {
     ) -> Vec<Symbol> {
         // Reset context for each file
         self.context = ParserContext::new();
+        self.resolution_context = Some(GoResolutionContext::new(file_id));
         let mut symbols = Vec::new();
 
         match self.parser.parse(code, None) {

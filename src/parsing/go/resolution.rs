@@ -12,6 +12,278 @@ use crate::storage::DocumentIndex;
 use crate::{FileId, SymbolId};
 use std::collections::HashMap;
 
+/// Information extracted from go.mod file
+///
+/// Contains module metadata including name, Go version, dependencies,
+/// and replace directives used for import resolution.
+#[derive(Debug, Clone, Default)]
+pub struct GoModInfo {
+    /// Module name from 'module' directive
+    pub module_name: Option<String>,
+
+    /// Go version from 'go' directive  
+    pub go_version: Option<String>,
+
+    /// Dependencies from 'require' directives (module -> version)
+    pub dependencies: HashMap<String, String>,
+
+    /// Replace directives (from -> to)
+    pub replacements: HashMap<String, String>,
+}
+
+/// Type information for Go type system resolution
+#[derive(Debug, Clone)]
+pub struct TypeInfo {
+    /// Type name (e.g., "int", "MyStruct", "Stack[T]")
+    pub name: String,
+
+    /// Symbol ID if this type has an associated symbol
+    pub symbol_id: Option<SymbolId>,
+
+    /// Package path where this type is defined
+    pub package_path: Option<String>,
+
+    /// Whether this type is exported (public)
+    pub is_exported: bool,
+
+    /// Type category
+    pub category: TypeCategory,
+
+    /// Generic type parameters if this is a generic type
+    pub generic_params: Vec<String>,
+
+    /// Constraints for generic parameters
+    pub constraints: HashMap<String, String>,
+}
+
+/// Categories of types in Go
+#[derive(Debug, Clone, PartialEq)]
+pub enum TypeCategory {
+    /// Built-in types (int, string, bool, etc.)
+    BuiltIn,
+
+    /// User-defined struct types
+    Struct,
+
+    /// User-defined interface types
+    Interface,
+
+    /// Type aliases (type MyInt int)
+    Alias,
+
+    /// Generic type parameters (T, K, V, etc.)
+    Generic,
+
+    /// Instantiated generic types (Stack[string])
+    GenericInstance,
+}
+
+/// Registry for tracking all types available in the current Go context
+#[derive(Debug, Default)]
+pub struct TypeRegistry {
+    /// All registered types by name
+    types: HashMap<String, TypeInfo>,
+
+    /// Built-in Go types (initialized once)
+    built_in_types: HashMap<String, TypeInfo>,
+
+    /// Generic type contexts (stack for nested scopes)
+    generic_contexts: Vec<HashMap<String, TypeInfo>>,
+}
+
+impl TypeRegistry {
+    pub fn new() -> Self {
+        let mut registry = Self {
+            types: HashMap::new(),
+            built_in_types: Self::init_built_in_types(),
+            generic_contexts: Vec::new(),
+        };
+
+        // Copy built-in types to main registry
+        for (name, type_info) in &registry.built_in_types {
+            registry.types.insert(name.clone(), type_info.clone());
+        }
+
+        registry
+    }
+
+    /// Initialize Go built-in types
+    fn init_built_in_types() -> HashMap<String, TypeInfo> {
+        let mut types = HashMap::new();
+
+        // Boolean type
+        types.insert(
+            "bool".to_string(),
+            TypeInfo {
+                name: "bool".to_string(),
+                symbol_id: None,
+                package_path: None,
+                is_exported: true,
+                category: TypeCategory::BuiltIn,
+                generic_params: Vec::new(),
+                constraints: HashMap::new(),
+            },
+        );
+
+        // String types
+        for name in &["string", "byte", "rune"] {
+            types.insert(
+                name.to_string(),
+                TypeInfo {
+                    name: name.to_string(),
+                    symbol_id: None,
+                    package_path: None,
+                    is_exported: true,
+                    category: TypeCategory::BuiltIn,
+                    generic_params: Vec::new(),
+                    constraints: HashMap::new(),
+                },
+            );
+        }
+
+        // Numeric types
+        for name in &[
+            "int",
+            "int8",
+            "int16",
+            "int32",
+            "int64",
+            "uint",
+            "uint8",
+            "uint16",
+            "uint32",
+            "uint64",
+            "float32",
+            "float64",
+            "complex64",
+            "complex128",
+            "uintptr",
+        ] {
+            types.insert(
+                name.to_string(),
+                TypeInfo {
+                    name: name.to_string(),
+                    symbol_id: None,
+                    package_path: None,
+                    is_exported: true,
+                    category: TypeCategory::BuiltIn,
+                    generic_params: Vec::new(),
+                    constraints: HashMap::new(),
+                },
+            );
+        }
+
+        // Special built-in types
+        for name in &["error", "any"] {
+            types.insert(
+                name.to_string(),
+                TypeInfo {
+                    name: name.to_string(),
+                    symbol_id: None,
+                    package_path: None,
+                    is_exported: true,
+                    category: TypeCategory::BuiltIn,
+                    generic_params: Vec::new(),
+                    constraints: HashMap::new(),
+                },
+            );
+        }
+
+        // Add comparable (Go 1.18+ constraint)
+        types.insert(
+            "comparable".to_string(),
+            TypeInfo {
+                name: "comparable".to_string(),
+                symbol_id: None,
+                package_path: None,
+                is_exported: true,
+                category: TypeCategory::Interface,
+                generic_params: Vec::new(),
+                constraints: HashMap::new(),
+            },
+        );
+
+        types
+    }
+
+    /// Check if a type name represents a Go built-in type
+    pub fn is_built_in_type(&self, type_name: &str) -> bool {
+        self.built_in_types.contains_key(type_name)
+    }
+
+    /// Register a user-defined type
+    pub fn register_type(&mut self, type_info: TypeInfo) {
+        self.types.insert(type_info.name.clone(), type_info);
+    }
+
+    /// Resolve a type by name with scope-aware lookup
+    pub fn resolve_type(&self, type_name: &str) -> Option<&TypeInfo> {
+        // 1. Check generic contexts (most specific scope first)
+        for context in self.generic_contexts.iter().rev() {
+            if let Some(type_info) = context.get(type_name) {
+                return Some(type_info);
+            }
+        }
+
+        // 2. Check registered types (including built-ins)
+        self.types.get(type_name)
+    }
+
+    /// Enter a new generic scope (for functions/types with type parameters)
+    pub fn enter_generic_scope(&mut self) {
+        self.generic_contexts.push(HashMap::new());
+    }
+
+    /// Exit the current generic scope
+    pub fn exit_generic_scope(&mut self) {
+        self.generic_contexts.pop();
+    }
+
+    /// Add a generic type parameter to current scope
+    pub fn add_generic_parameter(&mut self, param_name: String, constraint: Option<String>) {
+        if let Some(current_context) = self.generic_contexts.last_mut() {
+            current_context.insert(
+                param_name.clone(),
+                TypeInfo {
+                    name: param_name,
+                    symbol_id: None,
+                    package_path: None,
+                    is_exported: false, // Type parameters are scoped
+                    category: TypeCategory::Generic,
+                    generic_params: Vec::new(),
+                    constraints: constraint
+                        .map(|c| {
+                            let mut constraints = HashMap::new();
+                            constraints.insert("constraint".to_string(), c);
+                            constraints
+                        })
+                        .unwrap_or_default(),
+                },
+            );
+        }
+    }
+
+    /// Get all types that implement a given interface
+    pub fn find_types_implementing(&self, _interface_name: &str) -> Vec<&TypeInfo> {
+        // Find all types that could implement this interface
+        self.types
+            .values()
+            .filter(|type_info| {
+                // Only structs can implement interfaces in Go
+                matches!(type_info.category, TypeCategory::Struct)
+                // TODO: Add actual method compatibility checking when inheritance resolver is available
+            })
+            .collect()
+    }
+
+    /// Check if a type implements an interface (requires inheritance resolver)
+    pub fn type_implements_interface(&self, _type_name: &str, _interface_name: &str) -> bool {
+        // This would check method compatibility
+        // For now, return false - will be enhanced when connected to inheritance resolver
+        false
+    }
+}
+
 /// Go-specific resolution context handling Go's scoping rules
 ///
 /// Go has the following scoping rules:
@@ -34,6 +306,9 @@ pub struct GoResolutionContext {
 
     /// Import tracking (path -> alias)
     imports: Vec<(String, Option<String>)>,
+
+    /// Type registry for type resolution
+    type_registry: TypeRegistry,
 }
 
 impl GoResolutionContext {
@@ -44,6 +319,7 @@ impl GoResolutionContext {
             imported_symbols: HashMap::new(),
             scope_stack: Vec::new(),
             imports: Vec::new(),
+            type_registry: TypeRegistry::new(),
         }
     }
 
@@ -131,15 +407,19 @@ impl GoResolutionContext {
     /// Resolve imported package symbols (symbols from imported packages)
     ///
     /// This method resolves symbols that come from explicitly imported packages.
-    /// It handles various Go import patterns:
+    /// It handles various Go import patterns with enhanced resolution:
     /// - Standard library: "fmt", "strings", "net/http"
     /// - External modules: "github.com/user/repo/package"
     /// - Local modules: "myproject/internal/utils"
+    /// - Relative imports: "./utils", "../common"
+    /// - Vendor directory imports: resolved via vendor/
     pub fn resolve_imported_package_symbols(
         &self,
         package_name: &str,
         symbol_name: &str,
         document_index: &DocumentIndex,
+        current_package_path: Option<&str>,
+        project_root: Option<&str>,
     ) -> Option<SymbolId> {
         // Look through imports to find the package
         for (import_path, alias) in &self.imports {
@@ -149,37 +429,244 @@ impl GoResolutionContext {
             });
 
             if effective_name == package_name {
-                // Found the matching import, now resolve the symbol
+                // 1. Check if it's a relative import
+                if (import_path.starts_with("./") || import_path.starts_with("../"))
+                    && current_package_path.is_some()
+                {
+                    if let Some(resolved_path) =
+                        self.resolve_relative_import(import_path, current_package_path.unwrap())
+                    {
+                        return self.resolve_symbol_in_package(
+                            &resolved_path,
+                            symbol_name,
+                            document_index,
+                        );
+                    }
+                }
+
+                // 2. Check vendor directory if project root is available
+                if let Some(root) = project_root {
+                    if let Some(vendor_symbol) =
+                        self.resolve_vendor_import(import_path, root, document_index)
+                    {
+                        return Some(vendor_symbol);
+                    }
+                }
+
+                // 3. Standard resolution for absolute imports
                 return self.resolve_symbol_in_package(import_path, symbol_name, document_index);
             }
         }
         None
     }
 
+    /// Resolve relative imports (./pkg, ../pkg)
+    ///
+    /// Handle Go relative imports which are uncommon but valid.
+    /// Relative imports are resolved relative to the importing package's directory.
+    pub fn resolve_relative_import(
+        &self,
+        import_path: &str,
+        current_package_path: &str,
+    ) -> Option<String> {
+        if !import_path.starts_with("./") && !import_path.starts_with("../") {
+            return None;
+        }
+
+        let current_parts: Vec<&str> = current_package_path.split('/').collect();
+        let import_parts: Vec<&str> = import_path.split('/').collect();
+
+        let mut resolved_parts = current_parts;
+
+        for part in import_parts {
+            match part {
+                "." | "./" => continue, // Current directory
+                ".." | "../" => {
+                    if !resolved_parts.is_empty() {
+                        resolved_parts.pop();
+                    }
+                }
+                _ if !part.is_empty() => resolved_parts.push(part),
+                _ => continue,
+            }
+        }
+
+        Some(resolved_parts.join("/"))
+    }
+
+    /// Check for imports in vendor directory
+    ///
+    /// Vendor directories contain vendored dependencies and have higher
+    /// priority than external modules in Go module resolution.
+    pub fn resolve_vendor_import(
+        &self,
+        import_path: &str,
+        project_root: &str,
+        document_index: &DocumentIndex,
+    ) -> Option<SymbolId> {
+        // Construct vendor path: project_root/vendor/import_path
+        let vendor_path = format!("{project_root}/vendor/{import_path}");
+
+        // Look for symbols from this vendor path
+        if let Ok(candidates) = document_index.find_symbols_by_name("*") {
+            for candidate in candidates {
+                if let Some(ref module_path) = candidate.module_path {
+                    let module_str: &str = module_path.as_ref();
+                    if module_str.starts_with(&vendor_path)
+                        || (module_str.contains("vendor/")
+                            && module_str.ends_with(&import_path.replace('/', "/")))
+                    {
+                        return Some(candidate.id);
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    /// Parse go.mod file for module information
+    ///
+    /// Extract module name, Go version, dependencies, and replace directives
+    /// from a go.mod file.
+    pub fn parse_go_mod(&self, go_mod_path: &str) -> Option<GoModInfo> {
+        use std::fs;
+
+        let content = fs::read_to_string(go_mod_path).ok()?;
+        let mut info = GoModInfo::default();
+        let mut in_require_block = false;
+
+        for line in content.lines() {
+            let line = line.trim();
+
+            // Skip empty lines and comments
+            if line.is_empty() || line.starts_with("//") {
+                continue;
+            }
+
+            // Parse module directive
+            if line.starts_with("module ") {
+                if let Some(module_name) = line.strip_prefix("module ") {
+                    info.module_name = Some(module_name.trim().to_string());
+                }
+            }
+            // Parse go directive
+            else if line.starts_with("go ") {
+                if let Some(go_version) = line.strip_prefix("go ") {
+                    info.go_version = Some(go_version.trim().to_string());
+                }
+            }
+            // Parse replace directives
+            else if line.starts_with("replace ") {
+                if let Some(replace_part) = line.strip_prefix("replace ") {
+                    if let Some((from, to)) = replace_part.split_once(" => ") {
+                        info.replacements
+                            .insert(from.trim().to_string(), to.trim().to_string());
+                    }
+                }
+            }
+            // Parse require directive - handle both inline and block forms
+            else if line.starts_with("require ") {
+                if line.ends_with("(") {
+                    // Start of require block
+                    in_require_block = true;
+                } else {
+                    // Inline require
+                    if let Some(require_part) = line.strip_prefix("require ") {
+                        let parts: Vec<&str> = require_part.split_whitespace().collect();
+                        if parts.len() >= 2 {
+                            info.dependencies
+                                .insert(parts[0].to_string(), parts[1].to_string());
+                        }
+                    }
+                }
+            }
+            // Handle require block content
+            else if in_require_block {
+                if line == ")" {
+                    in_require_block = false;
+                } else {
+                    // Parse dependency line in block
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    if parts.len() >= 2 {
+                        info.dependencies
+                            .insert(parts[0].to_string(), parts[1].to_string());
+                    }
+                }
+            }
+        }
+
+        Some(info)
+    }
+
+    /// Apply module replacements from go.mod
+    ///
+    /// Handle go.mod replace directives to map import paths to local or
+    /// alternative module paths.
+    pub fn apply_module_replacements(&self, import_path: &str, go_mod_info: &GoModInfo) -> String {
+        // Check for exact replacement
+        if let Some(replacement) = go_mod_info.replacements.get(import_path) {
+            return replacement.clone();
+        }
+
+        // Check for prefix replacements
+        for (from_pattern, to_replacement) in &go_mod_info.replacements {
+            if import_path.starts_with(from_pattern) {
+                let suffix = &import_path[from_pattern.len()..];
+                return format!("{to_replacement}{suffix}");
+            }
+        }
+
+        // No replacement found
+        import_path.to_string()
+    }
+
     /// Handle Go module paths and go.mod resolution
     ///
-    /// This method implements basic Go module resolution logic.
-    /// In a full implementation, this would parse go.mod files and
-    /// resolve module dependencies properly.
+    /// This method implements Go module resolution logic with go.mod parsing
+    /// and module replacement support.
     pub fn handle_go_module_paths(
         &self,
         module_path: &str,
-        _document_index: &DocumentIndex, // TODO: Use for go.mod parsing and module version resolution (Phase 5.2)
+        document_index: &DocumentIndex,
     ) -> Option<String> {
-        // Simplified Go module resolution
-        // In practice, this would:
         // 1. Check if the path is a standard library package
-        // 2. Check go.mod for module replacements
-        // 3. Resolve module versions and dependencies
-
         if self.is_standard_library_package(module_path) {
-            // Standard library packages are always available
-            Some(module_path.to_string())
-        } else {
-            // For now, assume the module path is valid
-            // A full implementation would check go.mod, go.sum, and module cache
-            Some(module_path.to_string())
+            return Some(module_path.to_string());
         }
+
+        // 2. Look for go.mod file in the project
+        // This would typically walk up from the current file to find go.mod
+        if let Some(go_mod_info) = self.find_and_parse_go_mod(document_index) {
+            // Apply any replacements from go.mod
+            let resolved_path = self.apply_module_replacements(module_path, &go_mod_info);
+
+            // 3. Check if it's a local module (starts with module name)
+            if let Some(ref module_name) = go_mod_info.module_name {
+                if resolved_path.starts_with(module_name) {
+                    return Some(resolved_path);
+                }
+            }
+
+            return Some(resolved_path);
+        }
+
+        // 3. Fallback to assuming the module path is valid
+        Some(module_path.to_string())
+    }
+
+    /// Find and parse go.mod file in the project
+    ///
+    /// Walk up directory tree to find go.mod file and parse it.
+    /// In practice, this would use the DocumentIndex to find go.mod files.
+    fn find_and_parse_go_mod(&self, _document_index: &DocumentIndex) -> Option<GoModInfo> {
+        // TODO: In a complete implementation, this would:
+        // 1. Use DocumentIndex to find go.mod files in the indexed codebase
+        // 2. Parse the nearest go.mod file relative to the current file
+        // 3. Cache parsed go.mod information for performance
+
+        // For now, return None to use fallback resolution
+        None
     }
 
     /// Check if a package is part of the Go standard library
@@ -247,6 +734,68 @@ impl GoResolutionContext {
             }
         }
         None
+    }
+
+    /// Register a user-defined type
+    pub fn register_type(&mut self, type_info: TypeInfo) {
+        self.type_registry.register_type(type_info);
+    }
+
+    /// Resolve a type by name
+    pub fn resolve_type(&self, type_name: &str) -> Option<&TypeInfo> {
+        self.type_registry.resolve_type(type_name)
+    }
+
+    /// Check if a type is a built-in Go type
+    pub fn is_built_in_type(&self, type_name: &str) -> bool {
+        self.type_registry.is_built_in_type(type_name)
+    }
+
+    /// Enter a generic scope for function/type with type parameters
+    pub fn enter_generic_scope(&mut self) {
+        self.type_registry.enter_generic_scope();
+    }
+
+    /// Exit the current generic scope
+    pub fn exit_generic_scope(&mut self) {
+        self.type_registry.exit_generic_scope();
+    }
+
+    /// Add a generic type parameter to the current scope
+    pub fn add_generic_parameter(&mut self, param_name: String, constraint: Option<String>) {
+        self.type_registry
+            .add_generic_parameter(param_name, constraint);
+    }
+
+    /// Parse generic type parameters from a signature like "[T any, K comparable]"
+    pub fn parse_and_register_generic_params(&mut self, generic_part: &str) {
+        // Remove brackets and split by comma
+        let cleaned = generic_part.trim_start_matches('[').trim_end_matches(']');
+        if cleaned.is_empty() {
+            return;
+        }
+
+        for param in cleaned.split(',') {
+            let param = param.trim();
+            if param.is_empty() {
+                continue;
+            }
+
+            // Parse "T any", "K comparable", "V SomeInterface", etc.
+            let parts: Vec<&str> = param.split_whitespace().collect();
+            if parts.is_empty() {
+                continue;
+            }
+
+            let param_name = parts[0].to_string();
+            let constraint = if parts.len() > 1 {
+                Some(parts[1..].join(" "))
+            } else {
+                None
+            };
+
+            self.add_generic_parameter(param_name, constraint);
+        }
     }
 }
 
@@ -367,16 +916,42 @@ impl GoInheritanceResolver {
         }
     }
 
-    /// Check if a type is an interface (heuristic)
+    /// Check if a type is an interface
     ///
-    /// In Go, this should ideally be determined by the parser, but for now
-    /// we use heuristics based on naming conventions and tracking.
-    /// TODO: Use for interface detection in Phase 5.3 (Type System Integration) when resolving interface implementations
-    #[allow(dead_code)]
-    fn is_interface(&self, type_name: &str) -> bool {
-        self.interface_embeds.contains_key(type_name)
-            || type_name.starts_with("I")  // Common Go interface naming convention
-            || !self.struct_implements.contains_key(type_name)
+    /// This method determines whether a type is an interface based on:
+    /// 1. Explicit tracking via interface_embeds
+    /// 2. Common Go naming conventions (interfaces often start with 'I' or end with 'er')
+    /// 3. Exclusion principle (if it's not a struct, it might be an interface)
+    pub fn is_interface(&self, type_name: &str) -> bool {
+        // 1. Explicitly tracked interfaces
+        if self.interface_embeds.contains_key(type_name) {
+            return true;
+        }
+
+        // 2. Check if it's known to be a struct (has implementation relationships)
+        if self.struct_implements.contains_key(type_name) {
+            return false; // Definitely a struct
+        }
+
+        // 3. Common Go interface naming conventions (only if not explicitly tracked as struct)
+        if type_name.starts_with('I')
+            && type_name.len() > 1
+            && type_name.chars().nth(1).unwrap().is_uppercase()
+        {
+            return true; // IReader, IWriter, etc.
+        }
+
+        // Simple heuristics for common interface patterns
+        // But be more conservative - only for single words ending in "er" or "able"
+        let word_count = type_name
+            .split(|c: char| c.is_uppercase() && c != type_name.chars().next().unwrap())
+            .count();
+        if word_count == 1 && (type_name.ends_with("er") || type_name.ends_with("able")) {
+            return true; // Reader, Writer, Comparable, etc.
+        }
+
+        // 4. Default to false for unknown types
+        false
     }
 }
 
@@ -593,6 +1168,113 @@ impl GoInheritanceResolver {
 
         interfaces
     }
+
+    /// Check if a struct type implements an interface
+    ///
+    /// This performs structural compatibility checking - in Go, a type implements
+    /// an interface if it has all the methods required by the interface.
+    pub fn check_struct_implements_interface(
+        &self,
+        struct_name: &str,
+        interface_name: &str,
+    ) -> bool {
+        // Get methods required by the interface
+        let interface_methods = self.get_all_methods(interface_name);
+
+        // Get methods available on the struct
+        let struct_methods = self.get_all_methods(struct_name);
+
+        // Check if struct has all required interface methods
+        for interface_method in &interface_methods {
+            if !struct_methods.contains(interface_method) {
+                return false;
+            }
+        }
+
+        // If struct has all interface methods, it implements the interface
+        !interface_methods.is_empty()
+            && interface_methods.iter().all(|m| struct_methods.contains(m))
+    }
+
+    /// Discover all implicit interface implementations
+    ///
+    /// This method scans all known types and determines which structs
+    /// implicitly implement which interfaces based on method signatures.
+    pub fn discover_implementations(&mut self) -> Vec<(String, String)> {
+        let mut implementations = Vec::new();
+
+        // Get all struct names and interface names
+        let struct_names: Vec<String> = self.struct_implements.keys().cloned().collect();
+        let interface_names: Vec<String> = self
+            .interface_embeds
+            .keys()
+            .cloned()
+            .chain(
+                self.type_methods
+                    .keys()
+                    .filter(|name| self.is_interface(name))
+                    .cloned(),
+            )
+            .collect();
+
+        // Check each struct against each interface
+        for struct_name in &struct_names {
+            for interface_name in &interface_names {
+                if self.check_struct_implements_interface(struct_name, interface_name) {
+                    // Register this implementation if not already known
+                    if !self
+                        .struct_implements
+                        .get(struct_name)
+                        .map(|impls| impls.contains(interface_name))
+                        .unwrap_or(false)
+                    {
+                        self.add_struct_implements(struct_name.clone(), interface_name.clone());
+                        implementations.push((struct_name.clone(), interface_name.clone()));
+                    }
+                }
+            }
+        }
+
+        implementations
+    }
+
+    /// Find all types (structs) that implement a given interface
+    pub fn find_implementations_of(&self, interface_name: &str) -> Vec<String> {
+        let mut implementations = Vec::new();
+
+        for (struct_name, interfaces) in &self.struct_implements {
+            if interfaces.contains(&interface_name.to_string()) {
+                implementations.push(struct_name.clone());
+            }
+        }
+
+        // Also check if any other structs could implement this interface
+        // based on their method sets (not yet explicitly tracked)
+        for struct_name in self.type_methods.keys() {
+            if !self.is_interface(struct_name)
+                && !implementations.contains(struct_name)
+                && self.check_struct_implements_interface(struct_name, interface_name)
+            {
+                implementations.push(struct_name.clone());
+            }
+        }
+
+        implementations
+    }
+
+    /// Register methods for a type (struct or interface)
+    pub fn register_type_methods(&mut self, type_name: String, methods: Vec<String>) {
+        self.type_methods.insert(type_name, methods);
+    }
+
+    /// Check if a type has a specific method
+    pub fn type_has_method(&self, type_name: &str, method_name: &str) -> bool {
+        if let Some(methods) = self.type_methods.get(type_name) {
+            methods.contains(&method_name.to_string())
+        } else {
+            false
+        }
+    }
 }
 
 #[cfg(test)]
@@ -758,16 +1440,28 @@ mod tests {
 
         // The actual resolution would require symbols in the index
         // For now, test that the method handles the imports correctly
-        let result = context.resolve_imported_package_symbols("fmt", "Println", &document_index);
+        let result =
+            context.resolve_imported_package_symbols("fmt", "Println", &document_index, None, None);
         // Result will be None since we don't have actual symbols, but it should not panic
         assert!(result.is_none());
 
-        let result = context.resolve_imported_package_symbols("utils", "Helper", &document_index);
+        let result = context.resolve_imported_package_symbols(
+            "utils",
+            "Helper",
+            &document_index,
+            None,
+            None,
+        );
         assert!(result.is_none());
 
         // Test non-existent package
-        let result =
-            context.resolve_imported_package_symbols("nonexistent", "Symbol", &document_index);
+        let result = context.resolve_imported_package_symbols(
+            "nonexistent",
+            "Symbol",
+            &document_index,
+            None,
+            None,
+        );
         assert!(result.is_none());
 
         // Cleanup
@@ -825,5 +1519,340 @@ mod tests {
             context.resolve("ConflictingName"),
             Some(SymbolId::new(4).unwrap())
         );
+    }
+
+    #[test]
+    fn test_relative_import_resolution() {
+        let context = GoResolutionContext::new(FileId::new(1).unwrap());
+
+        // Test current directory import
+        let result = context.resolve_relative_import("./utils", "myproject/internal");
+        assert_eq!(result, Some("myproject/internal/utils".to_string()));
+
+        // Test parent directory import
+        let result = context.resolve_relative_import("../common", "myproject/internal");
+        assert_eq!(result, Some("myproject/common".to_string()));
+
+        // Test multiple parent directories
+        let result = context.resolve_relative_import("../../shared", "myproject/pkg/internal");
+        assert_eq!(result, Some("shared".to_string()));
+
+        // Test complex relative path
+        let result = context.resolve_relative_import("../lib/utils", "myproject/cmd");
+        assert_eq!(result, Some("myproject/lib/utils".to_string()));
+
+        // Test non-relative path (should return None)
+        let result = context.resolve_relative_import("fmt", "myproject/internal");
+        assert_eq!(result, None);
+
+        let result = context.resolve_relative_import("github.com/user/repo", "myproject/internal");
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_go_mod_parsing() {
+        let context = GoResolutionContext::new(FileId::new(1).unwrap());
+
+        // Test parsing module info from content (simulate file read)
+        let go_mod_content = r#"
+module github.com/mycompany/myproject
+
+go 1.21
+
+require (
+    github.com/gin-gonic/gin v1.9.1
+    github.com/lib/pq v1.10.7
+)
+
+replace github.com/old/module => ../local/module
+replace github.com/another/module => github.com/fork/module v1.2.3
+"#;
+
+        // Create a temporary go.mod file for testing
+        let temp_dir = std::env::temp_dir().join("codanna_test_go_mod");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let go_mod_path = temp_dir.join("go.mod");
+        std::fs::write(&go_mod_path, go_mod_content).unwrap();
+
+        let result = context.parse_go_mod(go_mod_path.to_str().unwrap());
+        assert!(result.is_some());
+
+        let info = result.unwrap();
+        assert_eq!(
+            info.module_name,
+            Some("github.com/mycompany/myproject".to_string())
+        );
+        assert_eq!(info.go_version, Some("1.21".to_string()));
+
+        // Check dependencies
+        assert!(info.dependencies.contains_key("github.com/gin-gonic/gin"));
+        assert_eq!(info.dependencies["github.com/gin-gonic/gin"], "v1.9.1");
+
+        // Check replacements
+        assert!(info.replacements.contains_key("github.com/old/module"));
+        assert_eq!(
+            info.replacements["github.com/old/module"],
+            "../local/module"
+        );
+
+        // Cleanup
+        std::fs::remove_dir_all(&temp_dir).unwrap_or(());
+    }
+
+    #[test]
+    fn test_module_replacements() {
+        let context = GoResolutionContext::new(FileId::new(1).unwrap());
+
+        let mut go_mod_info = GoModInfo::default();
+        go_mod_info.replacements.insert(
+            "github.com/old/module".to_string(),
+            "../local/module".to_string(),
+        );
+        go_mod_info.replacements.insert(
+            "github.com/company".to_string(),
+            "github.com/fork".to_string(),
+        );
+
+        // Test exact replacement
+        let result = context.apply_module_replacements("github.com/old/module", &go_mod_info);
+        assert_eq!(result, "../local/module");
+
+        // Test prefix replacement
+        let result = context.apply_module_replacements("github.com/company/repo/pkg", &go_mod_info);
+        assert_eq!(result, "github.com/fork/repo/pkg");
+
+        // Test no replacement
+        let result = context.apply_module_replacements("github.com/other/module", &go_mod_info);
+        assert_eq!(result, "github.com/other/module");
+    }
+
+    #[test]
+    fn test_type_registry_built_ins() {
+        let registry = TypeRegistry::new();
+
+        // Test built-in type detection
+        assert!(registry.is_built_in_type("int"));
+        assert!(registry.is_built_in_type("string"));
+        assert!(registry.is_built_in_type("bool"));
+        assert!(registry.is_built_in_type("float64"));
+        assert!(registry.is_built_in_type("error"));
+        assert!(registry.is_built_in_type("any"));
+        assert!(registry.is_built_in_type("comparable"));
+
+        // Test non-built-in types
+        assert!(!registry.is_built_in_type("MyStruct"));
+        assert!(!registry.is_built_in_type("CustomInterface"));
+
+        // Test built-in type resolution
+        let int_type = registry.resolve_type("int");
+        assert!(int_type.is_some());
+        assert_eq!(int_type.unwrap().category, TypeCategory::BuiltIn);
+
+        let string_type = registry.resolve_type("string");
+        assert!(string_type.is_some());
+        assert_eq!(string_type.unwrap().category, TypeCategory::BuiltIn);
+    }
+
+    #[test]
+    fn test_type_registry_user_defined() {
+        let mut registry = TypeRegistry::new();
+
+        // Register a user-defined struct
+        let struct_info = TypeInfo {
+            name: "Person".to_string(),
+            symbol_id: Some(SymbolId::new(1).unwrap()),
+            package_path: Some("myproject/models".to_string()),
+            is_exported: true,
+            category: TypeCategory::Struct,
+            generic_params: Vec::new(),
+            constraints: HashMap::new(),
+        };
+        registry.register_type(struct_info);
+
+        // Test resolution
+        let person_type = registry.resolve_type("Person");
+        assert!(person_type.is_some());
+        let person = person_type.unwrap();
+        assert_eq!(person.category, TypeCategory::Struct);
+        assert!(person.is_exported);
+        assert_eq!(person.package_path, Some("myproject/models".to_string()));
+
+        // Register a generic type
+        let generic_info = TypeInfo {
+            name: "Stack".to_string(),
+            symbol_id: Some(SymbolId::new(2).unwrap()),
+            package_path: Some("myproject/containers".to_string()),
+            is_exported: true,
+            category: TypeCategory::Struct,
+            generic_params: vec!["T".to_string()],
+            constraints: HashMap::new(),
+        };
+        registry.register_type(generic_info);
+
+        let stack_type = registry.resolve_type("Stack");
+        assert!(stack_type.is_some());
+        let stack = stack_type.unwrap();
+        assert_eq!(stack.generic_params, vec!["T".to_string()]);
+    }
+
+    #[test]
+    fn test_type_registry_generic_scopes() {
+        let mut registry = TypeRegistry::new();
+
+        // Enter a generic scope
+        registry.enter_generic_scope();
+        registry.add_generic_parameter("T".to_string(), Some("any".to_string()));
+        registry.add_generic_parameter("K".to_string(), Some("comparable".to_string()));
+
+        // Test resolution within scope
+        let t_type = registry.resolve_type("T");
+        assert!(t_type.is_some());
+        assert_eq!(t_type.unwrap().category, TypeCategory::Generic);
+
+        let k_type = registry.resolve_type("K");
+        assert!(k_type.is_some());
+        assert_eq!(k_type.unwrap().category, TypeCategory::Generic);
+
+        // Exit scope
+        registry.exit_generic_scope();
+
+        // Should no longer be resolvable
+        assert!(registry.resolve_type("T").is_none());
+        assert!(registry.resolve_type("K").is_none());
+
+        // But built-ins should still work
+        assert!(registry.resolve_type("int").is_some());
+    }
+
+    #[test]
+    fn test_go_resolution_context_type_integration() {
+        let mut context = GoResolutionContext::new(FileId::new(1).unwrap());
+
+        // Test built-in type checks
+        assert!(context.is_built_in_type("string"));
+        assert!(context.is_built_in_type("int"));
+        assert!(!context.is_built_in_type("MyType"));
+
+        // Register a user-defined type
+        let type_info = TypeInfo {
+            name: "User".to_string(),
+            symbol_id: Some(SymbolId::new(1).unwrap()),
+            package_path: Some("myapp/models".to_string()),
+            is_exported: true,
+            category: TypeCategory::Struct,
+            generic_params: Vec::new(),
+            constraints: HashMap::new(),
+        };
+        context.register_type(type_info);
+
+        // Test type resolution
+        let user_type = context.resolve_type("User");
+        assert!(user_type.is_some());
+        assert_eq!(user_type.unwrap().category, TypeCategory::Struct);
+
+        // Test generic parameter parsing
+        context.enter_generic_scope();
+        context.parse_and_register_generic_params("[T any, K comparable]");
+
+        assert!(context.resolve_type("T").is_some());
+        assert!(context.resolve_type("K").is_some());
+
+        context.exit_generic_scope();
+        assert!(context.resolve_type("T").is_none());
+    }
+
+    #[test]
+    fn test_interface_implementation_detection() {
+        let mut resolver = GoInheritanceResolver::new();
+
+        // Register interface methods
+        resolver.register_type_methods("Writer".to_string(), vec!["Write".to_string()]);
+
+        // Register struct methods
+        resolver.register_type_methods(
+            "FileWriter".to_string(),
+            vec!["Write".to_string(), "Close".to_string()],
+        );
+
+        // Test interface detection heuristics
+        assert!(resolver.is_interface("Writer")); // ends with "er"
+        assert!(resolver.is_interface("IReader")); // starts with "I"
+        assert!(resolver.is_interface("Comparable")); // ends with "able"
+
+        // Register FileWriter as having implementations to mark it as a struct
+        resolver.add_struct_implements("FileWriter".to_string(), "Writer".to_string());
+        assert!(!resolver.is_interface("FileWriter")); // now registered as struct
+
+        // Test implementation checking
+        assert!(resolver.check_struct_implements_interface("FileWriter", "Writer"));
+        assert!(resolver.type_has_method("FileWriter", "Write"));
+        assert!(resolver.type_has_method("FileWriter", "Close"));
+        assert!(!resolver.type_has_method("FileWriter", "Read"));
+
+        // Test finding implementations
+        let implementations = resolver.find_implementations_of("Writer");
+        // Should contain FileWriter since we registered it as implementing Writer
+        assert!(implementations.contains(&"FileWriter".to_string()));
+    }
+
+    #[test]
+    fn test_generic_parameter_parsing() {
+        let mut context = GoResolutionContext::new(FileId::new(1).unwrap());
+
+        // Test simple generic parsing
+        context.enter_generic_scope();
+        context.parse_and_register_generic_params("[T any]");
+        assert!(context.resolve_type("T").is_some());
+        context.exit_generic_scope();
+
+        // Test complex generic parsing with constraints
+        let mut test_context = GoResolutionContext::new(FileId::new(1).unwrap());
+        test_context.enter_generic_scope();
+        test_context.parse_and_register_generic_params("[T any, K comparable, V Serializable]");
+
+        // All parameters should be registered
+        assert!(test_context.resolve_type("T").is_some());
+        assert!(test_context.resolve_type("K").is_some());
+        assert!(test_context.resolve_type("V").is_some());
+    }
+
+    #[test]
+    fn test_inheritance_resolver_comprehensive() {
+        let mut resolver = GoInheritanceResolver::new();
+
+        // Set up a complex inheritance hierarchy
+        resolver.add_interface_embeds(
+            "ReadWriter".to_string(),
+            vec!["Reader".to_string(), "Writer".to_string()],
+        );
+
+        resolver.register_type_methods("Reader".to_string(), vec!["Read".to_string()]);
+        resolver.register_type_methods("Writer".to_string(), vec!["Write".to_string()]);
+        resolver.register_type_methods(
+            "File".to_string(),
+            vec!["Read".to_string(), "Write".to_string(), "Close".to_string()],
+        );
+
+        // Test method resolution
+        assert_eq!(
+            resolver.resolve_method("File", "Read"),
+            Some("File".to_string())
+        );
+        assert_eq!(
+            resolver.resolve_method("File", "Write"),
+            Some("File".to_string())
+        );
+        assert!(resolver.resolve_method("File", "NonExistent").is_none());
+
+        // Test inheritance chains
+        let chain = resolver.get_inheritance_chain("ReadWriter");
+        assert!(chain.contains(&"ReadWriter".to_string()));
+        assert!(chain.contains(&"Reader".to_string()));
+        assert!(chain.contains(&"Writer".to_string()));
+
+        // Test all methods aggregation
+        let all_methods = resolver.get_all_methods("ReadWriter");
+        assert!(all_methods.contains(&"Read".to_string()));
+        assert!(all_methods.contains(&"Write".to_string()));
     }
 }

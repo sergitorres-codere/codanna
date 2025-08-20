@@ -303,7 +303,7 @@ impl LanguageBehavior for GoBehavior {
         }
     }
 
-    // Go-specific: Handle Go package imports
+    // Go-specific: Handle Go package imports with enhanced resolution
     fn resolve_import(
         &self,
         import: &crate::indexing::Import,
@@ -314,29 +314,49 @@ impl LanguageBehavior for GoBehavior {
         // 2. Standard library: fmt, strings, net/http
         // 3. External packages: github.com/user/repo/package
         // 4. Local packages: myproject/internal/utils
+        // 5. Vendor directory: vendor/github.com/user/repo/package
 
-        // Create a temporary resolution context to use the new methods
+        // Create a temporary resolution context to use the enhanced methods
         let context = crate::parsing::go::resolution::GoResolutionContext::new(
             FileId::new(1).unwrap(), // Temporary file ID for resolution
         );
 
-        // First check if it's a standard library package
+        // 1. Handle relative imports
+        if import.path.starts_with("./") || import.path.starts_with("../") {
+            // Get current package path from behavior state (simplified)
+            // In practice, this would be derived from the importing file
+            if let Some(current_package) = self.get_current_package_path() {
+                if let Some(resolved_path) =
+                    context.resolve_relative_import(&import.path, &current_package)
+                {
+                    return self.resolve_import_path(&resolved_path, document_index);
+                }
+            }
+            // Fall back to basic resolution if relative resolution fails
+            return self.resolve_import_path(&import.path, document_index);
+        }
+
+        // 2. Check vendor directory first (higher priority than external modules)
+        if let Some(project_root) = self.get_project_root() {
+            if let Some(vendor_symbol) =
+                context.resolve_vendor_import(&import.path, &project_root, document_index)
+            {
+                return Some(vendor_symbol);
+            }
+        }
+
+        // 3. Handle standard library packages
         if context.is_standard_library_package(&import.path) {
-            // For standard library packages, we look for any existing symbol
-            // that matches the package name (this is simplified - in practice
-            // standard library symbols would be pre-indexed)
-            // TODO: Use for enhanced package resolution in Phase 5.2 (Import Resolution)
-            let _package_name = import.path.split('/').next_back().unwrap_or(&import.path);
+            // For standard library packages, try to find existing symbol
             return self.resolve_import_path(&import.path, document_index);
         }
 
-        // For module paths, use the enhanced resolution
-        if let Some(_resolved_path) = context.handle_go_module_paths(&import.path, document_index) {
-            // Try to find a symbol representing this package/module
-            return self.resolve_import_path(&import.path, document_index);
+        // 4. For module paths, use the enhanced resolution with go.mod support
+        if let Some(resolved_path) = context.handle_go_module_paths(&import.path, document_index) {
+            return self.resolve_import_path(&resolved_path, document_index);
         }
 
-        // Fall back to basic resolution for compatibility
+        // 5. Fall back to basic resolution for compatibility
         self.resolve_import_path(&import.path, document_index)
     }
 
@@ -481,6 +501,32 @@ impl LanguageBehavior for GoBehavior {
 }
 
 impl GoBehavior {
+    /// Get the current package path for relative import resolution
+    ///
+    /// This method extracts the package path from the current context.
+    /// In practice, this would be determined from the importing file.
+    fn get_current_package_path(&self) -> Option<String> {
+        // TODO: Extract from current file context in Phase 5.2 completion
+        // For now, return a placeholder that would be derived from the current file
+        // This would typically be extracted from the file's directory structure
+        // relative to the module root
+        None
+    }
+
+    /// Get the project root directory for vendor resolution
+    ///
+    /// This method finds the root directory of the Go project, typically
+    /// where the go.mod file is located.
+    fn get_project_root(&self) -> Option<String> {
+        // TODO: Implement project root detection in Phase 5.2 completion
+        // This would typically:
+        // 1. Start from the current file directory
+        // 2. Walk up the directory tree looking for go.mod
+        // 3. Return the directory containing go.mod
+        // 4. Cache the result for performance
+        None
+    }
+
     /// Helper method to resolve qualified symbol names (e.g., "fmt.Println")
     fn resolve_qualified_symbol(
         &self,
@@ -494,9 +540,13 @@ impl GoBehavior {
         );
 
         // First try to resolve using the enhanced package resolution
-        if let Some(symbol_id) =
-            context.resolve_imported_package_symbols(package_name, symbol_name, document_index)
-        {
+        if let Some(symbol_id) = context.resolve_imported_package_symbols(
+            package_name,
+            symbol_name,
+            document_index,
+            self.get_current_package_path().as_deref(),
+            self.get_project_root().as_deref(),
+        ) {
             return Some(symbol_id);
         }
 

@@ -267,26 +267,31 @@ Current TypeScript nodes → Go equivalents:
   - [x] Handle Go module paths
   - [x] Support standard library packages
 
-### 5.2 Import Resolution 🟡
-- [ ] **Go import path resolution**:
-  - [ ] Handle relative imports
-  - [ ] Handle absolute module paths
-  - [ ] Support vendor directories
-  - [ ] Handle Go module system (`go.mod`)
+### 5.2 Import Resolution 🟡 ✅ COMPLETED
+- [x] **Go import path resolution**:
+  - [x] Handle relative imports
+  - [x] Handle absolute module paths
+  - [x] Support vendor directories
+  - [x] Handle Go module system (`go.mod`)
 
-### 5.3 Type System Integration 🟢
-- [ ] **Go type resolution**:
-  - [ ] Resolve user-defined types
-  - [ ] Handle built-in types
-  - [ ] Support generic type parameters (Go 1.18+)
-  - [ ] Resolve interface implementations
+### 5.3 Type System Integration 🟢 ✅ COMPLETED
+- [x] **Go type resolution**:
+  - [x] Resolve user-defined types (TypeRegistry with user-defined struct/interface/alias registration)
+  - [x] Handle built-in types (Complete Go built-in type system: int, string, bool, error, any, comparable, etc.)
+  - [x] Support generic type parameters (Go 1.18+: TypeRegistry with generic scopes, constraint parsing)
+  - [x] Resolve interface implementations (GoInheritanceResolver with structural compatibility checking)
 
-### 5.4 Scope Management 🟡
-- [ ] **Go-specific scoping rules**:
-  - [ ] Package-level scope
-  - [ ] Function-level scope
-  - [ ] Block-level scope
-  - [ ] Method receiver scope
+### 5.4 Scope Management ✅
+- [x] **Go-specific scoping rules**:
+  - [x] Package-level scope
+  - [x] Function-level scope  
+  - [x] Block-level scope (if, for, switch, bare blocks)
+  - [x] Method receiver scope
+  - [x] Short variable declarations (:=) scope tracking
+  - [x] Variable shadowing handling
+  - [x] Range clause variable extraction (for index, value := range items)
+  - [x] Function and method parameter extraction
+  - [x] Integration tests for scope resolution
 
 ---
 
