@@ -11,6 +11,7 @@ license = "Apache-2.0"
 readme = "README.md"
 keywords = ["mcp-server", "context-engineering", "agentic-coding", "code-embedding", "ai-ide"]
 categories = ["development-tools", "command-line-utilities", "parsing", "text-processing", "compilers"]
+autoexamples = false
 
 [profile.release]
 # opt-level = 3

@@ -430,99 +430,6 @@ enum RetrieveQuery {
     },
 }
 
-/// Parse key:value pairs from positional arguments with strict type validation
-///
-/// Security constraints:
-/// - Only allows: strings, unsigned integers (u64), floats (f64), and booleans
-/// - Maximum key length: 50 characters
-/// - Maximum value length: 1000 characters
-/// - No special characters in keys (alphanumeric + underscore only)
-/// - No code injection possible - values are strictly typed
-///
-/// Returns a map with parsed values, inferring types safely
-fn parse_key_value_pairs(args: &[String]) -> serde_json::Map<String, serde_json::Value> {
-    use serde_json::Value;
-
-    let mut map = serde_json::Map::with_capacity(args.len());
-
-    for arg in args {
-        // Security: Limit total argument length
-        if arg.len() > 1050 {
-            // key (50) + ':' (1) + value (1000) = 1051 max
-            eprintln!("Warning: Skipping oversized argument (max 1050 chars)");
-            continue;
-        }
-
-        // Fast path: split on first colon only
-        if let Some((key, value)) = arg.split_once(':') {
-            // Security: Validate key format (alphanumeric + underscore only)
-            if key.len() > 50 {
-                eprintln!(
-                    "Warning: Skipping argument with oversized key (max 50 chars): {}",
-                    &key[..20]
-                );
-                continue;
-            }
-
-            // Security: Only allow safe key characters
-            if !key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
-                eprintln!("Warning: Skipping argument with invalid key characters: {key}");
-                continue;
-            }
-
-            // Security: Limit value length
-            if value.len() > 1000 {
-                eprintln!("Warning: Skipping argument with oversized value (max 1000 chars)");
-                continue;
-            }
-
-            // Type inference with strict validation
-            let json_value = if value.starts_with('"') && value.ends_with('"') && value.len() > 1 {
-                // Quoted string: remove quotes and validate UTF-8
-                let unquoted = &value[1..value.len() - 1];
-                // Security: Ensure valid UTF-8 (though Rust strings already are)
-                Value::String(unquoted.to_string())
-            } else if value == "true" || value == "false" {
-                // Boolean - only exact matches allowed
-                Value::Bool(value == "true")
-            } else if let Ok(n) = value.parse::<u64>() {
-                // Unsigned integer - safe range 0 to 2^64-1
-                // Security: Number parsing is safe, Rust's parse handles overflow
-                Value::Number(n.into())
-            } else if value.contains('.') {
-                // Only try float parsing if it has a decimal point
-                if let Ok(f) = value.parse::<f64>() {
-                    // Security: Check for special float values
-                    if f.is_finite() {
-                        if let Some(num) = serde_json::Number::from_f64(f) {
-                            Value::Number(num)
-                        } else {
-                            // Should not happen with finite floats, but be safe
-                            Value::String(value.to_string())
-                        }
-                    } else {
-                        // Reject NaN, Infinity, -Infinity
-                        eprintln!("Warning: Skipping non-finite float value: {value}");
-                        continue;
-                    }
-                } else {
-                    // Not a valid float, treat as string
-                    Value::String(value.to_string())
-                }
-            } else {
-                // Default to string for everything else
-                // Security: String is safe, no evaluation happens
-                Value::String(value.to_string())
-            };
-
-            map.insert(key.to_string(), json_value);
-        }
-        // Silently skip non-key:value arguments (they might be positional)
-    }
-
-    map
-}
-
 /// Entry point with tokio async runtime.
 ///
 /// Handles config initialization, index loading/creation, and command dispatch.
@@ -1099,8 +1006,11 @@ async fn main() {
                             std::process::exit(1);
                         });
 
+                    // Extract language filter
+                    let language = params.get("lang").map(|s| s.as_str());
+
                     let format = OutputFormat::from_json_flag(json);
-                    retrieve::retrieve_symbol(&indexer, &final_name, format)
+                    retrieve::retrieve_symbol(&indexer, &final_name, language, format)
                 }
                 RetrieveQuery::Callers { args, json } => {
                     use codanna::io::args::parse_positional_args;
@@ -1118,8 +1028,11 @@ async fn main() {
                             std::process::exit(1);
                         });
 
+                    // Extract language filter
+                    let language = params.get("lang").map(|s| s.as_str());
+
                     let format = OutputFormat::from_json_flag(json);
-                    retrieve::retrieve_callers(&indexer, &final_function, format)
+                    retrieve::retrieve_callers(&indexer, &final_function, language, format)
                 }
                 RetrieveQuery::Calls { args, json } => {
                     use codanna::io::args::parse_positional_args;
@@ -1137,8 +1050,11 @@ async fn main() {
                             std::process::exit(1);
                         });
 
+                    // Extract language filter
+                    let language = params.get("lang").map(|s| s.as_str());
+
                     let format = OutputFormat::from_json_flag(json);
-                    retrieve::retrieve_calls(&indexer, &final_function, format)
+                    retrieve::retrieve_calls(&indexer, &final_function, language, format)
                 }
                 RetrieveQuery::Implementations { args, json } => {
                     use codanna::io::args::parse_positional_args;
@@ -1156,8 +1072,11 @@ async fn main() {
                             std::process::exit(1);
                         });
 
+                    // Extract language filter
+                    let language = params.get("lang").map(|s| s.as_str());
+
                     let format = OutputFormat::from_json_flag(json);
-                    retrieve::retrieve_implementations(&indexer, &final_trait, format)
+                    retrieve::retrieve_implementations(&indexer, &final_trait, language, format)
                 }
                 RetrieveQuery::Search {
                     args,
@@ -1194,6 +1113,9 @@ async fn main() {
                     let final_kind = kind.or_else(|| params.get("kind").cloned());
                     let final_module = module.or_else(|| params.get("module").cloned());
 
+                    // Extract language filter
+                    let language = params.get("lang").map(|s| s.as_str());
+
                     // Call retrieve function with merged parameters
                     let format = OutputFormat::from_json_flag(json);
                     retrieve::retrieve_search(
@@ -1202,6 +1124,7 @@ async fn main() {
                         final_limit,
                         final_kind.as_deref(),
                         final_module.as_deref(),
+                        language,
                         format,
                     )
                 }
@@ -1250,8 +1173,11 @@ async fn main() {
                             std::process::exit(1);
                         });
 
+                    // Extract language filter
+                    let language = params.get("lang").map(|s| s.as_str());
+
                     let format = OutputFormat::from_json_flag(json);
-                    retrieve::retrieve_describe(&indexer, &final_symbol, format)
+                    retrieve::retrieve_describe(&indexer, &final_symbol, language, format)
                 }
                 RetrieveQuery::Uses { symbol } => {
                     eprintln!("'retrieve uses' command not yet implemented for: {symbol}");
@@ -1295,6 +1221,8 @@ async fn main() {
             args,
             json,
         } => {
+            use codanna::io::args::parse_positional_args;
+
             // Build arguments from both positional and --args
             let mut arguments = if let Some(args_str) = &args {
                 // Parse JSON arguments if provided (backward compatibility)
@@ -1314,63 +1242,14 @@ async fn main() {
                 Some(serde_json::Map::new())
             };
 
-            // Process positional arguments
+            // Process positional arguments using unified parser
             if !positional.is_empty() {
                 if let Some(ref mut args_map) = arguments {
-                    // Smart parsing: reconstruct values that were split by shell
-                    let mut processed_args = Vec::new();
-                    let mut i = 0;
+                    // Use the unified parser from args.rs
+                    let (first_positional, params) = parse_positional_args(&positional);
 
-                    while i < positional.len() {
-                        let arg = &positional[i];
-
-                        if let Some((key, value)) = arg.split_once(':') {
-                            // This is a key:value pair
-                            if value.starts_with('"') && !value.ends_with('"') {
-                                // Opening quote but no closing quote - value was split by shell
-                                // Reconstruct the full value until we find the closing quote
-                                let mut full_value = value.to_string();
-                                i += 1;
-
-                                while i < positional.len() {
-                                    let next_part = &positional[i];
-                                    full_value.push(' ');
-                                    full_value.push_str(next_part);
-
-                                    if next_part.ends_with('"') {
-                                        // Found the closing quote
-                                        break;
-                                    }
-                                    i += 1;
-                                }
-
-                                processed_args.push(format!("{key}:{full_value}"));
-                            } else {
-                                // Complete key:value pair
-                                processed_args.push(arg.clone());
-                            }
-                        } else {
-                            // Not a key:value pair - regular positional argument
-                            processed_args.push(arg.clone());
-                        }
-                        i += 1;
-                    }
-
-                    // Now separate regular args from key:value pairs
-                    let mut regular_args = Vec::new();
-                    let mut key_value_args = Vec::new();
-
-                    for arg in &processed_args {
-                        if arg.contains(':') {
-                            key_value_args.push(arg.clone());
-                        } else {
-                            regular_args.push(arg.clone());
-                        }
-                    }
-
-                    // Handle the first regular argument as positional for simple tools
-                    if !regular_args.is_empty() {
-                        let pos_arg = &regular_args[0];
+                    // Handle the first positional argument based on tool type
+                    if let Some(pos_arg) = first_positional {
                         match tool.as_str() {
                             "find_symbol" => {
                                 args_map.insert(
@@ -1403,29 +1282,29 @@ async fn main() {
                                 );
                             }
                             _ => {
-                                if regular_args.len() > 1 || !key_value_args.is_empty() {
-                                    eprintln!(
-                                        "Warning: Unknown tool '{tool}', treating as key:value args"
-                                    );
-                                }
+                                eprintln!(
+                                    "Warning: Unknown tool '{tool}', ignoring positional argument"
+                                );
                             }
-                        }
-
-                        // Warn if there are extra regular arguments
-                        if regular_args.len() > 1 {
-                            eprintln!(
-                                "Warning: Ignoring extra positional arguments after the first one"
-                            );
                         }
                     }
 
-                    // Parse and merge key:value pairs
-                    if !key_value_args.is_empty() {
-                        let parsed = parse_key_value_pairs(&key_value_args);
-                        // Merge parsed arguments (they override previous values)
-                        for (key, value) in parsed {
-                            args_map.insert(key, value);
-                        }
+                    // Add all key:value pairs from params
+                    for (key, value) in params {
+                        // Try to parse as number first, then boolean, fallback to string
+                        let json_value = if let Ok(n) = value.parse::<i64>() {
+                            serde_json::Value::Number(n.into())
+                        } else if let Ok(f) = value.parse::<f64>() {
+                            serde_json::Value::Number(
+                                serde_json::Number::from_f64(f)
+                                    .unwrap_or_else(|| serde_json::Number::from(0)),
+                            )
+                        } else if let Ok(b) = value.parse::<bool>() {
+                            serde_json::Value::Bool(b)
+                        } else {
+                            serde_json::Value::String(value)
+                        };
+                        args_map.insert(key, json_value);
                     }
                 }
             }
@@ -1439,9 +1318,13 @@ async fn main() {
                     .as_ref()
                     .and_then(|m| m.get("name"))
                     .and_then(|v| v.as_str());
+                let language = arguments
+                    .as_ref()
+                    .and_then(|m| m.get("lang"))
+                    .and_then(|v| v.as_str());
 
                 if let Some(symbol_name) = name {
-                    let symbols = indexer.find_symbols_by_name(symbol_name, None);
+                    let symbols = indexer.find_symbols_by_name(symbol_name, language);
                     if !symbols.is_empty() {
                         use codanna::symbol::context::ContextIncludes;
                         let mut results = Vec::new();
@@ -1488,10 +1371,14 @@ async fn main() {
                     .as_ref()
                     .and_then(|m| m.get("function_name"))
                     .and_then(|v| v.as_str());
+                let language = arguments
+                    .as_ref()
+                    .and_then(|m| m.get("lang"))
+                    .and_then(|v| v.as_str());
 
                 if let Some(func_name) = function_name {
                     // Find the function first
-                    let symbols = indexer.find_symbols_by_name(func_name, None);
+                    let symbols = indexer.find_symbols_by_name(func_name, language);
                     if let Some(symbol) = symbols.into_iter().find(|s| {
                         matches!(
                             s.kind,
@@ -1528,10 +1415,14 @@ async fn main() {
                     .as_ref()
                     .and_then(|m| m.get("function_name"))
                     .and_then(|v| v.as_str());
+                let language = arguments
+                    .as_ref()
+                    .and_then(|m| m.get("lang"))
+                    .and_then(|v| v.as_str());
 
                 if let Some(func_name) = function_name {
                     // Find all functions with this name
-                    let symbols = indexer.find_symbols_by_name(func_name, None);
+                    let symbols = indexer.find_symbols_by_name(func_name, language);
                     if !symbols.is_empty() {
                         let mut all_callers = Vec::new();
 
@@ -1558,10 +1449,14 @@ async fn main() {
                     .as_ref()
                     .and_then(|m| m.get("symbol_name"))
                     .and_then(|v| v.as_str());
+                let language = arguments
+                    .as_ref()
+                    .and_then(|m| m.get("lang"))
+                    .and_then(|v| v.as_str());
 
                 if let Some(sym_name) = symbol_name {
                     // Find the symbol first
-                    let symbols = indexer.find_symbols_by_name(sym_name, None);
+                    let symbols = indexer.find_symbols_by_name(sym_name, language);
                     if let Some(symbol) = symbols.first() {
                         let max_depth = arguments
                             .as_ref()
@@ -1613,6 +1508,10 @@ async fn main() {
                         .as_ref()
                         .and_then(|m| m.get("module"))
                         .and_then(|v| v.as_str());
+                    let language = arguments
+                        .as_ref()
+                        .and_then(|m| m.get("lang"))
+                        .and_then(|v| v.as_str());
 
                     // Parse the kind filter if provided
                     let kind_filter = kind.as_ref().and_then(|k| match k.to_lowercase().as_str() {
@@ -1626,7 +1525,7 @@ async fn main() {
                         _ => None,
                     });
 
-                    match indexer.search(q, limit, kind_filter, module, None) {
+                    match indexer.search(q, limit, kind_filter, module, language) {
                         Ok(results) => Some(results),
                         Err(_) => Some(Vec::new()),
                     }
@@ -1674,10 +1573,16 @@ async fn main() {
                             .and_then(|m| m.get("threshold"))
                             .and_then(|v| v.as_f64())
                             .map(|t| t as f32);
+                        let language = arguments
+                            .as_ref()
+                            .and_then(|m| m.get("lang"))
+                            .and_then(|v| v.as_str());
 
                         let results = match threshold {
-                            Some(t) => indexer.semantic_search_docs_with_threshold(q, limit, t),
-                            None => indexer.semantic_search_docs(q, limit),
+                            Some(t) => indexer.semantic_search_docs_with_threshold_and_language(
+                                q, limit, t, language,
+                            ),
+                            None => indexer.semantic_search_docs_with_language(q, limit, language),
                         };
 
                         match results {
@@ -1721,10 +1626,16 @@ async fn main() {
                             .and_then(|m| m.get("threshold"))
                             .and_then(|v| v.as_f64())
                             .map(|t| t as f32);
+                        let language = arguments
+                            .as_ref()
+                            .and_then(|m| m.get("lang"))
+                            .and_then(|v| v.as_str());
 
                         let search_results = match threshold {
-                            Some(t) => indexer.semantic_search_docs_with_threshold(q, limit, t),
-                            None => indexer.semantic_search_docs(q, limit),
+                            Some(t) => indexer.semantic_search_docs_with_threshold_and_language(
+                                q, limit, t, language,
+                            ),
+                            None => indexer.semantic_search_docs_with_language(q, limit, language),
                         };
 
                         match search_results {
@@ -1835,9 +1746,15 @@ async fn main() {
                             eprintln!("Error: find_symbol requires 'name' parameter");
                             std::process::exit(1);
                         });
+                    let lang = arguments
+                        .as_ref()
+                        .and_then(|m| m.get("lang"))
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
                     server
                         .find_symbol(Parameters(FindSymbolRequest {
                             name: name.to_string(),
+                            lang,
                         }))
                         .await
                 }
@@ -1917,12 +1834,18 @@ async fn main() {
                         .and_then(|m| m.get("module"))
                         .and_then(|v| v.as_str())
                         .map(|s| s.to_string());
+                    let lang = arguments
+                        .as_ref()
+                        .and_then(|m| m.get("lang"))
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
                     server
                         .search_symbols(Parameters(SearchSymbolsRequest {
                             query: query.to_string(),
                             limit,
                             kind,
                             module,
+                            lang,
                         }))
                         .await
                 }
@@ -1945,11 +1868,17 @@ async fn main() {
                         .and_then(|m| m.get("threshold"))
                         .and_then(|v| v.as_f64())
                         .map(|v| v as f32);
+                    let lang = arguments
+                        .as_ref()
+                        .and_then(|m| m.get("lang"))
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
                     server
                         .semantic_search_docs(Parameters(SemanticSearchRequest {
                             query: query.to_string(),
                             limit,
                             threshold,
+                            lang,
                         }))
                         .await
                 }
@@ -1974,12 +1903,18 @@ async fn main() {
                         .and_then(|m| m.get("threshold"))
                         .and_then(|v| v.as_f64())
                         .map(|v| v as f32);
+                    let lang = arguments
+                        .as_ref()
+                        .and_then(|m| m.get("lang"))
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
                     server
                         .semantic_search_with_context(Parameters(
                             SemanticSearchWithContextRequest {
                                 query: query.to_string(),
                                 limit,
                                 threshold,
+                                lang,
                             },
                         ))
                         .await

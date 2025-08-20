@@ -1099,6 +1099,42 @@ impl DocumentIndex {
         }
     }
 
+    /// Find a symbol by its ID with language filter
+    pub fn find_symbol_by_id_with_language(
+        &self,
+        id: SymbolId,
+        language: &str,
+    ) -> StorageResult<Option<crate::Symbol>> {
+        let searcher = self.reader.searcher();
+
+        // Build a compound query: symbol_id AND language
+        let query = BooleanQuery::from(vec![
+            (
+                Occur::Must,
+                Box::new(TermQuery::new(
+                    Term::from_field_u64(self.schema.symbol_id, id.0 as u64),
+                    IndexRecordOption::Basic,
+                )) as Box<dyn Query>,
+            ),
+            (
+                Occur::Must,
+                Box::new(TermQuery::new(
+                    Term::from_field_text(self.schema.language, language),
+                    IndexRecordOption::Basic,
+                )) as Box<dyn Query>,
+            ),
+        ]);
+
+        let top_docs = searcher.search(&query, &TopDocs::with_limit(1))?;
+
+        if let Some((_score, doc_address)) = top_docs.first() {
+            let doc = searcher.doc::<Document>(*doc_address)?;
+            Ok(Some(self.document_to_symbol(&doc)?))
+        } else {
+            Ok(None)
+        }
+    }
+
     /// Find symbols by name
     pub fn find_symbols_by_name(
         &self,

@@ -1740,23 +1740,60 @@ impl SimpleIndexer {
         query: &str,
         limit: usize,
     ) -> IndexResult<Vec<(Symbol, f32)>> {
+        self.semantic_search_docs_with_language(query, limit, None)
+    }
+
+    /// Search documentation using natural language query with optional language filter
+    /// Returns symbols with their similarity scores, sorted by relevance
+    pub fn semantic_search_docs_with_language(
+        &self,
+        query: &str,
+        limit: usize,
+        language_filter: Option<&str>,
+    ) -> IndexResult<Vec<(Symbol, f32)>> {
         let semantic = self.semantic_search.as_ref().ok_or_else(|| {
             IndexError::General(
                 "Semantic search is not enabled. Call enable_semantic_search() first.".to_string(),
             )
         })?;
 
+        // When filtering by language, we need to fetch more results
+        // because some will be filtered out. Fetch 3x to be safe.
+        let fetch_limit = if language_filter.is_some() {
+            limit * 3
+        } else {
+            limit
+        };
+
         let results = semantic
             .lock()
             .unwrap()
-            .search(query, limit)
+            .search(query, fetch_limit)
             .map_err(|e| IndexError::General(format!("Semantic search failed: {e}")))?;
 
-        // Convert SymbolIds to Symbols
-        let mut symbol_results = Vec::with_capacity(results.len());
+        // Convert SymbolIds to Symbols and filter by language using Tantivy
+        let mut symbol_results = Vec::with_capacity(limit);
         for (symbol_id, score) in results {
-            if let Some(symbol) = self.get_symbol(symbol_id) {
-                symbol_results.push((symbol, score));
+            // Use Tantivy to check if symbol matches language filter
+            if let Some(lang_filter) = language_filter {
+                // Query Tantivy with both symbol_id AND language filter
+                if let Ok(Some(symbol)) = self
+                    .document_index
+                    .find_symbol_by_id_with_language(symbol_id, lang_filter)
+                {
+                    symbol_results.push((symbol, score));
+                    if symbol_results.len() >= limit {
+                        break;
+                    }
+                }
+            } else {
+                // No language filter, just get the symbol
+                if let Some(symbol) = self.get_symbol(symbol_id) {
+                    symbol_results.push((symbol, score));
+                    if symbol_results.len() >= limit {
+                        break;
+                    }
+                }
             }
         }
 
@@ -1770,23 +1807,60 @@ impl SimpleIndexer {
         limit: usize,
         threshold: f32,
     ) -> IndexResult<Vec<(Symbol, f32)>> {
+        self.semantic_search_docs_with_threshold_and_language(query, limit, threshold, None)
+    }
+
+    /// Search documentation with similarity threshold and optional language filter
+    pub fn semantic_search_docs_with_threshold_and_language(
+        &self,
+        query: &str,
+        limit: usize,
+        threshold: f32,
+        language_filter: Option<&str>,
+    ) -> IndexResult<Vec<(Symbol, f32)>> {
         let semantic = self.semantic_search.as_ref().ok_or_else(|| {
             IndexError::General(
                 "Semantic search is not enabled. Call enable_semantic_search() first.".to_string(),
             )
         })?;
 
+        // When filtering by language, we need to fetch more results
+        // because some will be filtered out. Fetch 3x to be safe.
+        let fetch_limit = if language_filter.is_some() {
+            limit * 3
+        } else {
+            limit
+        };
+
         let results = semantic
             .lock()
             .unwrap()
-            .search_with_threshold(query, limit, threshold)
+            .search_with_threshold(query, fetch_limit, threshold)
             .map_err(|e| IndexError::General(format!("Semantic search failed: {e}")))?;
 
-        // Convert SymbolIds to Symbols
-        let mut symbol_results = Vec::with_capacity(results.len());
+        // Convert SymbolIds to Symbols and filter by language using Tantivy
+        let mut symbol_results = Vec::with_capacity(limit);
         for (symbol_id, score) in results {
-            if let Some(symbol) = self.get_symbol(symbol_id) {
-                symbol_results.push((symbol, score));
+            // Use Tantivy to check if symbol matches language filter
+            if let Some(lang_filter) = language_filter {
+                // Query Tantivy with both symbol_id AND language filter
+                if let Ok(Some(symbol)) = self
+                    .document_index
+                    .find_symbol_by_id_with_language(symbol_id, lang_filter)
+                {
+                    symbol_results.push((symbol, score));
+                    if symbol_results.len() >= limit {
+                        break;
+                    }
+                }
+            } else {
+                // No language filter, just get the symbol
+                if let Some(symbol) = self.get_symbol(symbol_id) {
+                    symbol_results.push((symbol, score));
+                    if symbol_results.len() >= limit {
+                        break;
+                    }
+                }
             }
         }
 

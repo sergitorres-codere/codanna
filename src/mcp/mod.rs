@@ -73,6 +73,9 @@ pub fn format_relative_time(timestamp: u64) -> String {
 pub struct FindSymbolRequest {
     /// Name of the symbol to find
     pub name: String,
+    /// Filter by programming language (e.g., "rust", "python", "typescript", "php")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lang: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
@@ -109,6 +112,9 @@ pub struct SearchSymbolsRequest {
     /// Filter by module path
     #[serde(skip_serializing_if = "Option::is_none")]
     pub module: Option<String>,
+    /// Filter by programming language (e.g., "rust", "python", "typescript", "php")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lang: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
@@ -121,6 +127,9 @@ pub struct SemanticSearchRequest {
     /// Minimum similarity score (0-1)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub threshold: Option<f32>,
+    /// Filter by programming language (e.g., "rust", "python", "typescript", "php")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lang: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
@@ -133,6 +142,9 @@ pub struct SemanticSearchWithContextRequest {
     /// Minimum similarity score (0-1)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub threshold: Option<f32>,
+    /// Filter by programming language (e.g., "rust", "python", "typescript", "php")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lang: Option<String>,
 }
 
 fn default_depth() -> usize {
@@ -242,12 +254,12 @@ impl CodeIntelligenceServer {
     #[tool(description = "Find a symbol by name in the indexed codebase")]
     pub async fn find_symbol(
         &self,
-        Parameters(FindSymbolRequest { name }): Parameters<FindSymbolRequest>,
+        Parameters(FindSymbolRequest { name, lang }): Parameters<FindSymbolRequest>,
     ) -> Result<CallToolResult, McpError> {
         use crate::symbol::context::ContextIncludes;
 
         let indexer = self.indexer.read().await;
-        let symbols = indexer.find_symbols_by_name(&name, None);
+        let symbols = indexer.find_symbols_by_name(&name, lang.as_deref());
 
         if symbols.is_empty() {
             return Ok(CallToolResult::success(vec![Content::text(format!(
@@ -678,6 +690,7 @@ impl CodeIntelligenceServer {
             query,
             limit,
             threshold,
+            lang,
         }): Parameters<SemanticSearchRequest>,
     ) -> Result<CallToolResult, McpError> {
         let indexer = self.indexer.read().await;
@@ -689,8 +702,13 @@ impl CodeIntelligenceServer {
         }
 
         let results = match threshold {
-            Some(t) => indexer.semantic_search_docs_with_threshold(&query, limit, t),
-            None => indexer.semantic_search_docs(&query, limit),
+            Some(t) => indexer.semantic_search_docs_with_threshold_and_language(
+                &query,
+                limit,
+                t,
+                lang.as_deref(),
+            ),
+            None => indexer.semantic_search_docs_with_language(&query, limit, lang.as_deref()),
         };
 
         match results {
@@ -760,6 +778,7 @@ impl CodeIntelligenceServer {
             query,
             limit,
             threshold,
+            lang,
         }): Parameters<SemanticSearchWithContextRequest>,
     ) -> Result<CallToolResult, McpError> {
         let indexer = self.indexer.read().await;
@@ -772,8 +791,13 @@ impl CodeIntelligenceServer {
 
         // First, perform semantic search
         let search_results = match threshold {
-            Some(t) => indexer.semantic_search_docs_with_threshold(&query, limit, t),
-            None => indexer.semantic_search_docs(&query, limit),
+            Some(t) => indexer.semantic_search_docs_with_threshold_and_language(
+                &query,
+                limit,
+                t,
+                lang.as_deref(),
+            ),
+            None => indexer.semantic_search_docs_with_language(&query, limit, lang.as_deref()),
         };
 
         match search_results {
@@ -1047,6 +1071,7 @@ impl CodeIntelligenceServer {
             limit,
             kind,
             module,
+            lang,
         }): Parameters<SearchSymbolsRequest>,
     ) -> Result<CallToolResult, McpError> {
         let indexer = self.indexer.read().await;
@@ -1063,7 +1088,13 @@ impl CodeIntelligenceServer {
             _ => None,
         });
 
-        match indexer.search(&query, limit, kind_filter, module.as_deref(), None) {
+        match indexer.search(
+            &query,
+            limit,
+            kind_filter,
+            module.as_deref(),
+            lang.as_deref(),
+        ) {
             Ok(results) => {
                 if results.is_empty() {
                     return Ok(CallToolResult::success(vec![Content::text(format!(

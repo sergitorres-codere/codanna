@@ -9,9 +9,14 @@ use crate::{SimpleIndexer, Symbol};
 use std::borrow::Cow;
 
 /// Execute retrieve symbol command
-pub fn retrieve_symbol(indexer: &SimpleIndexer, name: &str, format: OutputFormat) -> ExitCode {
+pub fn retrieve_symbol(
+    indexer: &SimpleIndexer,
+    name: &str,
+    language: Option<&str>,
+    format: OutputFormat,
+) -> ExitCode {
     let mut output = OutputManager::new(format);
-    let symbols = indexer.find_symbols_by_name(name, None);
+    let symbols = indexer.find_symbols_by_name(name, language);
 
     if symbols.is_empty() {
         // Build not found output
@@ -76,9 +81,14 @@ pub fn retrieve_symbol(indexer: &SimpleIndexer, name: &str, format: OutputFormat
 }
 
 /// Execute retrieve callers command
-pub fn retrieve_callers(indexer: &SimpleIndexer, function: &str, format: OutputFormat) -> ExitCode {
+pub fn retrieve_callers(
+    indexer: &SimpleIndexer,
+    function: &str,
+    language: Option<&str>,
+    format: OutputFormat,
+) -> ExitCode {
     let mut output = OutputManager::new(format);
-    let symbols = indexer.find_symbols_by_name(function, None);
+    let symbols = indexer.find_symbols_by_name(function, language);
 
     if symbols.is_empty() {
         let unified = UnifiedOutput {
@@ -154,9 +164,14 @@ pub fn retrieve_callers(indexer: &SimpleIndexer, function: &str, format: OutputF
 }
 
 /// Execute retrieve calls command
-pub fn retrieve_calls(indexer: &SimpleIndexer, function: &str, format: OutputFormat) -> ExitCode {
+pub fn retrieve_calls(
+    indexer: &SimpleIndexer,
+    function: &str,
+    language: Option<&str>,
+    format: OutputFormat,
+) -> ExitCode {
     let mut output = OutputManager::new(format);
-    let symbols = indexer.find_symbols_by_name(function, None);
+    let symbols = indexer.find_symbols_by_name(function, language);
 
     if symbols.is_empty() {
         let unified = UnifiedOutput {
@@ -235,12 +250,13 @@ pub fn retrieve_calls(indexer: &SimpleIndexer, function: &str, format: OutputFor
 pub fn retrieve_implementations(
     indexer: &SimpleIndexer,
     trait_name: &str,
+    language: Option<&str>,
     format: OutputFormat,
 ) -> ExitCode {
     let mut output = OutputManager::new(format);
 
     // Find the trait symbol first
-    let trait_symbols = indexer.find_symbols_by_name(trait_name, None);
+    let trait_symbols = indexer.find_symbols_by_name(trait_name, language);
     let implementations = if let Some(trait_symbol) = trait_symbols.first() {
         indexer.get_implementations(trait_symbol.id)
     } else {
@@ -288,6 +304,7 @@ pub fn retrieve_search(
     limit: usize,
     kind: Option<&str>,
     module: Option<&str>,
+    language: Option<&str>,
     format: OutputFormat,
 ) -> ExitCode {
     let mut output = OutputManager::new(format);
@@ -313,7 +330,7 @@ pub fn retrieve_search(
     });
 
     let search_results = indexer
-        .search(query, limit, kind_filter, module, None)
+        .search(query, limit, kind_filter, module, language)
         .unwrap_or_default();
 
     let results_with_path: Vec<SymbolContext> = search_results
@@ -442,10 +459,11 @@ pub fn retrieve_impact(
 pub fn retrieve_describe(
     indexer: &SimpleIndexer,
     symbol_name: &str,
+    language: Option<&str>,
     format: OutputFormat,
 ) -> ExitCode {
     let mut output = OutputManager::new(format);
-    let symbols = indexer.find_symbols_by_name(symbol_name, None);
+    let symbols = indexer.find_symbols_by_name(symbol_name, language);
 
     if symbols.is_empty() {
         let unified = UnifiedOutput {
