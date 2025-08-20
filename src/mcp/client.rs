@@ -51,14 +51,12 @@ impl CodeIntelligenceClient {
             .await?;
 
         println!("Result:");
-        if let Some(content_vec) = &result.content {
-            for annotated_content in content_vec {
-                match &**annotated_content {
-                    rmcp::model::RawContent::Text(text) => {
-                        println!("{}", text.text);
-                    }
-                    _ => println!("(Non-text content)"),
+        for annotated_content in &result.content {
+            match &**annotated_content {
+                rmcp::model::RawContent::Text(text) => {
+                    println!("{}", text.text);
                 }
+                _ => println!("(Non-text content)"),
             }
         }
 

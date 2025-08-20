@@ -2390,15 +2390,13 @@ async fn main() {
                         }
                     } else {
                         // Default text output
-                        if let Some(content_vec) = &call_result.content {
-                            for content in content_vec {
-                                match &**content {
-                                    rmcp::model::RawContent::Text(text_content) => {
-                                        println!("{}", text_content.text);
-                                    }
-                                    _ => {
-                                        eprintln!("Warning: Non-text content returned");
-                                    }
+                        for content in &call_result.content {
+                            match &**content {
+                                rmcp::model::RawContent::Text(text_content) => {
+                                    println!("{}", text_content.text);
+                                }
+                                _ => {
+                                    eprintln!("Warning: Non-text content returned");
                                 }
                             }
                         }
