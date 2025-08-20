@@ -2462,7 +2462,25 @@ impl SimpleIndexer {
             &cache_path,
             all_symbols.iter(),
         )
-        .map_err(|e| IndexError::General(format!("Failed to build symbol cache: {e}")))?;
+        .map_err(|e| {
+            // Check for Windows file locking error
+            let error_msg = if cfg!(windows) && e.to_string().contains("os error 1224") {
+                format!(
+                    "Failed to build symbol cache: {e}\n\n\
+                    Windows file locking detected. The cache file is currently in use.\n\
+                    To fix this issue:\n\
+                    1. Stop all running codanna processes\n\
+                    2. Delete the cache file: {}\n\
+                    3. Re-run the index command with --force flag\n\
+                    \n\
+                    Example: codanna index src --force",
+                    cache_path.display()
+                )
+            } else {
+                format!("Failed to build symbol cache: {e}")
+            };
+            IndexError::General(error_msg)
+        })?;
 
         // Load the cache for immediate use
         self.load_symbol_cache()?;
