@@ -42,6 +42,9 @@ pub struct SimpleSemanticSearch {
     /// Embeddings indexed by symbol ID
     embeddings: HashMap<SymbolId, Vec<f32>>,
 
+    /// Language mapping for each symbol (for language-filtered search)
+    symbol_languages: HashMap<SymbolId, String>,
+
     /// The embedding model (wrapped in Mutex for interior mutability)
     model: Mutex<TextEmbedding>,
 
@@ -85,6 +88,7 @@ impl SimpleSemanticSearch {
 
         Ok(Self {
             embeddings: HashMap::new(),
+            symbol_languages: HashMap::new(),
             model: Mutex::new(text_model),
             dimensions,
             metadata: None,
@@ -122,6 +126,25 @@ impl SimpleSemanticSearch {
         }
 
         self.embeddings.insert(symbol_id, embedding);
+        Ok(())
+    }
+
+    /// Index a documentation comment for a symbol with language information
+    pub fn index_doc_comment_with_language(
+        &mut self,
+        symbol_id: SymbolId,
+        doc: &str,
+        language: &str,
+    ) -> Result<(), SemanticSearchError> {
+        // First index the doc comment normally
+        self.index_doc_comment(symbol_id, doc)?;
+
+        // Then store the language mapping
+        if self.embeddings.contains_key(&symbol_id) {
+            self.symbol_languages
+                .insert(symbol_id, language.to_string());
+        }
+
         Ok(())
     }
 
@@ -164,6 +187,61 @@ impl SimpleSemanticSearch {
         Ok(similarities)
     }
 
+    /// Search for similar documentation with language filtering
+    ///
+    /// This filters BEFORE computing similarity, ensuring we only compute
+    /// similarity for symbols in the requested language.
+    pub fn search_with_language(
+        &self,
+        query: &str,
+        limit: usize,
+        language: Option<&str>,
+    ) -> Result<Vec<(SymbolId, f32)>, SemanticSearchError> {
+        if self.embeddings.is_empty() {
+            return Err(SemanticSearchError::NoEmbeddings);
+        }
+
+        // Generate query embedding
+        let query_embeddings = self
+            .model
+            .lock()
+            .unwrap()
+            .embed(vec![query], None)
+            .map_err(|e| SemanticSearchError::EmbeddingError(e.to_string()))?;
+        let query_embedding = query_embeddings.into_iter().next().unwrap();
+
+        // Filter embeddings by language BEFORE computing similarity
+        let filtered_embeddings: Vec<(&SymbolId, &Vec<f32>)> = if let Some(lang) = language {
+            self.embeddings
+                .iter()
+                .filter(|(id, _)| {
+                    self.symbol_languages
+                        .get(id)
+                        .map(|l| l == lang)
+                        .unwrap_or(false)
+                })
+                .collect()
+        } else {
+            self.embeddings.iter().collect()
+        };
+
+        // Calculate similarities only for filtered embeddings
+        let mut similarities: Vec<(SymbolId, f32)> = filtered_embeddings
+            .into_iter()
+            .map(|(id, embedding)| {
+                let similarity = cosine_similarity(&query_embedding, embedding);
+                (*id, similarity)
+            })
+            .collect();
+
+        // Sort by similarity descending
+        similarities.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+
+        // Return top results
+        similarities.truncate(limit);
+        Ok(similarities)
+    }
+
     /// Search with a similarity threshold
     pub fn search_with_threshold(
         &self,
@@ -186,6 +264,7 @@ impl SimpleSemanticSearch {
     /// Clear all embeddings
     pub fn clear(&mut self) {
         self.embeddings.clear();
+        self.symbol_languages.clear();
     }
 
     /// Remove embeddings for specific symbols
@@ -195,6 +274,7 @@ impl SimpleSemanticSearch {
     pub fn remove_embeddings(&mut self, symbol_ids: &[SymbolId]) {
         for id in symbol_ids {
             self.embeddings.remove(id);
+            self.symbol_languages.remove(id);
         }
     }
 
@@ -244,6 +324,26 @@ impl SimpleSemanticSearch {
 
         // Save all embeddings
         storage.save_batch(&embeddings)?;
+
+        // Save language mappings as a JSON file (convert SymbolId to u32 for serialization)
+        let languages_path = path.join("languages.json");
+        let languages_map: HashMap<u32, String> = self
+            .symbol_languages
+            .iter()
+            .map(|(id, lang)| (id.to_u32(), lang.clone()))
+            .collect();
+        let languages_json = serde_json::to_string(&languages_map).map_err(|e| {
+            SemanticSearchError::StorageError {
+                message: format!("Failed to serialize language mappings: {e}"),
+                suggestion: "This is likely a bug in the code".to_string(),
+            }
+        })?;
+        std::fs::write(&languages_path, languages_json).map_err(|e| {
+            SemanticSearchError::StorageError {
+                message: format!("Failed to write language mappings: {e}"),
+                suggestion: "Check disk space and file permissions".to_string(),
+            }
+        })?;
 
         Ok(())
     }
@@ -303,8 +403,32 @@ impl SimpleSemanticSearch {
         )
         .map_err(|e| SemanticSearchError::ModelInitError(e.to_string()))?;
 
+        // Load language mappings if they exist
+        let languages_path = path.join("languages.json");
+        let symbol_languages = if languages_path.exists() {
+            let languages_json = std::fs::read_to_string(&languages_path).map_err(|e| {
+                SemanticSearchError::StorageError {
+                    message: format!("Failed to read language mappings: {e}"),
+                    suggestion: "Language mappings file may be corrupted".to_string(),
+                }
+            })?;
+            let languages_map: HashMap<u32, String> = serde_json::from_str(&languages_json)
+                .map_err(|e| SemanticSearchError::StorageError {
+                    message: format!("Failed to parse language mappings: {e}"),
+                    suggestion: "Try rebuilding the semantic index".to_string(),
+                })?;
+            // Convert u32 keys back to SymbolId
+            languages_map
+                .into_iter()
+                .filter_map(|(id, lang)| SymbolId::new(id).map(|sid| (sid, lang)))
+                .collect()
+        } else {
+            HashMap::new()
+        };
+
         Ok(Self {
             embeddings,
+            symbol_languages,
             model: Mutex::new(model),
             dimensions: metadata.dimension,
             metadata: Some(metadata),

@@ -1752,7 +1752,23 @@ impl LanguageParser for TypeScriptParser {
 
     fn extract_doc_comment(&self, node: &Node, code: &str) -> Option<String> {
         // Look for JSDoc/TSDoc comments (/** ... */)
-        if let Some(prev) = node.prev_sibling() {
+
+        // First, check if this node is inside an export_statement
+        // If so, we need to check the export_statement's previous sibling for the comment
+        let comment_node = if let Some(parent) = node.parent() {
+            if parent.kind() == "export_statement" {
+                // For exported functions, check the export statement's previous sibling
+                parent.prev_sibling()
+            } else {
+                // For non-exported functions, check the node's previous sibling
+                node.prev_sibling()
+            }
+        } else {
+            // No parent, check the node's previous sibling
+            node.prev_sibling()
+        };
+
+        if let Some(prev) = comment_node {
             if prev.kind() == "comment" {
                 let comment = &code[prev.byte_range()];
                 if comment.starts_with("/**") {

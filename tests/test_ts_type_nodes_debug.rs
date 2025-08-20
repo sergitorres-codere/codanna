@@ -7,10 +7,20 @@ fn explore_typescript_type_nodes() {
     println!("\n=== TypeScript Type Node Exploration ===\n");
 
     let code = r#"
+/**
+ * Process user authentication and validate credentials
+ * This function handles user login
+ */
+export function authenticate_user(username: string, password: string): string {
+    return "token123";
+}
+
+/** Single line JSDoc */
 function processUser(user: User): Result<User> {
     return { success: true };
 }
 
+// Regular comment
 class UserService implements IService {
     private client: HttpClient;
 }
@@ -30,7 +40,51 @@ class UserService implements IService {
 fn explore_node(node: &tree_sitter::Node, code: &str, depth: usize) {
     let indent = "  ".repeat(depth);
 
-    // Look for type-related nodes
+    // ADD: Debug output for comments and functions
+    if node.kind() == "comment" {
+        println!(
+            "{}COMMENT NODE FOUND: {:?}",
+            indent,
+            &code[node.byte_range()].chars().take(50).collect::<String>()
+        );
+    }
+
+    if node.kind() == "function_declaration" {
+        println!("{indent}FUNCTION NODE: checking for JSDoc comment...");
+        if let Some(prev) = node.prev_sibling() {
+            println!(
+                "{}  prev_sibling kind: '{}', text: {:?}",
+                indent,
+                prev.kind(),
+                &code[prev.byte_range()].chars().take(30).collect::<String>()
+            );
+        } else {
+            println!("{indent}  NO prev_sibling found");
+        }
+    }
+
+    if node.kind() == "export_statement" {
+        println!(
+            "{}EXPORT_STATEMENT found, {} children",
+            indent,
+            node.child_count()
+        );
+        // Check children of export statement
+        for i in 0..node.child_count() {
+            if let Some(child) = node.child(i) {
+                if child.kind() == "function_declaration" {
+                    println!("{indent}  Child {i} is function_declaration");
+                    if let Some(prev) = child.prev_sibling() {
+                        println!("{}    Function's prev_sibling: {}", indent, prev.kind());
+                    } else {
+                        println!("{indent}    Function has NO prev_sibling");
+                    }
+                }
+            }
+        }
+    }
+
+    // Look for type-related nodes (ORIGINAL CODE)
     if matches!(
         node.kind(),
         "function_declaration"
