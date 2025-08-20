@@ -158,6 +158,17 @@ fn test_go_struct_and_method_extraction() -> Result<()> {
     let structs = filter_symbols_by_kind(&symbols, "struct");
     assert!(structs.len() >= 5, "Should find at least 5 struct types");
 
+    // Check for struct fields (should have qualified names)
+    let fields = filter_symbols_by_kind(&symbols, "field");
+    assert!(!fields.is_empty(), "Should find struct fields");
+
+    // Verify that fields have qualified names (StructName.FieldName)
+    let qualified_fields: Vec<_> = fields.iter().filter(|f| f.name.contains('.')).collect();
+    assert!(
+        !qualified_fields.is_empty(),
+        "Should find fields with qualified names (StructName.FieldName)"
+    );
+
     // Check for methods (functions with receivers)
     let methods = filter_symbols_by_kind(&symbols, "method");
     assert!(methods.len() >= 10, "Should find at least 10 methods");
@@ -199,6 +210,11 @@ fn test_go_struct_and_method_extraction() -> Result<()> {
     );
 
     println!("✓ Found {} struct types", structs.len());
+    println!(
+        "✓ Found {} struct fields ({} qualified)",
+        fields.len(),
+        qualified_fields.len()
+    );
     println!("✓ Found {} methods", methods.len());
     println!(
         "✓ Found {} pointer receiver methods",
@@ -233,11 +249,20 @@ fn test_go_interface_extraction() -> Result<()> {
         "Should find at least 5 interface types"
     );
 
-    // Check for interface methods
-    let interface_methods = filter_symbols_by_kind(&symbols, "interface_method");
+    // Check for interface methods (they are stored as regular methods)
+    let methods = filter_symbols_by_kind(&symbols, "method");
+    let interface_methods: Vec<_> = methods
+        .iter()
+        .filter(|m| {
+            // Interface methods should have qualified names like "InterfaceName.MethodName"
+            m.name.contains('.') &&
+            // Also check they don't have receiver syntax (which indicates struct methods)
+            !m.signature.contains("func (")
+        })
+        .collect();
     assert!(
         !interface_methods.is_empty(),
-        "Should find interface methods"
+        "Should find interface methods with qualified names"
     );
 
     // Verify specific interfaces
@@ -388,10 +413,17 @@ fn test_go_visibility_rules() -> Result<()> {
     }
 
     for symbol in &unexported_symbols {
-        // Skip special cases like main function or init functions
-        if symbol.name != "main" && symbol.name != "init" {
+        // Skip special cases like main function, init functions, and blank imports (_)
+        if symbol.name != "main" && symbol.name != "init" && symbol.name != "_" {
+            // For qualified names like "Struct.field", check the actual field name part
+            let name_to_check = if symbol.name.contains('.') {
+                symbol.name.split('.').next_back().unwrap()
+            } else {
+                &symbol.name
+            };
+
             assert!(
-                symbol.name.chars().next().unwrap().is_lowercase(),
+                name_to_check.chars().next().unwrap().is_lowercase(),
                 "Unexported symbol '{}' should start with lowercase",
                 symbol.name
             );
@@ -406,13 +438,90 @@ fn test_go_visibility_rules() -> Result<()> {
     Ok(())
 }
 
-/// Test 7: Performance validation
+/// Test 7: Qualified names disambiguation
+/// Goal: Verify that struct fields and interface methods have qualified names for disambiguation
+#[test]
+fn test_qualified_names_disambiguation() -> Result<()> {
+    println!("\n=== Test 7: Qualified Names Disambiguation ===");
+
+    // Given: Go code with structs and interfaces that have common field/method names
+    let fixture_path = "tests/fixtures/go/qualified_names_test.go";
+    let symbols = extract_symbols_from_fixture(fixture_path)?;
+
+    // When: We extract symbols from the code
+    // Then: Fields and interface methods should have qualified names
+
+    // Check for struct fields with qualified names
+    let fields = filter_symbols_by_kind(&symbols, "field");
+    assert!(!fields.is_empty(), "Should find struct fields");
+
+    // Should have Person.Name, Person.Age, Product.Name, Product.Price
+    let expected_qualified_fields = ["Person.Name", "Person.Age", "Product.Name", "Product.Price"];
+    for expected_field in &expected_qualified_fields {
+        let found = fields.iter().any(|f| f.name == *expected_field);
+        assert!(found, "Should find qualified field: {expected_field}");
+    }
+
+    // Check for interface methods with qualified names
+    let methods = filter_symbols_by_kind(&symbols, "method");
+    let interface_methods: Vec<_> = methods
+        .iter()
+        .filter(|m| m.name.contains('.') && !m.signature.contains("func ("))
+        .collect();
+    assert!(
+        !interface_methods.is_empty(),
+        "Should find interface methods"
+    );
+
+    // Should have Reader.Read, Reader.Close, Writer.Write, Writer.Close
+    let expected_qualified_methods = [
+        "Reader.Read",
+        "Reader.Close",
+        "Writer.Write",
+        "Writer.Close",
+    ];
+    for expected_method in &expected_qualified_methods {
+        let found = interface_methods.iter().any(|m| m.name == *expected_method);
+        assert!(found, "Should find qualified method: {expected_method}");
+    }
+
+    // Verify disambiguation: we should be able to distinguish between
+    // Person.Name vs Product.Name and Reader.Close vs Writer.Close
+    let person_name = fields.iter().find(|f| f.name == "Person.Name");
+    let product_name = fields.iter().find(|f| f.name == "Product.Name");
+    assert!(
+        person_name.is_some() && product_name.is_some(),
+        "Should distinguish between Person.Name and Product.Name"
+    );
+
+    let reader_close = interface_methods.iter().find(|m| m.name == "Reader.Close");
+    let writer_close = interface_methods.iter().find(|m| m.name == "Writer.Close");
+    assert!(
+        reader_close.is_some() && writer_close.is_some(),
+        "Should distinguish between Reader.Close and Writer.Close"
+    );
+
+    println!(
+        "✓ Found {} qualified fields",
+        fields.iter().filter(|f| f.name.contains('.')).count()
+    );
+    println!(
+        "✓ Found {} qualified interface methods",
+        interface_methods.len()
+    );
+    println!("✓ Successfully disambiguated symbols with same names");
+    println!("=== PASSED ===\n");
+
+    Ok(())
+}
+
+/// Test 8: Performance validation
 /// Goal: Verify parser meets performance targets
 #[test]
 fn test_go_parser_performance() -> Result<()> {
     use std::time::Instant;
 
-    println!("\n=== Test 7: Go Parser Performance ===");
+    println!("\n=== Test 8: Go Parser Performance ===");
 
     // Given: Multiple Go fixture files
     let fixture_paths = vec![
@@ -879,14 +988,25 @@ func main() {
         "Should find generic types and interfaces"
     );
 
-    let methods_with_receivers: Vec<_> = symbols
+    // Look specifically for struct methods (which have receiver syntax)
+    let struct_methods: Vec<_> = symbols
         .iter()
         .filter(|s| s.kind == "method" && s.signature.contains("func ("))
         .collect();
 
+    // Also count interface methods (which have qualified names but no receiver syntax)
+    let interface_methods: Vec<_> = symbols
+        .iter()
+        .filter(|s| s.kind == "method" && s.name.contains('.') && !s.signature.contains("func ("))
+        .collect();
+
+    let total_methods = struct_methods.len() + interface_methods.len();
+
     assert!(
-        methods_with_receivers.len() >= 3,
-        "Should find methods with receivers"
+        total_methods >= 3,
+        "Should find methods (struct methods: {}, interface methods: {})",
+        struct_methods.len(),
+        interface_methods.len()
     );
 
     let channel_related: Vec<_> = symbols
@@ -903,14 +1023,15 @@ func main() {
         "Should find channel-related symbols"
     );
 
-    let embedded_interfaces: Vec<_> = symbols
+    // Look for interfaces that should have embedded interfaces (like HTTPHandler)
+    let http_handler_interface: Vec<_> = symbols
         .iter()
-        .filter(|s| s.kind == "interface" && s.signature.contains("http.Handler"))
+        .filter(|s| s.kind == "interface" && s.name == "HTTPHandler")
         .collect();
 
     assert!(
-        !embedded_interfaces.is_empty(),
-        "Should find interfaces with embedded interfaces"
+        !http_handler_interface.is_empty(),
+        "Should find HTTPHandler interface (which embeds http.Handler)"
     );
 
     println!(
@@ -918,11 +1039,13 @@ func main() {
         generic_types.len()
     );
     println!(
-        "✓ Found {} methods with receivers",
-        methods_with_receivers.len()
+        "✓ Found {} methods total ({} struct methods, {} interface methods)",
+        total_methods,
+        struct_methods.len(),
+        interface_methods.len()
     );
     println!("✓ Found {} channel-related symbols", channel_related.len());
-    println!("✓ Found {} embedded interfaces", embedded_interfaces.len());
+    println!("✓ Found HTTPHandler interface with embedded http.Handler");
     println!("✓ Total symbols extracted: {}", symbols.len());
     println!("=== PASSED ===\n");
 

@@ -10,8 +10,8 @@ use codanna::parsing::LanguageParser;
 use codanna::parsing::go::GoParser;
 use codanna::types::{FileId, SymbolCounter};
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use std::hint::black_box;
 use std::fs;
+use std::hint::black_box;
 use std::path::PathBuf;
 
 // Performance targets and constants

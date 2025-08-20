@@ -586,7 +586,7 @@ impl GoParser {
         counter: &mut SymbolCounter,
         symbols: &mut Vec<Symbol>,
         module_path: &str,
-        _struct_name: &str, // TODO: Use for generating qualified field names (e.g., StructName.FieldName) when needed
+        struct_name: &str, // Used for generating qualified field names (e.g., StructName.FieldName)
     ) {
         // Look for field_declaration_list
         for child in struct_node.children(&mut struct_node.walk()) {
@@ -600,7 +600,7 @@ impl GoParser {
                             counter,
                             symbols,
                             module_path,
-                            _struct_name,
+                            struct_name,
                         );
                     }
                 }
@@ -617,7 +617,7 @@ impl GoParser {
         counter: &mut SymbolCounter,
         symbols: &mut Vec<Symbol>,
         module_path: &str,
-        _struct_name: &str, // TODO: Use for generating qualified field names (e.g., StructName.FieldName) when needed
+        struct_name: &str, // Used for generating qualified field names (e.g., StructName.FieldName)
     ) {
         // field_declaration may have multiple field names for the same type
         // e.g., "Width, Height float64"
@@ -645,9 +645,12 @@ impl GoParser {
                 None => field_name.to_string(),
             };
 
+            // Generate qualified field name for better disambiguation
+            let qualified_name = format!("{struct_name}.{field_name}");
+
             let symbol = self.create_symbol(
                 counter.next_id(),
-                field_name.to_string(),
+                qualified_name,
                 SymbolKind::Field,
                 file_id,
                 Range::new(
@@ -674,7 +677,7 @@ impl GoParser {
         counter: &mut SymbolCounter,
         symbols: &mut Vec<Symbol>,
         module_path: &str,
-        _interface_name: &str, // TODO: Use for generating qualified method names for interface methods
+        interface_name: &str, // Used for generating qualified method names for interface methods
     ) {
         // Look for method_elem nodes
         for child in interface_node.children(&mut interface_node.walk()) {
@@ -686,7 +689,7 @@ impl GoParser {
                     counter,
                     symbols,
                     module_path,
-                    _interface_name,
+                    interface_name,
                 );
             }
         }
@@ -701,7 +704,7 @@ impl GoParser {
         counter: &mut SymbolCounter,
         symbols: &mut Vec<Symbol>,
         module_path: &str,
-        _interface_name: &str, // TODO: Use for generating qualified method names for interface methods
+        interface_name: &str, // Used for generating qualified method names for interface methods
     ) {
         let method_name = method_node
             .children(&mut method_node.walk())
@@ -712,9 +715,12 @@ impl GoParser {
             let signature = &code[method_node.byte_range()];
             let visibility = self.determine_go_visibility(name);
 
+            // Generate qualified method name for better disambiguation
+            let qualified_name = format!("{interface_name}.{name}");
+
             let symbol = self.create_symbol(
                 counter.next_id(),
-                name.to_string(),
+                qualified_name,
                 SymbolKind::Method,
                 file_id,
                 Range::new(
@@ -1490,15 +1496,32 @@ impl GoParser {
 
             // Go function calls - look for calls to generic functions
             "call_expression" => {
-                // TODO: Use for tracking generic function calls once Phase 5.3 (Type System Integration) is complete
-                // Get the function being called for context
-                let _func_name = node
-                    .child_by_field_name("function")
-                    .map(|n| &code[n.byte_range()])
-                    .unwrap_or("anonymous");
+                // Track generic function calls with type arguments
+                if let Some(function_node) = node.child_by_field_name("function") {
+                    let func_name = &code[function_node.byte_range()];
 
-                // For Go, we mainly track type uses in function signatures and variable declarations
-                // Function calls don't typically have explicit type arguments like in TypeScript
+                    // Look for type arguments in generic function calls
+                    // Go 1.18+ supports syntax like: MakeSlice[int](10) or MyFunc[T, U](args)
+                    for child in node.children(&mut node.walk()) {
+                        if child.kind() == "type_arguments" {
+                            // Extract each type argument
+                            for type_arg in child.children(&mut child.walk()) {
+                                if matches!(
+                                    type_arg.kind(),
+                                    "type_identifier"
+                                        | "pointer_type"
+                                        | "array_type"
+                                        | "slice_type"
+                                        | "map_type"
+                                ) {
+                                    self.extract_go_type_reference(
+                                        &type_arg, code, func_name, uses,
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             _ => {}

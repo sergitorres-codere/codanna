@@ -428,6 +428,105 @@ The Go language implementation is **fully functional** after resolving the rebas
 
 ---
 
+## Phase 9: Remaining TODOs and Enhancements
+
+### 9.1 Parser Improvements 🟢
+- [x] **Qualified symbol names generation** (Lines 589, 620, 677, 704 in `src/parsing/go/parser.rs`):
+  - [x] Generate qualified field names for struct fields (e.g., `StructName.FieldName`)
+  - [x] Generate qualified method names for interface methods
+  - Rationale: Currently field and method names are stored without their parent context, making it harder to distinguish between fields/methods with the same name in different types
+
+- [x] **Generic function call tracking** (Line 1493 in `src/parsing/go/parser.rs`):
+  - [x] Track generic function calls for type system integration (Phase 5.3 completion)
+  - [x] Extract type arguments from generic function calls
+  - Rationale: Currently commented out pending Type System Integration completion
+
+### 9.2 Resolution System Enhancements 🟡
+- [ ] **Method compatibility checking** (Line 274 in `src/parsing/go/resolution.rs`):
+  - [ ] Add actual method compatibility checking for interface implementations
+  - [ ] Implement structural type compatibility verification
+  - Rationale: Currently Go interface implementation detection relies on basic type matching without full method signature compatibility
+
+- [ ] **Same-package symbol resolution** (Line 393 in `src/parsing/go/resolution.rs`):
+  - [ ] Compare module paths for same-package symbol resolution
+  - [ ] Implement package-scoped symbol priority
+  - Rationale: Go symbols in the same package should take precedence over imported symbols
+
+- [ ] **Complete go.mod file support** (Line 662 in `src/parsing/go/resolution.rs`):
+  - [ ] Parse `go.mod` files to extract module information
+  - [ ] Implement proper Go module path resolution
+  - [ ] Support `replace` and `require` directives
+  - [ ] Handle versioned module dependencies
+  - Rationale: Currently only has placeholder implementation for go.mod parsing
+
+### 9.3 Behavior System Completion 🟡
+- [ ] **Current package path extraction** (Line 509 in `src/parsing/go/behavior.rs`):
+  - [ ] Extract current package path from file context
+  - [ ] Implement file-to-package path mapping
+  - [ ] Support both GOPATH and module-based layouts
+  - Rationale: Required for proper relative import resolution
+
+- [ ] **Project root detection** (Line 521 in `src/parsing/go/behavior.rs`):
+  - [ ] Implement project root detection by finding `go.mod` files
+  - [ ] Walk up directory tree to find project boundaries
+  - [ ] Cache results for performance
+  - Rationale: Required for vendor directory resolution and module path calculation
+
+### 9.4 Test Infrastructure Enhancements 🟢
+- [ ] **Symbol count regression testing** (Line 73 in `tests/test_go_parser_integration.rs`):
+  - [ ] Enable symbol count constants for regression testing
+  - [ ] Establish stable baseline counts for fixture files
+  - [ ] Create regression test suite for symbol count validation
+  - Rationale: Ensure parser changes don't break existing symbol extraction
+
+- [ ] **Embedded interface validation** (Line 253 in `tests/test_go_parser_integration.rs`):
+  - [ ] Complete embedded interface validation in tests
+  - [ ] Test interface embedding syntax: `interface { io.Reader; io.Writer }`
+  - [ ] Verify embedded interface method extraction
+  - Rationale: Go interface embedding is a key language feature that should be fully tested
+
+- [ ] **Performance benchmark integration** (Line 1293 in `tests/test_go_parser_integration.rs`):
+  - [ ] Use test data generation functions in performance benchmarks
+  - [ ] Create scalable performance test data
+  - [ ] Integrate with existing benchmark suite
+  - Rationale: Enable systematic performance testing with controlled test data
+
+- [ ] **Comprehensive symbol validation** (Line 1316 in `tests/test_go_parser_integration.rs`):
+  - [ ] Use symbol structure validation in comprehensive tests
+  - [ ] Validate symbol completeness and correctness
+  - [ ] Test edge cases and malformed symbols
+  - Rationale: Ensure extracted symbols meet quality standards
+
+### 9.5 Code Quality and Documentation 🟢
+- [ ] **Remove unused import warning** (`src/parsing/go/behavior.rs:3`):
+  - [ ] Fix unused `LanguageId` import warning
+  - [ ] Clean up other unused imports across Go implementation
+  - Rationale: Maintain clean codebase without compiler warnings
+
+- [ ] **Complete code documentation**:
+  - [ ] Document all public APIs with rustdoc comments
+  - [ ] Add usage examples for complex functions
+  - [ ] Document Go-specific implementation decisions
+  - [ ] Add inline comments for complex parsing logic
+
+### 9.6 Advanced Go Language Features 🟢
+- [ ] **Enhanced generic support**:
+  - [ ] Support more complex type constraints
+  - [ ] Handle generic method calls with type inference
+  - [ ] Support generic struct and interface instantiation
+
+- [ ] **Improved interface implementation detection**:
+  - [ ] Cross-file interface implementation analysis
+  - [ ] Method set calculation for embedded types
+  - [ ] Structural type compatibility checking
+
+- [ ] **Channel and goroutine support**:
+  - [ ] Parse channel operations (`<-`, `go` statements)
+  - [ ] Extract goroutine function calls
+  - [ ] Track channel types and directions
+
+---
+
 ## Validation Checklist
 
 ### ✅ Completion Criteria
@@ -475,8 +574,15 @@ The Go language implementation is **fully functional** after resolving the rebas
 - **Phase 6**: 0.5 days (module integration)
 - **Phase 7**: 1-2 days (testing and validation)
 - **Phase 8**: 0.5 days (documentation and cleanup)
+- **Phase 9**: 2-4 days (remaining TODOs and enhancements)
 
-**Total Estimated Time: 8-13 days**
+**Total Estimated Time: 10-17 days**
+
+**Phase 9 Breakdown:**
+- 9.1-9.2 (Parser & Resolution): 1-2 days
+- 9.3 (Behavior System): 0.5-1 day
+- 9.4 (Test Infrastructure): 0.5-1 day
+- 9.5-9.6 (Quality & Advanced Features): 0.5-1 day
 
 ---
 

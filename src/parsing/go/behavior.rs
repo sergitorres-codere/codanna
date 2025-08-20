@@ -1,8 +1,8 @@
 //! Go-specific language behavior implementation
 
-use crate::parsing::{LanguageBehavior, LanguageId};
 use crate::parsing::behavior_state::{BehaviorState, StatefulBehavior};
 use crate::parsing::resolution::{InheritanceResolver, ResolutionScope};
+use crate::parsing::LanguageBehavior;
 use crate::storage::DocumentIndex;
 use crate::types::FileId;
 use crate::{SymbolId, Visibility};
