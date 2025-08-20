@@ -8,8 +8,8 @@
 //! - Interface implementation tracking (implicit in Go)
 
 use crate::parsing::{InheritanceResolver, ResolutionScope, ScopeLevel, ScopeType};
-use crate::{FileId, SymbolId};
 use crate::storage::DocumentIndex;
+use crate::{FileId, SymbolId};
 use std::collections::HashMap;
 
 /// Go-specific resolution context handling Go's scoping rules
@@ -20,8 +20,6 @@ use std::collections::HashMap;
 /// 3. Block scope - variables declared within blocks (if, for, etc.)
 /// 4. Imported symbols - symbols from imported packages
 pub struct GoResolutionContext {
-    file_id: FileId,
-
     /// Local scope (function parameters, local variables, block variables)
     local_scope: HashMap<String, SymbolId>,
 
@@ -39,9 +37,8 @@ pub struct GoResolutionContext {
 }
 
 impl GoResolutionContext {
-    pub fn new(file_id: FileId) -> Self {
+    pub fn new(_file_id: FileId) -> Self {
         Self {
-            file_id,
             local_scope: HashMap::new(),
             package_symbols: HashMap::new(),
             imported_symbols: HashMap::new(),
@@ -117,8 +114,9 @@ impl GoResolutionContext {
         // Look for symbols with matching name and package path
         if let Ok(candidates) = document_index.find_symbols_by_name(symbol_name) {
             for candidate in candidates {
+                // TODO: Compare module paths for same-package symbol resolution (Phase 5.1)
                 // Check if symbol is in the same package (same module path)
-                if let Some(ref module_path) = candidate.module_path {
+                if let Some(ref _module_path) = candidate.module_path {
                     // For now, consider symbols with same module path as local package
                     // This is a simplified approach - full Go module resolution would be more complex
                     if candidate.visibility == crate::Visibility::Public {
@@ -147,7 +145,7 @@ impl GoResolutionContext {
         for (import_path, alias) in &self.imports {
             let effective_name = alias.as_deref().unwrap_or_else(|| {
                 // If no alias, use the last component of the import path
-                import_path.split('/').last().unwrap_or(import_path)
+                import_path.split('/').next_back().unwrap_or(import_path)
             });
 
             if effective_name == package_name {
@@ -166,14 +164,14 @@ impl GoResolutionContext {
     pub fn handle_go_module_paths(
         &self,
         module_path: &str,
-        document_index: &DocumentIndex,
+        _document_index: &DocumentIndex, // TODO: Use for go.mod parsing and module version resolution (Phase 5.2)
     ) -> Option<String> {
         // Simplified Go module resolution
         // In practice, this would:
         // 1. Check if the path is a standard library package
         // 2. Check go.mod for module replacements
         // 3. Resolve module versions and dependencies
-        
+
         if self.is_standard_library_package(module_path) {
             // Standard library packages are always available
             Some(module_path.to_string())
@@ -193,13 +191,34 @@ impl GoResolutionContext {
         // In practice, this would be a more comprehensive list or
         // determined by checking the Go installation
         const STDLIB_PACKAGES: &[&str] = &[
-            "fmt", "strings", "strconv", "io", "os", "time", "context",
-            "encoding/json", "net/http", "net/url", "path/filepath",
-            "regexp", "sort", "sync", "errors", "log", "math", "bytes",
-            "bufio", "crypto", "database/sql", "reflect", "runtime",
+            "fmt",
+            "strings",
+            "strconv",
+            "io",
+            "os",
+            "time",
+            "context",
+            "encoding/json",
+            "net/http",
+            "net/url",
+            "path/filepath",
+            "regexp",
+            "sort",
+            "sync",
+            "errors",
+            "log",
+            "math",
+            "bytes",
+            "bufio",
+            "crypto",
+            "database/sql",
+            "reflect",
+            "runtime",
         ];
 
-        STDLIB_PACKAGES.iter().any(|&pkg| package_path == pkg || package_path.starts_with(&format!("{}/", pkg)))
+        STDLIB_PACKAGES
+            .iter()
+            .any(|&pkg| package_path == pkg || package_path.starts_with(&format!("{pkg}/")))
     }
 
     /// Resolve a symbol within a specific package
@@ -215,11 +234,13 @@ impl GoResolutionContext {
             for candidate in candidates {
                 if let Some(ref module_path) = candidate.module_path {
                     let module_str: &str = module_path.as_ref();
-                    
+
                     // Check for exact match or last component match
-                    if (module_str == package_path || 
-                        module_str.split('/').last() == Some(package_path.split('/').last().unwrap_or(package_path))) &&
-                       candidate.visibility == crate::Visibility::Public {
+                    if (module_str == package_path
+                        || module_str.split('/').next_back()
+                            == Some(package_path.split('/').next_back().unwrap_or(package_path)))
+                        && candidate.visibility == crate::Visibility::Public
+                    {
                         return Some(candidate.id);
                     }
                 }
@@ -350,6 +371,8 @@ impl GoInheritanceResolver {
     ///
     /// In Go, this should ideally be determined by the parser, but for now
     /// we use heuristics based on naming conventions and tracking.
+    /// TODO: Use for interface detection in Phase 5.3 (Type System Integration) when resolving interface implementations
+    #[allow(dead_code)]
     fn is_interface(&self, type_name: &str) -> bool {
         self.interface_embeds.contains_key(type_name)
             || type_name.starts_with("I")  // Common Go interface naming convention
@@ -366,7 +389,10 @@ impl InheritanceResolver for GoInheritanceResolver {
             }
             "implements" => {
                 // Struct implements interface (implicit in Go)
-                self.struct_implements.entry(child).or_default().push(parent);
+                self.struct_implements
+                    .entry(child)
+                    .or_default()
+                    .push(parent);
             }
             _ => {
                 // Go doesn't have explicit inheritance like "extends"
@@ -653,16 +679,24 @@ mod tests {
 
     #[test]
     fn test_go_resolution_context_package_resolution() {
-
         let mut context = GoResolutionContext::new(FileId::new(1).unwrap());
 
         // Test adding imports
         context.add_import("fmt".to_string(), None);
-        context.add_import("github.com/user/repo/utils".to_string(), Some("utils".to_string()));
+        context.add_import(
+            "github.com/user/repo/utils".to_string(),
+            Some("utils".to_string()),
+        );
 
         assert_eq!(context.imports.len(), 2);
         assert_eq!(context.imports[0], ("fmt".to_string(), None));
-        assert_eq!(context.imports[1], ("github.com/user/repo/utils".to_string(), Some("utils".to_string())));
+        assert_eq!(
+            context.imports[1],
+            (
+                "github.com/user/repo/utils".to_string(),
+                Some("utils".to_string())
+            )
+        );
     }
 
     #[test]
@@ -674,7 +708,7 @@ mod tests {
         assert!(context.is_standard_library_package("strings"));
         assert!(context.is_standard_library_package("net/http"));
         assert!(context.is_standard_library_package("encoding/json"));
-        
+
         // Test non-standard library packages
         assert!(!context.is_standard_library_package("github.com/user/repo"));
         assert!(!context.is_standard_library_package("myproject/internal/utils"));
@@ -683,9 +717,8 @@ mod tests {
 
     #[test]
     fn test_go_module_path_handling() {
-
         let context = GoResolutionContext::new(FileId::new(1).unwrap());
-        
+
         // Create a minimal DocumentIndex for testing
         let temp_dir = std::env::temp_dir().join("codanna_test_go_resolution");
         std::fs::create_dir_all(&temp_dir).unwrap();
@@ -699,7 +732,8 @@ mod tests {
         assert_eq!(stdlib_subpackage, Some("net/http".to_string()));
 
         // Test external module path handling
-        let external_result = context.handle_go_module_paths("github.com/user/repo", &document_index);
+        let external_result =
+            context.handle_go_module_paths("github.com/user/repo", &document_index);
         assert_eq!(external_result, Some("github.com/user/repo".to_string()));
 
         // Cleanup
@@ -708,12 +742,14 @@ mod tests {
 
     #[test]
     fn test_resolve_imported_package_symbols() {
-
         let mut context = GoResolutionContext::new(FileId::new(1).unwrap());
-        
+
         // Set up imports
         context.add_import("fmt".to_string(), None);
-        context.add_import("github.com/user/repo/utils".to_string(), Some("utils".to_string()));
+        context.add_import(
+            "github.com/user/repo/utils".to_string(),
+            Some("utils".to_string()),
+        );
 
         // Create a minimal DocumentIndex for testing
         let temp_dir = std::env::temp_dir().join("codanna_test_go_resolution_2");
@@ -730,7 +766,8 @@ mod tests {
         assert!(result.is_none());
 
         // Test non-existent package
-        let result = context.resolve_imported_package_symbols("nonexistent", "Symbol", &document_index);
+        let result =
+            context.resolve_imported_package_symbols("nonexistent", "Symbol", &document_index);
         assert!(result.is_none());
 
         // Cleanup
@@ -762,8 +799,14 @@ mod tests {
 
         // Test resolution order: local -> package -> imported
         assert_eq!(context.resolve("LocalVar"), Some(SymbolId::new(1).unwrap()));
-        assert_eq!(context.resolve("PackageFunc"), Some(SymbolId::new(2).unwrap()));
-        assert_eq!(context.resolve("ImportedSymbol"), Some(SymbolId::new(3).unwrap()));
+        assert_eq!(
+            context.resolve("PackageFunc"),
+            Some(SymbolId::new(2).unwrap())
+        );
+        assert_eq!(
+            context.resolve("ImportedSymbol"),
+            Some(SymbolId::new(3).unwrap())
+        );
         assert_eq!(context.resolve("NonExistent"), None);
 
         // Test that local scope has higher priority
@@ -778,6 +821,9 @@ mod tests {
             crate::parsing::ScopeLevel::Module,
         );
 
-        assert_eq!(context.resolve("ConflictingName"), Some(SymbolId::new(4).unwrap()));
+        assert_eq!(
+            context.resolve("ConflictingName"),
+            Some(SymbolId::new(4).unwrap())
+        );
     }
 }

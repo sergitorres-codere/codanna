@@ -135,10 +135,10 @@ mod tests {
     fn test_go_parser_creation() {
         let go_lang = GoLanguage;
         let settings = Settings::default();
-        
+
         let parser_result = go_lang.create_parser(&settings);
         assert!(parser_result.is_ok(), "Go parser creation should succeed");
-        
+
         // Verify we get a valid parser
         let parser = parser_result.unwrap();
         assert_eq!(parser.language(), crate::parsing::Language::Go);
@@ -148,7 +148,7 @@ mod tests {
     fn test_go_behavior_creation() {
         let go_lang = GoLanguage;
         let behavior = go_lang.create_behavior();
-        
+
         // Verify the behavior has correct Go-specific properties
         assert_eq!(behavior.module_separator(), "/");
         assert!(behavior.supports_inherent_methods());
@@ -158,10 +158,10 @@ mod tests {
     #[test]
     fn test_go_language_registry_registration() {
         use crate::parsing::LanguageRegistry;
-        
+
         let mut registry = LanguageRegistry::new();
         register(&mut registry);
-        
+
         // Verify Go language is registered
         let go_id = LanguageId::new("go");
         assert!(registry.get(go_id).is_some());
@@ -170,10 +170,10 @@ mod tests {
     #[test]
     fn test_go_file_extension_recognition() {
         use crate::parsing::LanguageRegistry;
-        
+
         let mut registry = LanguageRegistry::new();
         register(&mut registry);
-        
+
         // Test that .go files are recognized as Go
         let detected = registry.get_by_extension("go");
         assert!(detected.is_some());
@@ -184,15 +184,15 @@ mod tests {
     fn test_go_factory_methods_consistency() {
         let go_lang = GoLanguage;
         let settings = Settings::default();
-        
+
         // Create parser and behavior
         let parser = go_lang.create_parser(&settings).unwrap();
         let _behavior = go_lang.create_behavior();
-        
+
         // Verify they're consistent with the language definition
         assert_eq!(parser.language(), crate::parsing::Language::Go);
         assert_eq!(parser.language().to_language_id(), go_lang.id());
-        
+
         // Both should handle Go constructs appropriately
         let go_id = go_lang.id();
         assert_eq!(go_id.as_str(), "go");

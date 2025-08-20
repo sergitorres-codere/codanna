@@ -119,7 +119,7 @@ impl LanguageBehavior for GoBehavior {
             // Fallback: take the first word that looks like an identifier
             signature
                 .split_whitespace()
-                .find(|word| word.chars().next().map_or(false, |c| c.is_alphabetic()))
+                .find(|word| word.chars().next().is_some_and(|c| c.is_alphabetic()))
                 .unwrap_or("")
         };
 
@@ -271,7 +271,11 @@ impl LanguageBehavior for GoBehavior {
         // Go allows forward references for functions, types, and constants at package level
         let package_level_symbol = matches!(
             symbol.kind,
-            SymbolKind::Function | SymbolKind::Struct | SymbolKind::Interface | SymbolKind::Constant | SymbolKind::TypeAlias
+            SymbolKind::Function
+                | SymbolKind::Struct
+                | SymbolKind::Interface
+                | SymbolKind::Constant
+                | SymbolKind::TypeAlias
         );
 
         if package_level_symbol {
@@ -295,10 +299,7 @@ impl LanguageBehavior for GoBehavior {
             }
         } else {
             // Fallback for symbols without scope_context
-            matches!(
-                symbol.kind,
-                SymbolKind::TypeAlias | SymbolKind::Variable
-            )
+            matches!(symbol.kind, SymbolKind::TypeAlias | SymbolKind::Variable)
         }
     }
 
@@ -316,7 +317,7 @@ impl LanguageBehavior for GoBehavior {
 
         // Create a temporary resolution context to use the new methods
         let context = crate::parsing::go::resolution::GoResolutionContext::new(
-            FileId::new(1).unwrap() // Temporary file ID for resolution
+            FileId::new(1).unwrap(), // Temporary file ID for resolution
         );
 
         // First check if it's a standard library package
@@ -324,7 +325,8 @@ impl LanguageBehavior for GoBehavior {
             // For standard library packages, we look for any existing symbol
             // that matches the package name (this is simplified - in practice
             // standard library symbols would be pre-indexed)
-            let package_name = import.path.split('/').last().unwrap_or(&import.path);
+            // TODO: Use for enhanced package resolution in Phase 5.2 (Import Resolution)
+            let _package_name = import.path.split('/').next_back().unwrap_or(&import.path);
             return self.resolve_import_path(&import.path, document_index);
         }
 
@@ -353,12 +355,12 @@ impl LanguageBehavior for GoBehavior {
         // 1. Local scope (parameters, local variables)
         // 2. Package scope (functions, types, variables in same package)
         // 3. Imported symbols (qualified imports like fmt.Println)
-        
+
         // First try the standard resolution context
         if let Some(symbol_id) = context.resolve(name) {
             return Some(symbol_id);
         }
-        
+
         // For Go, try package-qualified names (e.g., "fmt.Println")
         if name.contains('.') {
             if let Some((package_name, symbol_name)) = name.split_once('.') {
@@ -367,11 +369,15 @@ impl LanguageBehavior for GoBehavior {
                     // If we found the package, try to find the symbol within it
                     // This would require more sophisticated import resolution
                     // For now, fall back to basic resolution
-                    return self.resolve_qualified_symbol(package_name, symbol_name, document_index);
+                    return self.resolve_qualified_symbol(
+                        package_name,
+                        symbol_name,
+                        document_index,
+                    );
                 }
             }
         }
-        
+
         None
     }
 
@@ -484,15 +490,13 @@ impl GoBehavior {
     ) -> Option<SymbolId> {
         // Create a temporary resolution context to use the enhanced methods
         let context = crate::parsing::go::resolution::GoResolutionContext::new(
-            FileId::new(1).unwrap() // Temporary file ID for resolution
+            FileId::new(1).unwrap(), // Temporary file ID for resolution
         );
 
         // First try to resolve using the enhanced package resolution
-        if let Some(symbol_id) = context.resolve_imported_package_symbols(
-            package_name, 
-            symbol_name, 
-            document_index
-        ) {
+        if let Some(symbol_id) =
+            context.resolve_imported_package_symbols(package_name, symbol_name, document_index)
+        {
             return Some(symbol_id);
         }
 
@@ -503,9 +507,10 @@ impl GoBehavior {
                 for candidate in candidates {
                     if let Some(ref module_path) = candidate.module_path {
                         let module_str = module_path.as_ref();
-                        if (module_str == package_name || 
-                            module_str.split('/').last() == Some(package_name)) &&
-                           candidate.visibility == crate::Visibility::Public {
+                        if (module_str == package_name
+                            || module_str.split('/').next_back() == Some(package_name))
+                            && candidate.visibility == crate::Visibility::Public
+                        {
                             return Some(candidate.id);
                         }
                     }
@@ -521,16 +526,17 @@ impl GoBehavior {
                 if let Some(ref module_path) = symbol.module_path {
                     // Handle both exact package matches and last component matches
                     let module_str = module_path.as_ref();
-                    if (module_str == package_name || 
-                        module_str.split('/').last() == Some(package_name)) &&
-                       symbol.name.as_ref() == symbol_name &&
-                       symbol.visibility == crate::Visibility::Public {
+                    if (module_str == package_name
+                        || module_str.split('/').next_back() == Some(package_name))
+                        && symbol.name.as_ref() == symbol_name
+                        && symbol.visibility == crate::Visibility::Public
+                    {
                         return Some(symbol.id);
                     }
                 }
             }
         }
-        
+
         None
     }
 }
@@ -538,8 +544,8 @@ impl GoBehavior {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
     use crate::Visibility;
+    use std::path::Path;
 
     #[test]
     fn test_module_separator() {
@@ -551,7 +557,7 @@ mod tests {
     fn test_module_path_from_file() {
         let behavior = GoBehavior::new();
         let project_root = Path::new("/home/user/project");
-        
+
         // Test basic Go file
         let file_path = Path::new("/home/user/project/pkg/utils/helper.go");
         assert_eq!(
@@ -587,7 +593,7 @@ mod tests {
     #[test]
     fn test_parse_visibility() {
         let behavior = GoBehavior::new();
-        
+
         // Test function signatures
         assert_eq!(
             behavior.parse_visibility("func PublicFunction() error"),
@@ -654,15 +660,19 @@ mod tests {
     #[test]
     fn test_import_matches_symbol() {
         let behavior = GoBehavior::new();
-        
+
         // Test exact matches
         assert!(behavior.import_matches_symbol("fmt", "fmt", None));
-        assert!(behavior.import_matches_symbol("github.com/user/repo", "github.com/user/repo", None));
-        
+        assert!(behavior.import_matches_symbol(
+            "github.com/user/repo",
+            "github.com/user/repo",
+            None
+        ));
+
         // Test relative imports
         assert!(behavior.import_matches_symbol("./utils", "pkg/utils", Some("pkg")));
         assert!(behavior.import_matches_symbol("../shared", "pkg/shared", Some("pkg/api")));
-        
+
         // Test non-matches
         assert!(!behavior.import_matches_symbol("fmt", "strings", None));
         assert!(!behavior.import_matches_symbol("./utils", "pkg/other", Some("pkg")));
@@ -670,10 +680,10 @@ mod tests {
 
     #[test]
     fn test_configure_symbol() {
-        use crate::{Symbol, SymbolKind, SymbolId, FileId, Visibility, Range};
+        use crate::{FileId, Range, Symbol, SymbolId, SymbolKind, Visibility};
 
         let behavior = GoBehavior::new();
-        
+
         // Test function with public signature
         let mut symbol = Symbol {
             id: SymbolId::new(1).unwrap(),
@@ -682,7 +692,12 @@ mod tests {
             signature: Some("func PublicFunction() error".into()),
             module_path: None,
             file_id: FileId::new(1).unwrap(),
-            range: Range { start_line: 1, start_column: 1, end_line: 1, end_column: 10 },
+            range: Range {
+                start_line: 1,
+                start_column: 1,
+                end_line: 1,
+                end_column: 10,
+            },
             doc_comment: None,
             visibility: Visibility::Private, // Will be updated by configure_symbol
             scope_context: None,
@@ -690,7 +705,10 @@ mod tests {
 
         behavior.configure_symbol(&mut symbol, Some("pkg/utils"));
 
-        assert_eq!(symbol.module_path.as_ref().map(|s| s.as_ref()), Some("pkg/utils"));
+        assert_eq!(
+            symbol.module_path.as_ref().map(|s| s.as_ref()),
+            Some("pkg/utils")
+        );
         assert_eq!(symbol.visibility, Visibility::Public); // Should be public due to capitalization
 
         // Test variable with private signature
@@ -701,7 +719,12 @@ mod tests {
             signature: Some("var privateVar string".into()),
             module_path: None,
             file_id: FileId::new(1).unwrap(),
-            range: Range { start_line: 1, start_column: 1, end_line: 1, end_column: 10 },
+            range: Range {
+                start_line: 1,
+                start_column: 1,
+                end_line: 1,
+                end_column: 10,
+            },
             doc_comment: None,
             visibility: Visibility::Public, // Will be updated by configure_symbol
             scope_context: None,

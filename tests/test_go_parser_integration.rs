@@ -70,8 +70,12 @@ pub struct GoImportInfo {
 }
 
 // Test constants
+// TODO: Use for regression testing once symbol counts stabilize
+#[allow(dead_code)]
 const EXPECTED_BASIC_SYMBOLS: usize = 15; // Approximate count from basic.go
+#[allow(dead_code)]
 const EXPECTED_STRUCT_SYMBOLS: usize = 20; // Approximate count from structs.go
+#[allow(dead_code)]
 const EXPECTED_INTERFACE_SYMBOLS: usize = 12; // Approximate count from interfaces.go
 const PERFORMANCE_TARGET_SYMBOLS_PER_SEC: usize = 10_000;
 
@@ -246,8 +250,9 @@ fn test_go_interface_extraction() -> Result<()> {
         "Reader interface should be exported"
     );
 
+    // TODO: Complete embedded interface validation once parser fully supports interface embedding
     // Check for embedded interfaces
-    let embedded_interfaces: Vec<_> = interfaces
+    let _embedded_interfaces: Vec<_> = interfaces
         .iter()
         .filter(|i| i.signature.contains("embed") || i.name.contains("ReadWrite"))
         .collect();
@@ -585,6 +590,8 @@ fn filter_symbols_by_kind<'a>(symbols: &'a [GoSymbolInfo], kind: &str) -> Vec<&'
 }
 
 /// Create test data for performance testing
+/// TODO: Use in performance benchmarks (Phase 7.3)
+#[allow(dead_code)]
 fn generate_test_symbols(count: usize) -> Result<Vec<GoSymbolInfo>> {
     let symbols: Result<Vec<_>> = (0..count)
         .map(|i| {
@@ -606,6 +613,8 @@ fn generate_test_symbols(count: usize) -> Result<Vec<GoSymbolInfo>> {
 }
 
 /// Validate that a symbol has the expected structure
+/// TODO: Use in comprehensive symbol validation tests (Phase 7.1)
+#[allow(dead_code)]
 fn validate_symbol_structure(symbol: &GoSymbolInfo) -> Result<()> {
     if symbol.name.is_empty() {
         return Err(GoParserError::SymbolExtractionFailed(

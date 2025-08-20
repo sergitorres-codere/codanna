@@ -362,7 +362,7 @@ impl GoParser {
         counter: &mut SymbolCounter,
         symbols: &mut Vec<Symbol>,
         module_path: &str,
-        struct_name: &str,
+        _struct_name: &str, // TODO: Use for generating qualified field names (e.g., StructName.FieldName) when needed
     ) {
         // Look for field_declaration_list
         for child in struct_node.children(&mut struct_node.walk()) {
@@ -376,7 +376,7 @@ impl GoParser {
                             counter,
                             symbols,
                             module_path,
-                            struct_name,
+                            _struct_name,
                         );
                     }
                 }
@@ -393,7 +393,7 @@ impl GoParser {
         counter: &mut SymbolCounter,
         symbols: &mut Vec<Symbol>,
         module_path: &str,
-        struct_name: &str,
+        _struct_name: &str, // TODO: Use for generating qualified field names (e.g., StructName.FieldName) when needed
     ) {
         // field_declaration may have multiple field names for the same type
         // e.g., "Width, Height float64"
@@ -450,7 +450,7 @@ impl GoParser {
         counter: &mut SymbolCounter,
         symbols: &mut Vec<Symbol>,
         module_path: &str,
-        interface_name: &str,
+        _interface_name: &str, // TODO: Use for generating qualified method names for interface methods
     ) {
         // Look for method_elem nodes
         for child in interface_node.children(&mut interface_node.walk()) {
@@ -462,7 +462,7 @@ impl GoParser {
                     counter,
                     symbols,
                     module_path,
-                    interface_name,
+                    _interface_name,
                 );
             }
         }
@@ -477,7 +477,7 @@ impl GoParser {
         counter: &mut SymbolCounter,
         symbols: &mut Vec<Symbol>,
         module_path: &str,
-        interface_name: &str,
+        _interface_name: &str, // TODO: Use for generating qualified method names for interface methods
     ) {
         let method_name = method_node
             .children(&mut method_node.walk())
@@ -991,8 +991,9 @@ impl GoParser {
 
             // Go function calls - look for calls to generic functions
             "call_expression" => {
+                // TODO: Use for tracking generic function calls once Phase 5.3 (Type System Integration) is complete
                 // Get the function being called for context
-                let func_name = node
+                let _func_name = node
                     .child_by_field_name("function")
                     .map(|n| &code[n.byte_range()])
                     .unwrap_or("anonymous");
@@ -1525,32 +1526,18 @@ import (
 
         // Verify specific imports
         // Standard library import
-        assert!(
-            imports
-                .iter()
-                .any(|i| i.path == "fmt" && i.alias.is_none())
-        );
-        
+        assert!(imports.iter().any(|i| i.path == "fmt" && i.alias.is_none()));
+
         // Aliased import
-        assert!(
-            imports
-                .iter()
-                .any(|i| i.path == "github.com/user/repo/utils" && i.alias == Some("utils".to_string()))
-        );
-        
+        assert!(imports.iter().any(
+            |i| i.path == "github.com/user/repo/utils" && i.alias == Some("utils".to_string())
+        ));
+
         // Dot import (not implemented as alias, but should be present)
-        assert!(
-            imports
-                .iter()
-                .any(|i| i.path == "encoding/json")
-        );
-        
+        assert!(imports.iter().any(|i| i.path == "encoding/json"));
+
         // Blank import
-        assert!(
-            imports
-                .iter()
-                .any(|i| i.path == "database/sql")
-        );
+        assert!(imports.iter().any(|i| i.path == "database/sql"));
 
         println!("=== PASSED ===\n");
     }
