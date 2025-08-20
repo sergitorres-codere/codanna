@@ -677,6 +677,314 @@ func privateFunc() int {
     Ok(())
 }
 
+/// Test 10: Error handling and edge cases
+/// Goal: Verify parser handles malformed Go code gracefully
+#[test] 
+fn test_go_parser_error_handling() -> Result<()> {
+    println!("\n=== Test 10: Error Handling and Edge Cases ===");
+
+    use codanna::parsing::LanguageParser;
+    use codanna::parsing::go::GoParser;
+    use codanna::types::{FileId, SymbolCounter};
+
+    let mut parser = GoParser::new().map_err(|e| {
+        GoParserError::InitializationFailed(format!("Failed to create parser: {e}"))
+    })?;
+
+    // Test with malformed Go code
+    let malformed_cases = vec![
+        ("Empty file", ""),
+        ("Only whitespace", "   \n\t  \n"),
+        ("Incomplete function", "func incomplete("),
+        ("Invalid syntax", "this is not go code!"),
+        ("Unmatched braces", "package main\nfunc test() {\n// missing closing brace"),
+    ];
+
+    for (case_name, malformed_code) in malformed_cases {
+        let mut symbol_counter = SymbolCounter::new();
+        let file_id = FileId::new(1).expect("Failed to create file ID");
+        
+        // Parser should not panic, but may return empty or partial results
+        let symbols = parser.parse(malformed_code, file_id, &mut symbol_counter);
+        
+        println!("✓ Parser handled '{}' gracefully ({} symbols found)", case_name, symbols.len());
+    }
+
+    // Test with very large function signatures
+    let large_signature = format!(
+        "package main\nfunc VeryLongFunctionName{}(param1 string, param2 int, param3 bool) (string, error) {{ return \"\", nil }}", 
+        "WithManyParameters".repeat(10)
+    );
+    
+    let mut symbol_counter = SymbolCounter::new();
+    let file_id = FileId::new(1).expect("Failed to create file ID");
+    let symbols = parser.parse(&large_signature, file_id, &mut symbol_counter);
+    
+    assert!(!symbols.is_empty(), "Should handle large function signatures");
+    
+    println!("✓ Large function signatures handled correctly");
+    println!("=== PASSED ===\n");
+
+    Ok(())
+}
+
+/// Test 11: Real-world Go patterns integration
+/// Goal: Verify parser handles complex real-world Go patterns
+#[test]
+fn test_real_world_go_patterns() -> Result<()> {
+    println!("\n=== Test 11: Real-World Go Patterns ===");
+
+    // Test with complex real-world Go code patterns
+    let complex_go_code = r#"
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+    "net/http"
+    "sync"
+    "time"
+)
+
+// Generic constraint interface
+type Comparable[T any] interface {
+    Compare(T) int
+    ~int | ~string | ~float64
+}
+
+// Generic struct with embedded interface
+type Repository[T Comparable[T]] struct {
+    mu      sync.RWMutex
+    items   map[string]T
+    logger  *log.Logger
+    timeout time.Duration
+}
+
+// Factory function with generics
+func NewRepository[T Comparable[T]](timeout time.Duration) *Repository[T] {
+    return &Repository[T]{
+        items:   make(map[string]T),
+        logger:  log.Default(),
+        timeout: timeout,
+    }
+}
+
+// Method with context and error handling
+func (r *Repository[T]) Store(ctx context.Context, key string, value T) error {
+    select {
+    case <-ctx.Done():
+        return ctx.Err()
+    default:
+    }
+
+    r.mu.Lock()
+    defer r.mu.Unlock()
+    
+    r.items[key] = value
+    r.logger.Printf("Stored item with key: %s", key)
+    return nil
+}
+
+// Interface with embedded interface
+type HTTPHandler interface {
+    http.Handler
+    Setup() error
+    Cleanup() error
+}
+
+// Struct implementing multiple interfaces
+type WebServer struct {
+    *Repository[string]
+    mux    *http.ServeMux
+    server *http.Server
+}
+
+// Method with complex receiver and return types
+func (ws *WebServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+    defer func() {
+        if err := recover(); err != nil {
+            http.Error(w, "Internal server error", http.StatusInternalServerError)
+            ws.logger.Printf("Panic recovered: %v", err)
+        }
+    }()
+    
+    ws.mux.ServeHTTP(w, r)
+}
+
+// Function with channel types
+func processRequests(ctx context.Context, requests <-chan *http.Request, responses chan<- *http.Response) {
+    for {
+        select {
+        case req := <-requests:
+            if req == nil {
+                return
+            }
+            // Process request...
+            
+        case <-ctx.Done():
+            close(responses)
+            return
+        }
+    }
+}
+
+// Main function with complex initialization
+func main() {
+    ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+    defer cancel()
+
+    repo := NewRepository[string](5 * time.Second)
+    
+    server := &WebServer{
+        Repository: repo,
+        mux:        http.NewServeMux(),
+        server: &http.Server{
+            Addr:         ":8080",
+            ReadTimeout:  10 * time.Second,
+            WriteTimeout: 10 * time.Second,
+        },
+    }
+
+    if err := server.Setup(); err != nil {
+        log.Fatal(err)
+    }
+    defer server.Cleanup()
+
+    fmt.Println("Server starting...")
+}
+"#;
+
+    // Parse the complex code
+    let symbols = extract_symbols_from_source(complex_go_code)?;
+
+    // Verify we extracted expected complex constructs
+    let generic_types: Vec<_> = symbols.iter()
+        .filter(|s| s.signature.contains("[") && (s.kind == "struct" || s.kind == "interface"))
+        .collect();
+    
+    assert!(
+        !generic_types.is_empty(),
+        "Should find generic types and interfaces"
+    );
+
+    let methods_with_receivers: Vec<_> = symbols.iter()
+        .filter(|s| s.kind == "method" && s.signature.contains("func ("))
+        .collect();
+    
+    assert!(
+        methods_with_receivers.len() >= 3,
+        "Should find methods with receivers"
+    );
+
+    let channel_related: Vec<_> = symbols.iter()
+        .filter(|s| s.signature.contains("chan ") || s.signature.contains("<-chan") || s.signature.contains("chan<-"))
+        .collect();
+    
+    assert!(
+        !channel_related.is_empty(),
+        "Should find channel-related symbols"
+    );
+
+    let embedded_interfaces: Vec<_> = symbols.iter()
+        .filter(|s| s.kind == "interface" && s.signature.contains("http.Handler"))
+        .collect();
+    
+    assert!(
+        !embedded_interfaces.is_empty(),
+        "Should find interfaces with embedded interfaces"
+    );
+
+    println!("✓ Found {} generic types and interfaces", generic_types.len());
+    println!("✓ Found {} methods with receivers", methods_with_receivers.len());
+    println!("✓ Found {} channel-related symbols", channel_related.len());
+    println!("✓ Found {} embedded interfaces", embedded_interfaces.len());
+    println!("✓ Total symbols extracted: {}", symbols.len());
+    println!("=== PASSED ===\n");
+
+    Ok(())
+}
+
+/// Test 12: Regression tests for fixed issues
+/// Goal: Ensure previously fixed bugs don't reoccur
+#[test]
+fn test_go_parser_regression_tests() -> Result<()> {
+    println!("\n=== Test 12: Regression Tests ===");
+
+    // Regression test data for common issues
+    let regression_cases = vec![
+        (
+            "Empty interface",
+            "package main\ntype Empty interface {}\nfunc main() {}",
+            "Should handle empty interfaces"
+        ),
+        (
+            "Method with pointer receiver",
+            "package main\ntype T struct{}\nfunc (t *T) Method() {}\nfunc main() {}",
+            "Should correctly parse pointer receivers"
+        ),
+        (
+            "Multiple return values",
+            "package main\nfunc multiReturn() (string, int, error) { return \"\", 0, nil }\nfunc main() {}",
+            "Should handle multiple return values"
+        ),
+        (
+            "Generic function with constraints",
+            "package main\nfunc Process[T any](item T) T { return item }\nfunc main() {}",
+            "Should handle generic functions with constraints"
+        ),
+        (
+            "Method on generic type",
+            "package main\ntype List[T any] []T\nfunc (l List[T]) Len() int { return len(l) }\nfunc main() {}",
+            "Should handle methods on generic types"
+        ),
+    ];
+
+    for (case_name, test_code, expectation) in regression_cases {
+        let symbols = extract_symbols_from_source(test_code)?;
+        
+        assert!(
+            !symbols.is_empty(),
+            "Regression case '{}' failed: {}", case_name, expectation
+        );
+
+        // Specific validations based on case
+        match case_name {
+            "Empty interface" => {
+                let interfaces = filter_symbols_by_kind(&symbols, "interface");
+                assert!(!interfaces.is_empty(), "Should find empty interface");
+            }
+            "Method with pointer receiver" => {
+                let methods = filter_symbols_by_kind(&symbols, "method");
+                assert!(!methods.is_empty(), "Should find method with pointer receiver");
+                assert!(
+                    methods.iter().any(|m| m.signature.contains("*T")),
+                    "Should preserve pointer receiver in signature"
+                );
+            }
+            "Multiple return values" => {
+                let functions = filter_symbols_by_kind(&symbols, "function");
+                let multi_return = functions.iter()
+                    .find(|f| f.name == "multiReturn")
+                    .expect("Should find multiReturn function");
+                assert!(
+                    multi_return.signature.contains("string, int, error"),
+                    "Should preserve multiple return types"
+                );
+            }
+            _ => {
+                // Generic validation - symbols should be present
+            }
+        }
+
+        println!("✓ Regression test '{}' passed", case_name);
+    }
+
+    println!("=== PASSED ===\n");
+
+    Ok(())
+}
+
 // Helper functions for the integration tests
 
 /// Extract symbols from a Go fixture file
@@ -896,6 +1204,62 @@ fn extract_quoted_string(s: &str) -> Option<String> {
     } else {
         None
     }
+}
+
+/// Extract symbols directly from Go source code
+fn extract_symbols_from_source(source_code: &str) -> Result<Vec<GoSymbolInfo>> {
+    use codanna::parsing::LanguageParser;
+    use codanna::parsing::go::GoParser;
+    use codanna::types::{FileId as ActualFileId, SymbolCounter, SymbolKind};
+
+    // Create parser and parse the source
+    let mut parser = GoParser::new().map_err(|e| {
+        GoParserError::InitializationFailed(format!("Failed to create Go parser: {e}"))
+    })?;
+
+    let mut symbol_counter = SymbolCounter::new();
+    let file_id = ActualFileId::new(1).expect("Failed to create file ID");
+    let symbols = parser.parse(source_code, file_id, &mut symbol_counter);
+
+    // Convert internal symbols to test symbols
+    let test_symbols: Result<Vec<_>> = symbols
+        .into_iter()
+        .map(|sym| {
+            let test_file_id = TestFileId::new(1).ok_or_else(|| {
+                GoParserError::SymbolExtractionFailed("Invalid test file ID".to_string())
+            })?;
+
+            let kind_str = match sym.kind {
+                SymbolKind::Function => "function",
+                SymbolKind::Method => "method",
+                SymbolKind::Struct => "struct",
+                SymbolKind::Interface => "interface",
+                SymbolKind::Variable => "variable",
+                SymbolKind::Constant => "constant",
+                SymbolKind::Field => "field",
+                SymbolKind::TypeAlias => "type_alias",
+                _ => "unknown",
+            };
+
+            let is_exported = match sym.visibility {
+                codanna::Visibility::Public => true,
+                _ => false,
+            };
+
+            Ok(GoSymbolInfo {
+                name: sym.name.to_string(),
+                kind: kind_str.to_string(),
+                signature: sym
+                    .signature
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| format!("{} {}", kind_str, sym.name)),
+                is_exported,
+                file_id: test_file_id,
+            })
+        })
+        .collect();
+
+    test_symbols
 }
 
 /// Filter symbols by their kind

@@ -74,6 +74,12 @@ pub mod definition;
 pub mod parser;
 pub mod resolution;
 
+#[cfg(test)]
+pub mod test_helpers;
+
+#[cfg(test)]
+mod parser_tests;
+
 pub use behavior::GoBehavior;
 pub use definition::GoLanguage;
 pub use parser::GoParser;

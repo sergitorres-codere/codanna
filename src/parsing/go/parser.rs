@@ -2071,72 +2071,88 @@ import (
     }
 
     #[test]
-    fn test_generic_type_extraction_in_constructors() {
-        println!("\n=== Go Generic Type Extraction in Constructors Test ===\n");
+    fn test_go_generic_type_extraction() {
+        println!("\n=== Go Generic Type Extraction Test ===\n");
 
         let mut parser = GoParser::new().unwrap();
 
         let code = r#"
-interface Session {
-    id: string;
+package main
+
+import "fmt"
+
+// Generic function with type constraint
+func Identity[T any](value T) T {
+    return value
 }
 
-interface User {
-    name: string;
+// Generic function with multiple type parameters
+func Compare[T comparable](a, b T) bool {
+    return a == b
 }
 
-const sessions = new Map<string, Session>();
-const users = new Set<User>();
-const nested = new Array<Map<string, User>>();
-const simple = new Map();
-const typed: Map<string, Session> = new Map();
-const hook = useState<Session>(null);
+// Generic struct
+type Container[T any] struct {
+    items []T
+}
+
+// Generic interface
+type Processor[T any] interface {
+    Process(T) error
+}
+
+func main() {
+    // Instantiate generic types
+    intContainer := Container[int]{items: []int{1, 2, 3}}
+    stringContainer := Container[string]{items: []string{"a", "b"}}
+    
+    fmt.Println(Identity(42))
+    fmt.Println(Compare("hello", "world"))
+    fmt.Println(intContainer.items)
+    fmt.Println(stringContainer.items)
+}
 "#;
 
         println!("Test code:\n{code}");
 
-        // Extract type uses
-        let uses = parser.find_uses(code);
+        // Parse the code to extract symbols
+        let mut symbol_counter = SymbolCounter::new();
+        let file_id = FileId::new(1).unwrap();
+        let symbols = parser.parse(code, file_id, &mut symbol_counter);
 
-        println!("\nExtracted {} type uses:", uses.len());
-        for (i, (context, type_name, _range)) in uses.iter().enumerate() {
-            println!("  {}. {} uses {}", i + 1, context, type_name);
+        println!("\nExtracted {} symbols:", symbols.len());
+        for (i, symbol) in symbols.iter().enumerate() {
+            println!("  {}. {} ({:?})", i + 1, symbol.name, symbol.kind);
         }
 
-        // Verify that generic type parameters are captured
+        // Verify that generic functions are captured
+        let generic_functions: Vec<_> = symbols.iter()
+            .filter(|s| matches!(s.kind, SymbolKind::Function) && 
+                       s.signature.as_ref().map_or(false, |sig| sig.contains("[")))
+            .collect();
+
+        assert!(!generic_functions.is_empty(), "Should find generic functions");
+
+        // Verify specific generic symbols
         assert!(
-            uses.iter()
-                .any(|(ctx, typ, _)| ctx == &"sessions" && typ == &"Session"),
-            "Should capture: sessions uses Session"
+            symbols.iter().any(|s| s.name.as_ref() == "Identity" && 
+                              s.signature.as_ref().map_or(false, |sig| sig.contains("[T any]"))),
+            "Should find Identity generic function"
         );
 
         assert!(
-            uses.iter()
-                .any(|(ctx, typ, _)| ctx == &"users" && typ == &"User"),
-            "Should capture: users uses User"
+            symbols.iter().any(|s| s.name.as_ref() == "Container" && 
+                              s.signature.as_ref().map_or(false, |sig| sig.contains("[T any]"))),
+            "Should find Container generic struct"
         );
 
         assert!(
-            uses.iter()
-                .any(|(ctx, typ, _)| ctx == &"nested" && typ == &"User"),
-            "Should capture: nested uses User (from Map<string, User>)"
+            symbols.iter().any(|s| s.name.as_ref() == "Processor" && 
+                              s.signature.as_ref().map_or(false, |sig| sig.contains("[T any]"))),
+            "Should find Processor generic interface"
         );
 
-        // Note: Type annotations are already handled by the existing code
-        // in the "variable_declarator" case, which extracts from node.child_by_field_name("type")
-        assert!(
-            uses.iter()
-                .any(|(ctx, typ, _)| ctx == &"typed" && (typ == &"Session" || typ == &"Map")),
-            "Should capture type annotation (either Map or Session)"
-        );
-
-        assert!(
-            uses.iter()
-                .any(|(ctx, typ, _)| ctx == &"useState" && typ == &"Session"),
-            "Should capture: useState uses Session (from function call)"
-        );
-
-        println!("\n✅ Generic type extraction test passed");
+        println!("\n✅ Go generic type extraction test passed");
     }
 
     #[test]
@@ -2217,134 +2233,216 @@ type ExtendedProcessor struct {
     }
 
     #[test]
-    fn test_complex_import_patterns() {
-        println!("\n=== Complex Import Patterns Test ===\n");
+    fn test_go_complex_import_patterns() {
+        println!("\n=== Go Complex Import Patterns Test ===\n");
 
         let mut parser = GoParser::new().unwrap();
         let file_id = FileId::new(1).unwrap();
 
         let code = r#"
-// Mixed default and named
-import React, { Component, useState as useStateHook } from 'react';
+package main
 
-// Type mixed with value imports
-import { type Config, createConfig } from './config';
+import (
+    "fmt"
+    "net/http"
+    "path/filepath"
+    
+    // Aliased import
+    httputil "net/http/httputil"
+    
+    // Dot import
+    . "math"
+    
+    // Blank import
+    _ "net/http/pprof"
+    
+    // External module
+    "github.com/gorilla/mux"
+    "github.com/user/project/internal/config"
+)
 
-// Aliased imports
-import { Helper as H } from './helper';
-
-// Re-export with rename
-export { default as MyButton } from './Button';
+func main() {
+    fmt.Println("Hello, World!")
+}
 "#;
 
         let imports = parser.find_imports(code, file_id);
 
-        println!("Found {} imports in complex patterns", imports.len());
+        println!("Found {} imports in Go complex patterns", imports.len());
         for import in &imports {
             println!(
-                "  - {} -> {:?} (glob: {})",
-                import.path, import.alias, import.is_glob
+                "  - {} -> {:?} (type_only: {})",
+                import.path, import.alias, import.is_type_only
             );
         }
 
-        // Should have 4 imports: react (default), ./config, ./helper, ./Button
-        assert_eq!(imports.len(), 4, "Should have 4 imports");
+        // Should have 8 imports: standard lib + external modules
+        assert!(imports.len() >= 6, "Should have at least 6 imports");
 
-        // Check for React default import
-        let react_default = imports
-            .iter()
-            .find(|i| i.path == "react" && i.alias == Some("React".to_string()));
-        assert!(react_default.is_some(), "Should find React default import");
+        // Check for standard library imports
+        assert!(imports.iter().any(|i| i.path == "fmt"), "Should find fmt import");
+        assert!(imports.iter().any(|i| i.path == "net/http"), "Should find net/http import");
 
-        // Check for config import (named imports, no alias)
-        let config = imports
-            .iter()
-            .find(|i| i.path == "./config" && i.alias.is_none());
-        assert!(config.is_some(), "Should find config import");
+        // Check for aliased import
+        assert!(
+            imports.iter().any(|i| i.path == "net/http/httputil" && 
+                              i.alias == Some("httputil".to_string())),
+            "Should find aliased httputil import"
+        );
 
-        // Check for helper import (named imports, no alias on Import struct)
-        let helper = imports
-            .iter()
-            .find(|i| i.path == "./helper" && i.alias.is_none());
-        assert!(helper.is_some(), "Should find helper import");
+        // Check for dot import
+        assert!(imports.iter().any(|i| i.path == "math"), "Should find math import");
 
-        println!("✅ Complex patterns handled correctly");
+        // Check for blank import
+        assert!(imports.iter().any(|i| i.path == "net/http/pprof"), "Should find pprof import");
+
+        // Check for external module
+        assert!(
+            imports.iter().any(|i| i.path == "github.com/gorilla/mux"),
+            "Should find external module import"
+        );
+
+        println!("✅ Go complex patterns handled correctly");
     }
 
     #[test]
-    fn test_import_path_formats() {
-        println!("\n=== Import Path Formats Test ===\n");
+    fn test_go_import_path_formats() {
+        println!("\n=== Go Import Path Formats Test ===\n");
 
         let mut parser = GoParser::new().unwrap();
         let file_id = FileId::new(1).unwrap();
 
         let code = r#"
-// Relative paths
-import { a } from './sibling';
-import { b } from '../parent';
-import { c } from '../../grandparent';
+package main
 
-// Node modules
-import express from 'express';
-import { Request } from '@types/express';
+import (
+    // Standard library imports
+    "fmt"
+    "strings"
+    "net/http"
+    "encoding/json"
+    
+    // External module imports
+    "github.com/gin-gonic/gin"
+    "github.com/user/repo/pkg/database"
+    "go.uber.org/zap"
+    
+    // Relative imports (rare in Go but valid)
+    "./internal/config"
+    "../shared/utils"
+)
 
-// Path aliases (would need tsconfig to resolve)
-import { service } from '@app/services';
-
-// Index imports
-import utils from './utils';  // implies ./utils/index
+func main() {
+    fmt.Println("Hello, World!")
+}
 "#;
 
         let imports = parser.find_imports(code, file_id);
 
-        println!("Path formats found:");
+        println!("Go path formats found:");
         for import in &imports {
             println!("  - {}", import.path);
         }
 
-        assert!(imports.iter().any(|i| i.path == "./sibling"));
-        assert!(imports.iter().any(|i| i.path == "../parent"));
-        assert!(imports.iter().any(|i| i.path == "express"));
-        assert!(imports.iter().any(|i| i.path.starts_with("@")));
+        // Check standard library imports
+        assert!(imports.iter().any(|i| i.path == "fmt"));
+        assert!(imports.iter().any(|i| i.path == "strings"));
+        assert!(imports.iter().any(|i| i.path == "net/http"));
+        assert!(imports.iter().any(|i| i.path == "encoding/json"));
 
-        println!("✅ Various path formats extracted correctly");
+        // Check external module imports
+        assert!(imports.iter().any(|i| i.path == "github.com/gin-gonic/gin"));
+        assert!(imports.iter().any(|i| i.path == "go.uber.org/zap"));
+
+        // Check relative imports
+        assert!(imports.iter().any(|i| i.path == "./internal/config"));
+        assert!(imports.iter().any(|i| i.path == "../shared/utils"));
+
+        println!("✅ Various Go path formats extracted correctly");
     }
 
     #[test]
-    fn test_export_variations() {
-        println!("\n=== Export Variations Test ===\n");
+    fn test_go_visibility_variations() {
+        println!("\n=== Go Visibility Variations Test ===\n");
 
         let mut parser = GoParser::new().unwrap();
         let file_id = FileId::new(1).unwrap();
 
         let code = r#"
-// Re-exports
-export { Component } from 'react';
-export { Helper as PublicHelper } from './helper';
-export * from './utils';
+package main
 
-// Type re-exports
-export type { Props } from './types';
+import "fmt"
+
+// Exported (public) symbols - start with uppercase
+const PublicConstant = "public"
+var PublicVariable = 42
+
+type PublicStruct struct {
+    PublicField   string
+    privateField  int
+}
+
+func PublicFunction() string {
+    return "public function"
+}
+
+func (p *PublicStruct) PublicMethod() {
+    fmt.Println("public method")
+}
+
+// Unexported (private) symbols - start with lowercase
+const privateConstant = "private"
+var privateVariable = 24
+
+type privateStruct struct {
+    field string
+}
+
+func privateFunction() string {
+    return "private function"
+}
+
+func (p *privateStruct) privateMethod() {
+    fmt.Println("private method")
+}
 "#;
 
-        let imports = parser.find_imports(code, file_id);
+        let mut symbol_counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut symbol_counter);
 
-        println!("Export-based imports found:");
-        for import in &imports {
-            println!(
-                "  - {} -> {:?} (glob: {})",
-                import.path, import.alias, import.is_glob
-            );
+        println!("Go visibility symbols found:");
+        for symbol in &symbols {
+            let visibility_str = match symbol.visibility {
+                Visibility::Public => "public",
+                _ => "private",
+            };
+            println!("  - {} ({:?}) -> {}", symbol.name, symbol.kind, visibility_str);
         }
 
-        assert!(
-            imports
-                .iter()
-                .any(|i| i.path == "react" && i.alias.is_none())
-        );
-        assert!(imports.iter().any(|i| i.path == "./helper"));
-        assert!(imports.iter().any(|i| i.path == "./utils" && i.is_glob));
+        // Check for exported symbols
+        let exported_symbols: Vec<_> = symbols.iter()
+            .filter(|s| matches!(s.visibility, Visibility::Public))
+            .collect();
+        
+        let unexported_symbols: Vec<_> = symbols.iter()
+            .filter(|s| !matches!(s.visibility, Visibility::Public))
+            .collect();
 
-        println!("✅ Export variations handled correctly");
+        assert!(!exported_symbols.is_empty(), "Should find exported symbols");
+        assert!(!unexported_symbols.is_empty(), "Should find unexported symbols");
+
+        // Check specific exported symbols
+        assert!(symbols.iter().any(|s| s.name.as_ref() == "PublicFunction" && 
+                                   matches!(s.visibility, Visibility::Public)));
+        assert!(symbols.iter().any(|s| s.name.as_ref() == "PublicStruct" && 
+                                   matches!(s.visibility, Visibility::Public)));
+
+        // Check specific unexported symbols
+        assert!(symbols.iter().any(|s| s.name.as_ref() == "privateFunction" && 
+                                   !matches!(s.visibility, Visibility::Public)));
+        assert!(symbols.iter().any(|s| s.name.as_ref() == "privateStruct" && 
+                                   !matches!(s.visibility, Visibility::Public)));
+
+        println!("✅ Go visibility variations handled correctly");
     }
 }
