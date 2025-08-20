@@ -467,16 +467,16 @@ The Go language implementation is **fully functional** after resolving the rebas
 - Fixed unused import warning in `behavior.rs`
 
 ### 9.3 Behavior System Completion 🟡
-- [ ] **Current package path extraction** (Line 509 in `src/parsing/go/behavior.rs`):
-  - [ ] Extract current package path from file context
-  - [ ] Implement file-to-package path mapping
-  - [ ] Support both GOPATH and module-based layouts
+- [x] **Current package path extraction** (Line 509 in `src/parsing/go/behavior.rs`):
+  - [x] Extract current package path from file context
+  - [x] Implement file-to-package path mapping
+  - [x] Support both GOPATH and module-based layouts
   - Rationale: Required for proper relative import resolution
 
-- [ ] **Project root detection** (Line 521 in `src/parsing/go/behavior.rs`):
-  - [ ] Implement project root detection by finding `go.mod` files
-  - [ ] Walk up directory tree to find project boundaries
-  - [ ] Cache results for performance
+- [x] **Project root detection** (Line 521 in `src/parsing/go/behavior.rs`):
+  - [x] Implement project root detection by finding `go.mod` files
+  - [x] Walk up directory tree to find project boundaries
+  - [x] Cache results for performance
   - Rationale: Required for vendor directory resolution and module path calculation
 
 ### 9.4 Test Infrastructure Enhancements 🟢
