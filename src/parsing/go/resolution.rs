@@ -552,7 +552,11 @@ impl GoResolutionContext {
             .count();
 
         // Calculate how many parts to keep from the current path
-        let keep_count = if up_count >= current_parts.len() {
+        // Special case: if going up would leave us at just the module name,
+        // and we have more to go up, we go to root (outside the module)
+        let keep_count = if up_count == current_parts.len() - 1 && current_parts.len() >= 3 {
+            0 // Go to root when traversing up to module level and beyond
+        } else if up_count >= current_parts.len() {
             0 // Go beyond the root
         } else {
             current_parts.len() - up_count
