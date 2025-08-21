@@ -80,7 +80,7 @@ MAX_AGE = 150
             SymbolKind::Class,
             SymbolKind::Function,
             SymbolKind::Method,
-            SymbolKind::Variable,
+            SymbolKind::Constant,
         ],
     },
     LanguageTestData {
@@ -117,7 +117,8 @@ const MAX_AGE: number = 150;
             SymbolKind::Class,
             SymbolKind::Function,
             SymbolKind::Method,
-            SymbolKind::Variable,
+            SymbolKind::Field,
+            SymbolKind::Constant,
         ],
     },
     LanguageTestData {
@@ -483,23 +484,3 @@ fn test_language_registry_integrity() -> Result<()> {
     Ok(())
 }
 
-/// Integration test that runs all regression tests together
-#[test]
-fn test_complete_regression_suite() -> Result<()> {
-    println!("\n🧪 Running Complete Language Parser Regression Suite");
-    println!("{}", "=".repeat(60));
-
-    // Run all regression tests in sequence
-    test_all_parsers_still_work()?;
-    test_go_parser_registration()?;
-    test_mcp_recognizes_go_files()?;
-    test_no_parser_conflicts()?;
-    test_language_registry_integrity()?;
-
-    println!("\n🎉 All regression tests passed!");
-    println!("   The Go parser integration is working correctly");
-    println!("   and has not broken any existing functionality.");
-    println!("{}", "=".repeat(60));
-
-    Ok(())
-}
