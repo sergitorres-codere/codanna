@@ -1009,6 +1009,37 @@ impl SimpleIndexer {
             )?;
         }
 
+        // Process plain function calls
+        let function_calls = parser.find_calls(content);
+        debug_print!(
+            self,
+            "Found {} function calls in file {:?}",
+            function_calls.len(),
+            file_id
+        );
+
+        for (caller, called_function, range) in function_calls {
+            debug_print!(
+                self,
+                "Processing function call: {} -> {}",
+                caller,
+                called_function
+            );
+
+            // Create metadata for function calls
+            let metadata = Some(RelationshipMetadata::new()
+                .at_position(range.start_line, range.start_column)
+                .with_context("function_call".to_string()));
+
+            self.add_relationships_by_name(
+                caller,
+                called_function,
+                file_id,
+                behavior.map_relationship("calls"),
+                metadata,
+            )?;
+        }
+
         // 2. Trait implementations
         let implementations = parser.find_implementations(content);
         for (type_name, trait_name, _range) in implementations {
