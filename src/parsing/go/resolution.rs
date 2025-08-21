@@ -554,10 +554,10 @@ impl GoResolutionContext {
         // Calculate how many parts to keep from the current path
         // Special case: if going up would leave us at just the module name,
         // and we have more to go up, we go to root (outside the module)
-        let keep_count = if up_count == current_parts.len() - 1 && current_parts.len() >= 3 {
-            0 // Go to root when traversing up to module level and beyond
-        } else if up_count >= current_parts.len() {
-            0 // Go beyond the root
+        let keep_count = if (up_count == current_parts.len() - 1 && current_parts.len() >= 3)
+            || up_count >= current_parts.len()
+        {
+            0 // Go to root when traversing up to/beyond module level
         } else {
             current_parts.len() - up_count
         };
@@ -568,7 +568,7 @@ impl GoResolutionContext {
         // Add non-".." parts from the import path
         for part in import_parts {
             match part {
-                "." | "./" => continue, // Current directory
+                "." | "./" => continue,   // Current directory
                 ".." | "../" => continue, // Already handled above
                 _ if !part.is_empty() => resolved_parts.push(part),
                 _ => continue,
