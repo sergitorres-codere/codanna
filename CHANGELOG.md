@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.5.2] - 2025-08-20
+## [0.5.2] - 2025-08-21
 
 ### Added
 - Language filtering for semantic search in mixed-language codebases
@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - File paths with line numbers in JSON output for all retrieve commands
 - Unified output schema with zero-cost abstractions (OutputManager)
 - Dual format support for all retrieve commands (positional and key:value)
+
+New slash commands:
+- /find: Smart semantic search with natural language query optimization
+- /deps: Dependency analysis with coupling metrics and refactoring insights
 
 ### Fixed
 - TypeScript JSDoc extraction for exported functions

@@ -4,6 +4,23 @@
 
 Give your code assistant the ability to see through your codebase—understanding functions, tracing relationships, and finding implementations with surgical precision. Context-first coding. No grep-and-hope loops. No endless back-and-forth. Just smarter engineering in fewer keystrokes.
 
+## Table of Contents
+
+- [What It Solves](#what-it-solves)
+- [Why Bother](#why-bother)
+- [Quick Start](#quick-start)
+- [How Accurate and Fast is Codanna?](#how-accurate-and-fast-is-codanna)
+- [How It Works](#how-it-works)
+- [Claude - MCP, Agents, Slash commands](#claude)
+- [Unix-Native. Pipe it, baby!](#unix-native-pipe-it-baby)
+- [Configuration](#configuration)
+- [Nerds Section](#nerds-section)
+- [Requirements](#requirements)
+- [Current Limitations](#current-limitations)
+- [Roadmap](#roadmap)
+- [Contributing](#contributing)
+- [License](#license)
+
 ## What It Solves
 
 Your AI assistant knows your code:
@@ -203,7 +220,14 @@ template = "Significant impact with {result_count} symbols. Break the change int
 
 ### Claude Slash Commands
 
-Coming soon — stay tuned
+Codanna includes custom slash commands for Claude that provide intelligent workflows for code exploration:
+
+| Command | Description | Example Report |
+|---------|-------------|----------------|
+| `/find <query>` | Smart semantic search with natural language - finds symbols, patterns, and implementations using optimized queries | [Language Registry Investigation](reports/find/find-language-registry-scaffold.md) |
+| `/deps <symbol>` | Analyze dependencies of a symbol - shows what it depends on, what depends on it, coupling metrics, and refactoring opportunities | [find_symbol Dependencies](reports/deps/find_symbol-method-dependencies.md) |
+
+These commands use Codanna's MCP tools under the hood but provide guided workflows with comprehensive analysis and automatic report generation.
 
 ## Unix-Native. Pipe it, baby!
 

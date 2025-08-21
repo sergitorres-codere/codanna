@@ -2279,9 +2279,8 @@ mod tests {
         assert!(retrieved.is_some());
 
         let retrieved_symbol = retrieved.unwrap();
-        // For now, language_id will be None since we haven't wired it through storage yet
-        // This test documents the current behavior and will fail when we implement storage
-        assert_eq!(retrieved_symbol.language_id, None); // TODO: Should be Some(LanguageId::new("rust"))
+        // Language ID is now properly stored and retrieved through the registry
+        assert_eq!(retrieved_symbol.language_id, Some(LanguageId::new("rust")));
         assert_eq!(retrieved_symbol.name.as_ref(), "test_func");
         assert_eq!(
             retrieved_symbol.signature.as_deref(),

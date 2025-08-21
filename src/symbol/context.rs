@@ -44,8 +44,8 @@ bitflags! {
 
 impl fmt::Display for SymbolContext {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Use the existing format_location_with_type method
-        // This provides: "Function calculate_similarity at src/vector/similarity.rs:101"
+        // Use format_location_with_type for concise symbol identification
+        // Format: "{Kind} {name} at {file_path}"
         write!(f, "{}", self.format_location_with_type())
     }
 }
