@@ -1,25 +1,43 @@
 ---
-allowed-tools: Bash(codanna mcp:*), Bash(jq:*), Bash(echo:*)
 description: Smart semantic search with natural language
 argument-hint: <search_query>
 ---
 
-## Semantic Search: "$ARGUMENTS"
+## Search Query Analysis
 
-### Search Results with Context
-!`codanna mcp semantic_search_with_context query:"$ARGUMENTS" limit:3 --json | jq -r 'if .result then .result else {"error": "Search failed or no results"} end'`
+**User's Original Query**: "$ARGUMENTS"
 
-### Alternative Text Search
-If semantic search has limited results, here's a text-based search:
-!`codanna retrieve search "$ARGUMENTS" --json | jq -r 'if .status == "success" then {results: .data.items[:5], total: .data.count} else {results: [], message: "No matches found"} end'`
+### Query Optimization
 
-## Analysis
+Claude, analyze the query above and improve it for code search:
 
-Based on the search results for "$ARGUMENTS", I've identified the most relevant symbols:
+1. **If vague** (e.g., "that parsing thing") → Make it specific (e.g., "language parser implementation")
+2. **If a question** (e.g., "how does parsing work?") → Extract keywords (e.g., "parsing implementation process")
+3. **If conversational** (e.g., "the stuff that handles languages") → Use technical terms (e.g., "language handler processor")
+4. **If too broad** (e.g., "errors") → Add context (e.g., "error handling exception management")
 
-1. **Primary Matches**: The top results based on semantic similarity
-2. **Context**: How these symbols relate to your query
-3. **Usage Patterns**: Common ways to use these symbols
-4. **Related Concepts**: Other symbols you might be interested in
+**Optimized Search Query**: _{Claude: Write your improved query here, then use it below}_
 
-Let me know if you'd like more details about any specific result or want to refine the search query.
+---
+
+### Semantic Search with Context
+
+Execute this command with your optimized query:
+
+```bash
+codanna mcp semantic_search_with_context query:"{YourOptimizedQuery}" limit:5
+```
+
+### Alternative: Full-Text Search
+
+If semantic search needs different keywords, try this (use your optimized query):
+
+```bash
+codanna retrieve search "{YourOptimizedQuery}" --limit 10
+```
+
+**Instructions for Claude**: 
+1. First, write an optimized version of the user's query
+2. Replace `{YourOptimizedQuery}` in both commands with your optimized query
+3. Execute the semantic search command
+4. If results are poor, try adjusting the query and searching again

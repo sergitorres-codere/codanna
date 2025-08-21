@@ -222,6 +222,22 @@ impl LanguageRegistry {
         self.extension_map.get(ext).and_then(|id| self.get(*id))
     }
 
+    /// Convert a string to LanguageId by looking up registered languages
+    ///
+    /// This is useful when reading language identifiers from storage
+    /// where they are stored as strings. Returns None if the language
+    /// is not registered.
+    #[must_use]
+    pub fn find_language_id(&self, name: &str) -> Option<LanguageId> {
+        // Iterate through all registered languages to find a match
+        for def in self.definitions.values() {
+            if def.id().as_str() == name {
+                return Some(def.id());
+            }
+        }
+        None
+    }
+
     /// Iterate over all available languages
     ///
     /// This includes disabled languages. Filter by is_enabled()

@@ -1391,11 +1391,20 @@ impl DocumentIndex {
             visibility,
             scope_context,
             language_id: {
-                // Cannot convert string to LanguageId here as it requires &'static str
-                // The storage layer remains language-agnostic
-                // For now, return None - the actual language is stored in the document
-                // and will be available when we implement language filtering in queries
-                None
+                // Read the language field from the document and convert to LanguageId
+                // using the language registry (which maintains the static strings)
+                doc.get_first(self.schema.language)
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                    .and_then(|lang_str| {
+                        // Use the global registry to convert string to LanguageId
+                        // This maintains language-agnostic storage while properly
+                        // converting to the type-safe LanguageId at retrieval time
+                        crate::parsing::get_registry()
+                            .lock()
+                            .ok()
+                            .and_then(|registry| registry.find_language_id(lang_str))
+                    })
             },
         })
     }

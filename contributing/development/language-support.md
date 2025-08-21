@@ -2,12 +2,12 @@
 
 > **📝 Note: This guide is currently under development**
 > 
-> We're actively updating this documentation to reflect the latest v0.5.0 architecture improvements. 
+> We're actively updating this documentation to reflect the latest v0.5.2 architecture improvements. 
 > Some sections may be incomplete or subject to change as we refine the language implementation process.
 
 Languages self-register via the modular registry system. Each language lives in its own subdirectory with complete isolation and language-specific resolution capabilities.
 
-## Current Status (v0.5.0)
+## Current Status (v0.5.2)
 
 **✅ Production Ready:**
 - Language registry architecture with self-registration
@@ -92,7 +92,7 @@ pub trait LanguageParser: Send + Sync {
 }
 ```
 
-**Signature Extraction (Required in v0.5.0):**
+**Signature Extraction (Required:**
 All parsers must extract complete signatures for all symbol types:
 ```rust
 // Common pattern: exclude body, include full declaration
@@ -121,7 +121,7 @@ pub trait LanguageBehavior: Send + Sync {
     fn supports_traits(&self) -> bool { false }
     fn supports_inherent_methods(&self) -> bool { false }
     
-    // Symbol resolution (v0.5.0)
+    // Symbol resolution
     fn resolve_symbol(&self, name: &str, context: &dyn ResolutionScope, 
                      document_index: &DocumentIndex) -> Option<SymbolId>;
     fn is_resolvable_symbol(&self, symbol: &Symbol) -> bool;
@@ -214,7 +214,7 @@ Every language test should explore:
    - Add to `src/parsing/registry.rs`: `super::{language}::register(registry);`
    - Update `src/parsing/mod.rs` with public module and re-exports
 4. **Dependencies** - Add to `Cargo.toml`: `tree-sitter-{language} = "0.x"`
-5. **Required Features (v0.5.0)**:
+5. **Required Features**:
    - ✅ Symbol extraction with scope context
    - ✅ Complete signature extraction for all symbol types
    - ✅ Parent context tracking for nested symbols
