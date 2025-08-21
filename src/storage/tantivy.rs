@@ -127,7 +127,7 @@ impl IndexSchema {
 
         // Metadata fields (for counters, etc.)
         let meta_key = builder.add_text_field("meta_key", STRING | STORED | FAST);
-        let meta_value = builder.add_u64_field("meta_value", STORED);
+        let meta_value = builder.add_u64_field("meta_value", STORED | FAST);
 
         // Vector search fields
         let cluster_id = builder.add_u64_field("cluster_id", FAST | STORED);

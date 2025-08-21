@@ -12,6 +12,8 @@
 
 use anyhow::Result;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use tempfile::TempDir;
 use thiserror::Error;
 
 /// Errors specific to Go project integration testing
@@ -104,8 +106,8 @@ fn test_complete_go_project_indexing() -> Result<()> {
     assert!(
         symbol_names
             .iter()
-            .any(|name| name.contains("Utils") || name.contains("util")),
-        "Should find utility functions/types"
+            .any(|name| name.contains("Process") || name.contains("Sanitize")),
+        "Should find utility functions (Process, Sanitize)"
     );
 
     // From internal/config/config.go
@@ -514,10 +516,24 @@ struct SingleFileResult {
 
 /// Index a complete Go project directory
 fn index_go_project(project_path: &Path) -> Result<ProjectIndexResult> {
+    use codanna::Settings;
     use codanna::indexing::SimpleIndexer;
 
-    // Create indexer
-    let mut indexer = SimpleIndexer::new();
+    // Create a temporary directory for the index to avoid conflicts
+    let temp_dir = TempDir::new().map_err(|e| {
+        GoProjectIntegrationError::ProjectIndexingFailed(format!(
+            "Failed to create temporary directory: {e}"
+        ))
+    })?;
+
+    let index_path = temp_dir.path().join("test_index");
+
+    // Create settings with the temporary index path
+    let mut settings = Settings::default();
+    settings.index_path = index_path;
+
+    // Create indexer with isolated settings
+    let mut indexer = SimpleIndexer::with_settings(Arc::new(settings));
 
     // Index the directory
     let stats = indexer
