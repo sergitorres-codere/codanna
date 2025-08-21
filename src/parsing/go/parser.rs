@@ -69,7 +69,13 @@ impl GoParser {
         })
     }
 
-    /// Extract symbols from a Go node
+    /// Extract symbols from a Go AST node recursively
+    ///
+    /// This is the main symbol extraction method that handles all Go language constructs:
+    /// - Functions and methods (with receivers)
+    /// - Type declarations (structs, interfaces, type aliases)
+    /// - Variable and constant declarations
+    /// - Maintains proper scope context and parent-child relationships
     fn extract_symbols_from_node(
         &mut self,
         node: Node,
@@ -397,6 +403,10 @@ impl GoParser {
     }
 
     /// Process a type_spec node (individual type definition)
+    /// Process a Go type specification node
+    ///
+    /// Handles type definitions including structs, interfaces, and type aliases.
+    /// Extracts type name, fields/methods, and generates appropriate signatures.
     fn process_type_spec(
         &mut self,
         node: Node,
@@ -1272,7 +1282,10 @@ impl GoParser {
     // There are no explicit "implements" declarations to detect at parse time
     // Implementation detection would require semantic analysis across files
 
-    /// Extract imports from AST node recursively  
+    /// Extract imports from AST node recursively
+    ///
+    /// Processes import_declaration nodes and delegates to specialized handlers
+    /// for different Go import styles (single, grouped, aliased, etc.)
     fn extract_imports_from_node(
         &self,
         node: Node,
@@ -1379,6 +1392,12 @@ impl GoParser {
 
     // Helper methods for find_calls()
     #[allow(clippy::only_used_in_recursion)]
+    /// Recursively extract function calls from Go AST nodes
+    ///
+    /// Traverses the syntax tree to find all function calls including:
+    /// - Direct function calls: `functionName()`
+    /// - Method calls: `receiver.method()`
+    /// - Package-qualified calls: `pkg.Function()`
     fn extract_calls_recursive<'a>(
         &self,
         node: &tree_sitter::Node,
@@ -1844,6 +1863,14 @@ impl GoParser {
 }
 
 impl LanguageParser for GoParser {
+    /// Parse Go source code and extract all symbols (functions, structs, interfaces, variables, etc.)
+    ///
+    /// This method handles the complete Go language syntax including:
+    /// - Package declarations and imports
+    /// - Function and method declarations (with receivers)
+    /// - Struct and interface type definitions
+    /// - Variable and constant declarations
+    /// - Generic types and constraints (Go 1.18+)
     fn parse(
         &mut self,
         code: &str,
@@ -1941,6 +1968,10 @@ impl LanguageParser for GoParser {
         None
     }
 
+    /// Extract function calls from Go source code
+    ///
+    /// Returns tuples of (caller_context, called_function, range) for all function calls
+    /// including method calls via dot notation and package-qualified calls.
     fn find_calls<'a>(&mut self, code: &'a str) -> Vec<(&'a str, &'a str, Range)> {
         let tree = match self.parser.parse(code, None) {
             Some(tree) => tree,
@@ -1956,6 +1987,10 @@ impl LanguageParser for GoParser {
         calls
     }
 
+    /// Extract method calls from Go source code
+    ///
+    /// Returns MethodCall structs containing caller, method name, and position information
+    /// for all method invocations including pointer receiver calls and chained calls.
     fn find_method_calls(&mut self, code: &str) -> Vec<MethodCall> {
         let tree = match self.parser.parse(code, None) {
             Some(tree) => tree,
@@ -1987,6 +2022,14 @@ impl LanguageParser for GoParser {
         Vec::new()
     }
 
+    /// Extract import declarations from Go source code
+    ///
+    /// Handles all Go import styles:
+    /// - Standard imports: `import "fmt"`
+    /// - Grouped imports: `import ( "fmt"; "os" )`
+    /// - Aliased imports: `import f "fmt"`
+    /// - Dot imports: `import . "fmt"`
+    /// - Blank imports: `import _ "database/sql"`
     fn find_imports(&mut self, code: &str, file_id: FileId) -> Vec<Import> {
         let mut imports = Vec::new();
 
@@ -1998,6 +2041,10 @@ impl LanguageParser for GoParser {
         imports
     }
 
+    /// Extract type usage references from Go source code
+    ///
+    /// Returns tuples of (context, type_name, range) for all type references
+    /// including struct field types, function parameters, and return types.
     fn find_uses<'a>(&mut self, code: &'a str) -> Vec<(&'a str, &'a str, Range)> {
         let tree = match self.parser.parse(code, None) {
             Some(tree) => tree,
@@ -2012,6 +2059,10 @@ impl LanguageParser for GoParser {
         uses
     }
 
+    /// Extract method definitions from Go source code
+    ///
+    /// Returns tuples of (receiver_type, method_name, range) for all method definitions
+    /// with explicit receivers, distinguishing them from standalone functions.
     fn find_defines<'a>(&mut self, code: &'a str) -> Vec<(&'a str, &'a str, Range)> {
         let tree = match self.parser.parse(code, None) {
             Some(tree) => tree,

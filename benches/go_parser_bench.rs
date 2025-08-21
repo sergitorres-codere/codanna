@@ -169,6 +169,37 @@ fn bench_go_language_constructs(c: &mut Criterion) {
     group.finish();
 }
 
+/// Benchmark scalable test data generation
+/// Tests parser performance with systematically generated test data of varying sizes
+fn bench_scalable_test_data(c: &mut Criterion) {
+    let mut group = c.benchmark_group("scalable_test_data");
+
+    // Test with different data sizes to measure scalability
+    let data_sizes = vec![100, 500, 1000, 2000, 5000, 10000];
+
+    for size in data_sizes {
+        let source_code = generate_scalable_go_code(size);
+        let symbol_count = count_expected_symbols(&source_code);
+        group.throughput(Throughput::Elements(symbol_count as u64));
+
+        group.bench_with_input(
+            BenchmarkId::new("generated_data", size),
+            &source_code,
+            |b, code| {
+                let mut parser = GoParser::new().expect("Failed to create Go parser");
+                b.iter(|| {
+                    let mut symbol_counter = SymbolCounter::new();
+                    let file_id = FileId::new(1).expect("Failed to create file ID");
+                    let symbols = parser.parse(black_box(code), file_id, &mut symbol_counter);
+                    black_box(symbols.len()) // Return count to avoid large memory allocations in benchmark
+                });
+            },
+        );
+    }
+
+    group.finish();
+}
+
 // Helper functions for generating test data
 
 /// Create basic Go code for benchmarking
@@ -623,6 +654,67 @@ fn create_many_generics(count: usize) -> String {
     code
 }
 
+/// Generate scalable Go code for systematic performance testing
+/// This function creates Go source code with a controlled number of symbols
+/// to enable systematic testing at different scales.
+fn generate_scalable_go_code(target_symbols: usize) -> String {
+    let mut code = String::from(
+        "package scalable_test\n\nimport (\n\t\"fmt\"\n\t\"context\"\n\t\"time\"\n)\n\n",
+    );
+
+    // Calculate distribution of symbols - aim for varied types
+    let functions = target_symbols / 4;
+    let structs = target_symbols / 8;
+    let interfaces = target_symbols / 16;
+    let methods = target_symbols / 4;
+    let constants = target_symbols / 8;
+    let variables = target_symbols / 8;
+
+    // Add constants
+    for i in 0..constants {
+        code.push_str(&format!("const Constant{i} = \"value_{i}\"\n"));
+    }
+    code.push('\n');
+
+    // Add variables
+    for i in 0..variables {
+        code.push_str(&format!("var Variable{i} string = \"var_{i}\"\n"));
+    }
+    code.push('\n');
+
+    // Add structs with fields
+    for i in 0..structs {
+        code.push_str(&format!(
+            "type Struct{i} struct {{\n\tField1_{i} string\n\tField2_{i} int\n\tField3_{i} bool\n}}\n\n"
+        ));
+    }
+
+    // Add interfaces
+    for i in 0..interfaces {
+        code.push_str(&format!(
+            "type Interface{i} interface {{\n\tMethod1_{i}() string\n\tMethod2_{i}(int) bool\n}}\n\n"
+        ));
+    }
+
+    // Add regular functions
+    for i in 0..functions {
+        code.push_str(&format!(
+            "func Function{i}(param1 string, param2 int) (string, error) {{\n\treturn fmt.Sprintf(\"func_%d_%s_%d\", {i}, param1, param2), nil\n}}\n\n"
+        ));
+    }
+
+    // Add methods for structs
+    for i in 0..(methods.min(structs * 3)) {
+        let struct_idx = i % structs;
+        code.push_str(&format!(
+            "func (s *Struct{struct_idx}) Method{i}() string {{\n\treturn fmt.Sprintf(\"method_{i}_%s\", s.Field1_{struct_idx})\n}}\n\n"
+        ));
+    }
+
+    code.push_str("func main() {}\n");
+    code
+}
+
 /// Find Go fixture files for benchmarking
 fn find_go_fixtures() -> Vec<PathBuf> {
     let mut fixtures = Vec::new();
@@ -666,6 +758,7 @@ criterion_group!(
     bench_go_fixture_files,
     bench_go_memory_usage,
     bench_parser_initialization,
-    bench_go_language_constructs
+    bench_go_language_constructs,
+    bench_scalable_test_data
 );
 criterion_main!(benches);

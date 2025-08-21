@@ -83,6 +83,11 @@ impl LanguageBehavior for GoBehavior {
         }
     }
 
+    /// Parse visibility from Go symbol signature using capitalization rules
+    ///
+    /// In Go, visibility is determined by the first character of the identifier:
+    /// - Uppercase first letter = Public/Exported (accessible outside package)
+    /// - Lowercase first letter = Private/Unexported (package-private)
     fn parse_visibility(&self, signature: &str) -> Visibility {
         // Go uses capitalization for visibility
         // Extract the symbol name from the signature and check if it starts with uppercase
@@ -135,16 +140,28 @@ impl LanguageBehavior for GoBehavior {
         }
     }
 
+    /// Go uses interfaces instead of traits
+    ///
+    /// Go's interface system provides similar functionality to traits
+    /// but uses structural typing (duck typing) rather than explicit implementation.
     fn supports_traits(&self) -> bool {
         false // Go has interfaces, not traits (traits are a Rust concept)
     }
 
+    /// Go supports methods on types (inherent methods)
+    ///
+    /// Methods can be defined on any named type using receiver syntax:
+    /// `func (r ReceiverType) MethodName() {}`
     fn supports_inherent_methods(&self) -> bool {
         true // Go has methods on types
     }
 
     // Go-specific resolution overrides
 
+    /// Create a Go-specific resolution context for symbol resolution
+    ///
+    /// Returns a GoResolutionContext that handles Go's package-based scoping,
+    /// import resolution, and module system integration.
     fn create_resolution_context(&self, file_id: FileId) -> Box<dyn ResolutionScope> {
         Box::new(GoResolutionContext::new(file_id))
     }

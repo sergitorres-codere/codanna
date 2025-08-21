@@ -349,6 +349,9 @@ pub struct GoResolutionContext {
 }
 
 impl GoResolutionContext {
+    /// Create a new Go resolution context for the specified file
+    ///
+    /// Initializes package-level scoping for Go's module system and imports
     pub fn new(file_id: FileId) -> Self {
         Self {
             file_id,
@@ -542,16 +545,27 @@ impl GoResolutionContext {
         let current_parts: Vec<&str> = current_package_path.split('/').collect();
         let import_parts: Vec<&str> = import_path.split('/').collect();
 
-        let mut resolved_parts = current_parts;
+        // Count the number of ".." in the import path
+        let up_count = import_parts
+            .iter()
+            .filter(|&part| *part == ".." || *part == "../")
+            .count();
 
+        // Calculate how many parts to keep from the current path
+        let keep_count = if up_count >= current_parts.len() {
+            0 // Go beyond the root
+        } else {
+            current_parts.len() - up_count
+        };
+
+        // Start with the parts we keep from the current path
+        let mut resolved_parts: Vec<&str> = current_parts.into_iter().take(keep_count).collect();
+
+        // Add non-".." parts from the import path
         for part in import_parts {
             match part {
                 "." | "./" => continue, // Current directory
-                ".." | "../" => {
-                    if !resolved_parts.is_empty() {
-                        resolved_parts.pop();
-                    }
-                }
+                ".." | "../" => continue, // Already handled above
                 _ if !part.is_empty() => resolved_parts.push(part),
                 _ => continue,
             }
@@ -687,6 +701,8 @@ impl GoResolutionContext {
     }
 
     /// Handle Go module paths and go.mod resolution
+    ///
+    /// Resolve Go module paths using go.mod file information
     ///
     /// This method implements Go module resolution logic with go.mod parsing
     /// and module replacement support.
@@ -1024,6 +1040,10 @@ impl Default for GoInheritanceResolver {
 }
 
 impl GoInheritanceResolver {
+    /// Create a new Go inheritance resolver
+    ///
+    /// Tracks Go's implicit interface implementation (structural typing)
+    /// and interface embedding relationships for type compatibility checking.
     pub fn new() -> Self {
         Self {
             struct_implements: HashMap::new(),
