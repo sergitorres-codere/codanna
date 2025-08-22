@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.3] - 2025-08-22
+
+### Added
+- Function call tracking for all language parsers via PR #17
+- Automatic detection and storage of function calls during indexing
+- Call relationships now tracked alongside existing symbol relationships
+
+### Fixed
+- MCP schema validation: Changed non-standard `uint` format to `uint32`
+- Python parser: Exclude method calls from function call tracking (only track function calls)
+- PHP parser: Exclude method calls from function call tracking (only track function calls)
+- Test deduplication for function call relationships from multiple analysis passes
+
+### Changed
+- CI workflow: Switched to PR-triggered CI with concurrency control for better resource management
+
 ## [0.5.2] - 2025-08-21
 
 ### Added

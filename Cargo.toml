@@ -1,6 +1,6 @@
 [package]
 name = "codanna"
-version = "0.5.2"
+version = "0.5.3"
 authors = ["Angel Bartolli <bartolli@gmail.com>"]
 edition = "2024"
 description = "Code Intelligence for Large Language Models"
