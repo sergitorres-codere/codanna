@@ -1,20 +1,28 @@
 name: Quick Check
+
 on:
-  push:
-    branches: ['**']
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - '.claude/**'
-      - 'LICENSE'
-      - '.gitignore'
   pull_request:
+    types: [opened, synchronize, reopened]
     paths-ignore:
       - '**.md'
       - 'docs/**'
       - '.claude/**'
       - 'LICENSE'
       - '.gitignore'
+  
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.claude/**'
+      - 'LICENSE'
+      - '.gitignore'
+
+# Cancel outdated builds for the same PR
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -24,7 +32,13 @@ jobs:
   quick-check:
     name: Quick Checks
     runs-on: ubuntu-latest
-    timeout-minutes: 5  # Fail if takes longer than 5 minutes
+    timeout-minutes: 5
+    
+    # Minimal permissions for security
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
     
     steps:
       - uses: actions/checkout@v4
@@ -58,8 +72,40 @@ jobs:
       - name: Compile check
         run: cargo check --all-features
       
-      # Skip doc check in quick-check - it's too slow (1m 44s)
-      # Doc checking moved to full-test suite
-      
-      # Skip tests in quick-check - cargo check is sufficient
-      # Tests moved to full-test suite
+      # Add status comment on PR (only for PRs)
+      - name: Comment PR status
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const outcome = '${{ job.status }}';
+            const emoji = outcome === 'success' ? '✅' : '❌';
+            const message = `${emoji} Quick checks ${outcome}`;
+            
+            // Find and update existing comment or create new one
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            
+            const botComment = comments.find(comment => 
+              comment.user.type === 'Bot' && 
+              comment.body.includes('Quick checks')
+            );
+            
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: message
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: message
+              });
+            }
