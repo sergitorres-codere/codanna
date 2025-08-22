@@ -715,12 +715,9 @@ impl PythonParser {
                 Some(&code[function_node.byte_range()])
             }
             "attribute" => {
-                // Method call: obj.method() - extract just the method name
-                if let Some(attr_node) = function_node.child_by_field_name("attribute") {
-                    Some(&code[attr_node.byte_range()])
-                } else {
-                    None
-                }
+                // Method call: obj.method() - should NOT be tracked by find_calls
+                // Return None to exclude method calls from function call tracking
+                None
             }
             _ => None,
         }
