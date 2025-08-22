@@ -1498,7 +1498,7 @@ async fn main() {
                         .as_ref()
                         .and_then(|m| m.get("limit"))
                         .and_then(|v| v.as_u64())
-                        .unwrap_or(10) as usize;
+                        .unwrap_or(10) as u32;
                     let kind = arguments
                         .as_ref()
                         .and_then(|m| m.get("kind"))
@@ -1525,7 +1525,7 @@ async fn main() {
                         _ => None,
                     });
 
-                    match indexer.search(q, limit, kind_filter, module, language) {
+                    match indexer.search(q, limit as usize, kind_filter, module, language) {
                         Ok(results) => Some(results),
                         Err(_) => Some(Vec::new()),
                     }
@@ -1620,7 +1620,7 @@ async fn main() {
                             .as_ref()
                             .and_then(|m| m.get("limit"))
                             .and_then(|v| v.as_u64())
-                            .unwrap_or(5) as usize; // Default 5 for context version
+                            .unwrap_or(5) as u32; // Default 5 for context version
                         let threshold = arguments
                             .as_ref()
                             .and_then(|m| m.get("threshold"))
@@ -1633,9 +1633,16 @@ async fn main() {
 
                         let search_results = match threshold {
                             Some(t) => indexer.semantic_search_docs_with_threshold_and_language(
-                                q, limit, t, language,
+                                q,
+                                limit as usize,
+                                t,
+                                language,
                             ),
-                            None => indexer.semantic_search_docs_with_language(q, limit, language),
+                            None => indexer.semantic_search_docs_with_language(
+                                q,
+                                limit as usize,
+                                language,
+                            ),
                         };
 
                         match search_results {
@@ -1801,7 +1808,7 @@ async fn main() {
                         .as_ref()
                         .and_then(|m| m.get("max_depth"))
                         .and_then(|v| v.as_u64())
-                        .unwrap_or(3) as usize;
+                        .unwrap_or(3) as u32;
                     server
                         .analyze_impact(Parameters(AnalyzeImpactRequest {
                             symbol_name: symbol_name.to_string(),
@@ -1823,7 +1830,7 @@ async fn main() {
                         .as_ref()
                         .and_then(|m| m.get("limit"))
                         .and_then(|v| v.as_u64())
-                        .unwrap_or(10) as usize;
+                        .unwrap_or(10) as u32;
                     let kind = arguments
                         .as_ref()
                         .and_then(|m| m.get("kind"))
@@ -1862,7 +1869,7 @@ async fn main() {
                         .as_ref()
                         .and_then(|m| m.get("limit"))
                         .and_then(|v| v.as_u64())
-                        .unwrap_or(10) as usize;
+                        .unwrap_or(10) as u32;
                     let threshold = arguments
                         .as_ref()
                         .and_then(|m| m.get("threshold"))
@@ -1897,7 +1904,7 @@ async fn main() {
                         .as_ref()
                         .and_then(|m| m.get("limit"))
                         .and_then(|v| v.as_u64())
-                        .unwrap_or(5) as usize;
+                        .unwrap_or(5) as u32;
                     let threshold = arguments
                         .as_ref()
                         .and_then(|m| m.get("threshold"))

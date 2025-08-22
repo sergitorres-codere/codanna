@@ -96,7 +96,7 @@ pub struct AnalyzeImpactRequest {
     pub symbol_name: String,
     /// Maximum depth to search (default: 3)
     #[serde(default = "default_depth")]
-    pub max_depth: usize,
+    pub max_depth: u32,
 }
 
 #[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
@@ -105,7 +105,7 @@ pub struct SearchSymbolsRequest {
     pub query: String,
     /// Maximum number of results (default: 10)
     #[serde(default = "default_limit")]
-    pub limit: usize,
+    pub limit: u32,
     /// Filter by symbol kind (e.g., "Function", "Struct", "Trait")
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
@@ -123,7 +123,7 @@ pub struct SemanticSearchRequest {
     pub query: String,
     /// Maximum number of results (default: 10)
     #[serde(default = "default_limit")]
-    pub limit: usize,
+    pub limit: u32,
     /// Minimum similarity score (0-1)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub threshold: Option<f32>,
@@ -138,7 +138,7 @@ pub struct SemanticSearchWithContextRequest {
     pub query: String,
     /// Maximum number of results (default: 5, as each includes full context)
     #[serde(default = "default_context_limit")]
-    pub limit: usize,
+    pub limit: u32,
     /// Minimum similarity score (0-1)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub threshold: Option<f32>,
@@ -147,15 +147,15 @@ pub struct SemanticSearchWithContextRequest {
     pub lang: Option<String>,
 }
 
-fn default_depth() -> usize {
+fn default_depth() -> u32 {
     3
 }
 
-fn default_limit() -> usize {
+fn default_limit() -> u32 {
     10
 }
 
-fn default_context_limit() -> usize {
+fn default_context_limit() -> u32 {
     5
 }
 
@@ -580,7 +580,7 @@ impl CodeIntelligenceServer {
                 // First get context for the symbol being analyzed
                 let symbol_ctx = indexer.get_symbol_context(symbol_id, ContextIncludes::CALLERS);
 
-                let impacted = indexer.get_impact_radius(symbol_id, Some(max_depth));
+                let impacted = indexer.get_impact_radius(symbol_id, Some(max_depth as usize));
 
                 if impacted.is_empty() {
                     return Ok(CallToolResult::success(vec![Content::text(format!(
@@ -704,11 +704,13 @@ impl CodeIntelligenceServer {
         let results = match threshold {
             Some(t) => indexer.semantic_search_docs_with_threshold_and_language(
                 &query,
-                limit,
+                limit as usize,
                 t,
                 lang.as_deref(),
             ),
-            None => indexer.semantic_search_docs_with_language(&query, limit, lang.as_deref()),
+            None => {
+                indexer.semantic_search_docs_with_language(&query, limit as usize, lang.as_deref())
+            }
         };
 
         match results {
@@ -793,11 +795,13 @@ impl CodeIntelligenceServer {
         let search_results = match threshold {
             Some(t) => indexer.semantic_search_docs_with_threshold_and_language(
                 &query,
-                limit,
+                limit as usize,
                 t,
                 lang.as_deref(),
             ),
-            None => indexer.semantic_search_docs_with_language(&query, limit, lang.as_deref()),
+            None => {
+                indexer.semantic_search_docs_with_language(&query, limit as usize, lang.as_deref())
+            }
         };
 
         match search_results {
@@ -1090,7 +1094,7 @@ impl CodeIntelligenceServer {
 
         match indexer.search(
             &query,
-            limit,
+            limit as usize,
             kind_filter,
             module.as_deref(),
             lang.as_deref(),
