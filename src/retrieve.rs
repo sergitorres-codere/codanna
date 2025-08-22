@@ -44,19 +44,19 @@ pub fn retrieve_symbol(
             }
         }
     } else {
-        // Transform symbols to SymbolContext with file paths
+        // Transform symbols to SymbolContext with file paths and relationships
+        use crate::symbol::context::ContextIncludes;
+
         let symbols_with_path: Vec<SymbolContext> = symbols
             .into_iter()
-            .map(|symbol| {
-                let base_path = indexer
-                    .get_file_path(symbol.file_id)
-                    .unwrap_or_else(|| "unknown".to_string());
-                let file_path = format!("{}:{}", base_path, symbol.range.start_line + 1);
-                SymbolContext {
-                    symbol,
-                    file_path,
-                    relationships: Default::default(),
-                }
+            .filter_map(|symbol| {
+                // Get full context with relationships (same as MCP find_symbol)
+                indexer.get_symbol_context(
+                    symbol.id,
+                    ContextIncludes::IMPLEMENTATIONS
+                        | ContextIncludes::DEFINITIONS
+                        | ContextIncludes::CALLERS,
+                )
             })
             .collect();
 
@@ -127,19 +127,17 @@ pub fn retrieve_callers(
             }
         }
 
-        // Transform to SymbolContext
+        // Transform to SymbolContext with relationships
+        use crate::symbol::context::ContextIncludes;
+
         let callers_with_path: Vec<SymbolContext> = all_callers
             .into_iter()
-            .map(|symbol| {
-                let base_path = indexer
-                    .get_file_path(symbol.file_id)
-                    .unwrap_or_else(|| "unknown".to_string());
-                let file_path = format!("{}:{}", base_path, symbol.range.start_line + 1);
-                SymbolContext {
-                    symbol,
-                    file_path,
-                    relationships: Default::default(),
-                }
+            .filter_map(|symbol| {
+                // Get context for each caller symbol (what it calls and defines)
+                indexer.get_symbol_context(
+                    symbol.id,
+                    ContextIncludes::CALLS | ContextIncludes::DEFINITIONS,
+                )
             })
             .collect();
 
@@ -210,19 +208,17 @@ pub fn retrieve_calls(
             }
         }
 
-        // Transform to SymbolContext
+        // Transform to SymbolContext with relationships
+        use crate::symbol::context::ContextIncludes;
+
         let calls_with_path: Vec<SymbolContext> = all_calls
             .into_iter()
-            .map(|symbol| {
-                let base_path = indexer
-                    .get_file_path(symbol.file_id)
-                    .unwrap_or_else(|| "unknown".to_string());
-                let file_path = format!("{}:{}", base_path, symbol.range.start_line + 1);
-                SymbolContext {
-                    symbol,
-                    file_path,
-                    relationships: Default::default(),
-                }
+            .filter_map(|symbol| {
+                // Get context for each called function (who calls it, what it defines)
+                indexer.get_symbol_context(
+                    symbol.id,
+                    ContextIncludes::CALLERS | ContextIncludes::DEFINITIONS,
+                )
             })
             .collect();
 
@@ -263,18 +259,17 @@ pub fn retrieve_implementations(
         vec![]
     };
 
+    // Transform implementations to SymbolContext with relationships
+    use crate::symbol::context::ContextIncludes;
+
     let impls_with_path: Vec<SymbolContext> = implementations
         .into_iter()
-        .map(|symbol| {
-            let base_path = indexer
-                .get_file_path(symbol.file_id)
-                .unwrap_or_else(|| "unknown".to_string());
-            let file_path = format!("{}:{}", base_path, symbol.range.start_line + 1);
-            SymbolContext {
-                symbol,
-                file_path,
-                relationships: Default::default(),
-            }
+        .filter_map(|symbol| {
+            // Get context for each implementation (what it defines, what calls it)
+            indexer.get_symbol_context(
+                symbol.id,
+                ContextIncludes::DEFINITIONS | ContextIncludes::CALLERS,
+            )
         })
         .collect();
 
@@ -333,20 +328,19 @@ pub fn retrieve_search(
         .search(query, limit, kind_filter, module, language)
         .unwrap_or_default();
 
+    // Transform search results to SymbolContext with relationships
+    use crate::symbol::context::ContextIncludes;
+
     let results_with_path: Vec<SymbolContext> = search_results
         .into_iter()
         .filter_map(|result| {
-            // Convert SearchResult to Symbol
-            if let Some(symbol) = indexer.get_symbol(result.symbol_id) {
-                let file_path = format!("{}:{}", result.file_path, result.line + 1);
-                Some(SymbolContext {
-                    symbol,
-                    file_path,
-                    relationships: Default::default(),
-                })
-            } else {
-                None
-            }
+            // Get full context for each search result
+            indexer.get_symbol_context(
+                result.symbol_id,
+                ContextIncludes::IMPLEMENTATIONS
+                    | ContextIncludes::DEFINITIONS
+                    | ContextIncludes::CALLERS,
+            )
         })
         .collect();
 
@@ -415,23 +409,17 @@ pub fn retrieve_impact(
         let symbol = &symbols[0];
         let impact_symbol_ids = indexer.get_impact_radius(symbol.id, Some(max_depth));
 
+        // Transform impact symbols to SymbolContext with relationships
+        use crate::symbol::context::ContextIncludes;
+
         let impact_with_path: Vec<SymbolContext> = impact_symbol_ids
             .into_iter()
             .filter_map(|symbol_id| {
-                // Get the actual symbol from the ID
-                if let Some(symbol) = indexer.get_symbol(symbol_id) {
-                    let base_path = indexer
-                        .get_file_path(symbol.file_id)
-                        .unwrap_or_else(|| "unknown".to_string());
-                    let file_path = format!("{}:{}", base_path, symbol.range.start_line + 1);
-                    Some(SymbolContext {
-                        symbol,
-                        file_path,
-                        relationships: Default::default(),
-                    })
-                } else {
-                    None
-                }
+                // Get full context for each impacted symbol
+                indexer.get_symbol_context(
+                    symbol_id,
+                    ContextIncludes::CALLERS | ContextIncludes::CALLS,
+                )
             })
             .collect();
 
@@ -538,6 +526,22 @@ pub fn retrieve_describe(
         }
         if !all_callers.is_empty() {
             context.relationships.called_by = Some(all_callers);
+        }
+
+        // Load defines relationships from ALL symbols
+        let mut all_defines = Vec::new();
+        for sym in &symbols {
+            let deps = indexer.get_dependencies(sym.id);
+            if let Some(defines) = deps.get(&crate::RelationKind::Defines) {
+                for defined in defines {
+                    if !all_defines.iter().any(|s: &Symbol| s.id == defined.id) {
+                        all_defines.push(defined.clone());
+                    }
+                }
+            }
+        }
+        if !all_defines.is_empty() {
+            context.relationships.defines = Some(all_defines);
         }
 
         // Load implementations (for traits/interfaces)
