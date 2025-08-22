@@ -529,8 +529,10 @@ fn index_go_project(project_path: &Path) -> Result<ProjectIndexResult> {
     let index_path = temp_dir.path().join("test_index");
 
     // Create settings with the temporary index path
-    let mut settings = Settings::default();
-    settings.index_path = index_path;
+    let settings = Settings {
+        index_path,
+        ..Default::default()
+    };
 
     // Create indexer with isolated settings
     let mut indexer = SimpleIndexer::with_settings(Arc::new(settings));

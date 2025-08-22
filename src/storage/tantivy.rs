@@ -118,7 +118,7 @@ impl IndexSchema {
         let relation_weight = builder.add_f64_field("relation_weight", STORED);
         let relation_line = builder.add_u64_field("relation_line", STORED);
         let relation_column = builder.add_u64_field("relation_column", STORED);
-        let relation_context = builder.add_text_field("relation_context", text_options);
+        let relation_context = builder.add_text_field("relation_context", text_options.clone());
 
         // File info fields
         let file_id = builder.add_u64_field("file_id", indexed_u64_options.clone());
@@ -126,7 +126,7 @@ impl IndexSchema {
         let file_timestamp = builder.add_u64_field("file_timestamp", STORED | FAST);
 
         // Metadata fields (for counters, etc.)
-        let meta_key = builder.add_text_field("meta_key", STRING | STORED | FAST);
+        let meta_key = builder.add_text_field("meta_key", text_options.clone());
         let meta_value = builder.add_u64_field("meta_value", STORED | FAST);
 
         // Vector search fields

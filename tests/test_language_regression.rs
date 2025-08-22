@@ -483,4 +483,3 @@ fn test_language_registry_integrity() -> Result<()> {
     println!("✅ Language registry integrity verified!");
     Ok(())
 }
-
