@@ -154,11 +154,21 @@ impl ResolutionScope for PythonResolutionContext {
             return Some(id);
         }
 
-        // 6. Check if it's a module path (contains .)
+        // 6. Check if it's a qualified name (contains .)
         if name.contains('.') {
-            // This would need DocumentIndex access to resolve
-            // For now, return None (will be handled by behavior)
-            return None;
+            let parts: Vec<&str> = name.split('.').collect();
+            if parts.len() == 2 {
+                let module_or_class = parts[0];
+                let function_or_method = parts[1];
+
+                // Check if module/class exists in our codebase
+                if self.resolve(module_or_class).is_some() {
+                    // Module/class exists, resolve the function/method
+                    return self.resolve(function_or_method);
+                }
+                // External library (like os.path) - return None
+                return None;
+            }
         }
 
         None

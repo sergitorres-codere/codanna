@@ -300,3 +300,102 @@ mod outer_mod {
 
     println!("\n=== NESTED SCOPES TEST COMPLETE ===\n");
 }
+
+#[test]
+fn test_rust_qualified_function_calls() {
+    let settings = Arc::new(Settings::default());
+    let factory = ParserFactory::new(settings);
+
+    let mut parser_with_behavior = factory
+        .create_parser_with_behavior(Language::Rust)
+        .expect("Failed to create Rust parser");
+    let parser = &mut parser_with_behavior.parser;
+
+    let code = r#"
+struct Foo;
+struct Bar;
+
+impl Foo {
+    pub fn new() -> Self {
+        Foo
+    }
+}
+
+impl Bar {
+    pub fn new() -> Self {
+        Bar
+    }
+}
+
+fn test_calls() {
+    // These should be tracked as different qualified calls
+    let f = Foo::new();  // Should be "Foo::new"
+    let b = Bar::new();  // Should be "Bar::new"
+    
+    // Standard library calls
+    let s = String::new();  // Should be "String::new"
+    let v = Vec::<i32>::new();  // Should be "Vec::new" or "Vec::<i32>::new"
+}
+"#;
+
+    // Get the function calls
+    let calls = parser.find_calls(code);
+
+    println!("\n=== RUST QUALIFIED FUNCTION CALLS TEST ===\n");
+    println!("Found {} function calls:", calls.len());
+
+    for (caller, target, range) in &calls {
+        println!(
+            "  {} -> '{}' at line {}",
+            caller,
+            target,
+            range.start_line + 1
+        );
+    }
+
+    // Verify we found the calls
+    assert!(calls.len() >= 4, "Should find at least 4 function calls");
+
+    // Check that qualified names are preserved
+    let foo_new = calls
+        .iter()
+        .find(|(_, target, _)| target.contains("Foo") && target.contains("new"));
+    let bar_new = calls
+        .iter()
+        .find(|(_, target, _)| target.contains("Bar") && target.contains("new"));
+    let string_new = calls
+        .iter()
+        .find(|(_, target, _)| target.contains("String") && target.contains("new"));
+
+    // The current implementation should preserve "Foo::new", "Bar::new", etc.
+    assert!(foo_new.is_some(), "Should find Foo::new call");
+    assert!(bar_new.is_some(), "Should find Bar::new call");
+    assert!(string_new.is_some(), "Should find String::new call");
+
+    // Verify the full qualified names are preserved
+    if let Some((_, target, _)) = foo_new {
+        println!("Foo::new tracked as: '{target}'");
+        assert_eq!(
+            *target, "Foo::new",
+            "Should preserve full qualified name 'Foo::new'"
+        );
+    }
+
+    if let Some((_, target, _)) = bar_new {
+        println!("Bar::new tracked as: '{target}'");
+        assert_eq!(
+            *target, "Bar::new",
+            "Should preserve full qualified name 'Bar::new'"
+        );
+    }
+
+    if let Some((_, target, _)) = string_new {
+        println!("String::new tracked as: '{target}'");
+        assert_eq!(
+            *target, "String::new",
+            "Should preserve full qualified name 'String::new'"
+        );
+    }
+
+    println!("\n=== QUALIFIED FUNCTION CALLS TEST COMPLETE ===\n");
+}

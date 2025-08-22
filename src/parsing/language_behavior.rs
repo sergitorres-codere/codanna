@@ -237,7 +237,7 @@ pub trait LanguageBehavior: Send + Sync {
     /// Add an import to the language's import tracking
     ///
     /// Default implementation is a no-op. Languages should override to track imports.
-    fn add_import(&self, _import: crate::indexing::Import) {
+    fn add_import(&self, _import: crate::parsing::Import) {
         // Default: no-op
     }
 
@@ -246,18 +246,6 @@ pub trait LanguageBehavior: Send + Sync {
     /// Default implementation is a no-op. Languages should override to track files.
     fn register_file(&self, _path: PathBuf, _file_id: FileId, _module_path: String) {
         // Default: no-op
-    }
-
-    /// Resolve a symbol using language-specific resolution rules
-    ///
-    /// Default implementation delegates to the resolution context.
-    fn resolve_symbol(
-        &self,
-        name: &str,
-        context: &dyn ResolutionScope,
-        _document_index: &DocumentIndex,
-    ) -> Option<SymbolId> {
-        context.resolve(name)
     }
 
     /// Add a trait/interface implementation
@@ -325,7 +313,7 @@ pub trait LanguageBehavior: Send + Sync {
     ///
     /// This is the main entry point for resolution context creation.
     /// This language-agnostic implementation:
-    /// 1. Adds imports tracked by the behavior (not ImportResolver)
+    /// 1. Adds imports tracked by the behavior
     /// 2. Adds resolvable symbols from the current file
     /// 3. Adds visible symbols from other files
     ///
@@ -342,7 +330,7 @@ pub trait LanguageBehavior: Send + Sync {
         // Create language-specific resolution context
         let mut context = self.create_resolution_context(file_id);
 
-        // 1. Add imported symbols (using behavior's tracked imports, not ImportResolver)
+        // 1. Add imported symbols using behavior's tracked imports
         let imports = self.get_imports_for_file(file_id);
         for import in imports {
             if let Some(symbol_id) = self.resolve_import(&import, document_index) {
@@ -464,7 +452,7 @@ pub trait LanguageBehavior: Send + Sync {
     /// Languages should track imports when add_import() is called.
     ///
     /// Default implementation returns empty (no imports).
-    fn get_imports_for_file(&self, _file_id: FileId) -> Vec<crate::indexing::Import> {
+    fn get_imports_for_file(&self, _file_id: FileId) -> Vec<crate::parsing::Import> {
         Vec::new()
     }
 
@@ -476,7 +464,7 @@ pub trait LanguageBehavior: Send + Sync {
     /// Default implementation tries basic name matching.
     fn resolve_import(
         &self,
-        import: &crate::indexing::Import,
+        import: &crate::parsing::Import,
         document_index: &DocumentIndex,
     ) -> Option<SymbolId> {
         // Get the importing module path for context

@@ -134,8 +134,20 @@ impl ResolutionScope for RustResolutionContext {
 
         // 5. Check if it's a path (contains ::)
         if name.contains("::") {
-            // This would need DocumentIndex access to resolve
-            // For now, return None (will be handled by behavior)
+            // Handle qualified names like Type::method or module::function
+            let parts: Vec<&str> = name.split("::").collect();
+            if parts.len() == 2 {
+                // Check if the type/module exists in our scope
+                let type_or_module = parts[0];
+                let method_or_func = parts[1];
+
+                // Try to resolve the type/module first
+                if self.resolve(type_or_module).is_some() {
+                    // Type exists, now try to resolve the method/function
+                    return self.resolve(method_or_func);
+                }
+            }
+            // Can't resolve - likely external library
             return None;
         }
 

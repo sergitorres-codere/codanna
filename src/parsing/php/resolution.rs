@@ -170,7 +170,28 @@ impl ResolutionScope for PhpResolutionContext {
         }
 
         // 5. Check global scope
-        self.global_scope.get(name).copied()
+        if let Some(&id) = self.global_scope.get(name) {
+            return Some(id);
+        }
+
+        // 6. Check if it's a qualified name (contains ::)
+        if name.contains("::") {
+            let parts: Vec<&str> = name.split("::").collect();
+            if parts.len() == 2 {
+                let class_or_namespace = parts[0];
+                let method_or_const = parts[1];
+
+                // Check if class exists in our codebase
+                if self.resolve(class_or_namespace).is_some() {
+                    // Class exists, resolve the method/constant
+                    return self.resolve(method_or_const);
+                }
+                // External library (like PDO::query) - return None
+                return None;
+            }
+        }
+
+        None
     }
 
     fn clear_local_scope(&mut self) {

@@ -210,7 +210,28 @@ impl ResolutionScope for TypeScriptResolutionContext {
         }
 
         // 6. Check global/ambient
-        self.global_symbols.get(name).copied()
+        if let Some(&id) = self.global_symbols.get(name) {
+            return Some(id);
+        }
+
+        // 7. Check if it's a qualified name (contains .)
+        if name.contains('.') {
+            let parts: Vec<&str> = name.split('.').collect();
+            if parts.len() == 2 {
+                let class_or_module = parts[0];
+                let method_or_prop = parts[1];
+
+                // Check if type exists in our codebase
+                if self.resolve(class_or_module).is_some() {
+                    // Type exists, resolve the method/property
+                    return self.resolve(method_or_prop);
+                }
+                // External library - return None
+                return None;
+            }
+        }
+
+        None
     }
 
     fn clear_local_scope(&mut self) {

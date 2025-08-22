@@ -187,7 +187,7 @@ impl SimpleIndexer {
         // Resolution system now handled through LanguageBehavior:
         // - Each language's behavior creates its own resolution context
         // - Trait/interface resolution happens via behavior.create_inheritance_resolver()
-        // - Import resolution happens via behavior.add_import() and behavior.resolve_symbol()
+        // - Import resolution happens via behavior.add_import() and ResolutionContext::resolve()
         // - No need to reconstruct state here as behaviors maintain their own state
         debug_print!(
             indexer,
@@ -650,7 +650,7 @@ impl SimpleIndexer {
             );
             // RESOLUTION SYSTEM: File registration now handled by LanguageBehavior
             // Each behavior tracks file->module mappings for import resolution
-            // Replaces ImportResolver.register_file()
+            // Register file with behavior for import tracking
             behavior.register_file(path.to_path_buf(), file_id, mod_path.clone());
         } else {
             debug_print!(self, "No module path for file {:?}", path);
@@ -815,8 +815,8 @@ impl SimpleIndexer {
         for import in imports {
             // RESOLUTION SYSTEM: Import tracking now delegated to LanguageBehavior
             // The behavior stores imports in its internal state and uses them during
-            // symbol resolution via behavior.resolve_symbol()
-            // This replaces the old ImportResolver.add_import() functionality
+            // symbol resolution via ResolutionContext::resolve()
+            // Track import for resolution
             behavior.add_import(import);
         }
 
@@ -2029,7 +2029,7 @@ impl SimpleIndexer {
     }
 
     // RESOLUTION SYSTEM: State reconstruction removed
-    // The old TraitResolver/ImportResolver required reconstructing state on startup
+    // Resolution state is now maintained by language behaviors
     // The new behavior system builds state incrementally during indexing
     // No reconstruction needed!
 
@@ -2269,26 +2269,6 @@ impl SimpleIndexer {
                     } else {
                         candidates.get(1).map(|s| s.id)
                     }
-                } else if rel.to_name.contains("::") {
-                    // Handle qualified paths like String::new
-                    let parts: Vec<&str> = rel.to_name.split("::").collect();
-                    if parts.len() == 2 {
-                        // Try to resolve the type first, then find the method
-                        if let Some(_type_id) = context.resolve(parts[0]) {
-                            // Find the method on this type
-                            // For now, just resolve the method name
-                            context.resolve(parts[1])
-                        } else {
-                            None
-                        }
-                    } else {
-                        context.resolve(&rel.to_name)
-                    }
-                } else if rel.to_name.starts_with("self.") {
-                    // Handle self.method() calls
-                    let method_name = &rel.to_name[5..]; // Skip "self."
-                    // Look for the method in the current module
-                    context.resolve(method_name)
                 } else if rel.kind == RelationKind::Calls && from_symbols.len() == 1 {
                     debug_print!(self, "Resolving as method call: '{}'", rel.to_name);
                     self.resolve_method_call_enhanced(

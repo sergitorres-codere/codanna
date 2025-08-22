@@ -187,11 +187,11 @@ impl LanguageBehavior for PythonBehavior {
         self.register_file_with_state(path, file_id, module_path);
     }
 
-    fn add_import(&self, import: crate::indexing::Import) {
+    fn add_import(&self, import: crate::parsing::Import) {
         self.add_import_with_state(import);
     }
 
-    fn get_imports_for_file(&self, file_id: FileId) -> Vec<crate::indexing::Import> {
+    fn get_imports_for_file(&self, file_id: FileId) -> Vec<crate::parsing::Import> {
         self.get_imports_from_state(file_id)
     }
 
@@ -414,7 +414,7 @@ impl LanguageBehavior for PythonBehavior {
     // Python-specific: Handle Python module imports
     fn resolve_import(
         &self,
-        import: &crate::indexing::Import,
+        import: &crate::parsing::Import,
         document_index: &DocumentIndex,
     ) -> Option<SymbolId> {
         // Python imports can be:

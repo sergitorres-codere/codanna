@@ -11,7 +11,7 @@
 //! are available in ABI-14. When upgrading to a newer tree-sitter-python version,
 //! verify compatibility with node type names used in this implementation.
 
-use crate::indexing::Import;
+use crate::parsing::Import;
 use crate::parsing::{Language, LanguageParser, MethodCall, ParserContext, ScopeType};
 use crate::types::SymbolCounter;
 use crate::{FileId, Range, Symbol, SymbolKind};

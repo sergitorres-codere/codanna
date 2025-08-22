@@ -81,7 +81,7 @@ pub trait LanguageParser: Send + Sync {
     /// Find import statements in the code
     ///
     /// Returns Import structs with path, alias, and glob information
-    fn find_imports(&mut self, code: &str, file_id: FileId) -> Vec<crate::indexing::Import>;
+    fn find_imports(&mut self, code: &str, file_id: FileId) -> Vec<crate::parsing::Import>;
 
     /// Get the language this parser handles
     fn language(&self) -> crate::parsing::Language;

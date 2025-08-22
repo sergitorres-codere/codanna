@@ -5,7 +5,7 @@
 //! Note: This parser uses ABI-14 with 383 node types and 40 fields.
 //! When migrating or updating the parser, ensure compatibility with ABI-14 features.
 
-use crate::indexing::Import;
+use crate::parsing::Import;
 use crate::parsing::{LanguageParser, MethodCall, ParserContext, ScopeType};
 use crate::types::SymbolCounter;
 use crate::{FileId, Range, Symbol, SymbolKind, Visibility};

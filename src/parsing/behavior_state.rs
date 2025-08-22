@@ -5,7 +5,7 @@
 //! across indexing operations.
 
 use crate::FileId;
-use crate::indexing::Import;
+use crate::parsing::Import;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};

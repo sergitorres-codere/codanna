@@ -411,7 +411,7 @@ fn test_new_behavior_methods_exist() {
         assert!(chain.contains(&"Test".to_string()));
 
         // Test new methods with default implementations
-        behavior.add_import(codanna::indexing::Import {
+        behavior.add_import(codanna::parsing::Import {
             path: "test/path".into(),
             alias: Some("test".into()),
             file_id,

@@ -9,7 +9,7 @@
 //! Note: This parser uses ABI-14 (same as Python). When upgrading the tree-sitter-php
 //! version, verify compatibility with node type names used in this implementation.
 
-use crate::indexing::Import;
+use crate::parsing::Import;
 use crate::parsing::{Language, LanguageParser, MethodCall, ParserContext, ScopeType};
 use crate::types::SymbolCounter;
 use crate::{FileId, Range, Symbol, SymbolKind};

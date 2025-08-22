@@ -30,7 +30,7 @@
 //! - Using generator-based tree traversal or manual state machines
 //! - Eliminating all intermediate allocations
 
-use crate::indexing::Import;
+use crate::parsing::Import;
 use crate::parsing::method_call::MethodCall;
 use crate::parsing::{Language, LanguageParser, ParserContext, ScopeType};
 use crate::types::SymbolCounter;
