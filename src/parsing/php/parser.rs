@@ -979,14 +979,19 @@ impl PhpParser {
                         calls.push((context, function_name, range));
                     }
                 }
+                // Also recurse to find nested calls like transform(getData())
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    self.extract_calls_from_node(child, code, current_context, calls);
+                }
             }
             "member_call_expression" => {
-                if let Some(name_node) = node.child_by_field_name("name") {
-                    let method_name = &code[name_node.byte_range()];
-                    let range = self.node_to_range(node);
-                    if let Some(context) = current_context {
-                        calls.push((context, method_name, range));
-                    }
+                // Method calls like $obj->method() or $this->method()
+                // Should NOT be tracked by find_calls, only by find_method_calls
+                // Just recurse to check for nested function calls within arguments
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    self.extract_calls_from_node(child, code, current_context, calls);
                 }
             }
             "function_definition" | "method_declaration" => {
