@@ -1082,6 +1082,45 @@ impl PythonParser {
             self.find_variable_types_in_node(child, code, variable_types);
         }
     }
+
+    fn find_defines_in_node<'a>(
+        node: Node,
+        code: &'a str,
+        defines: &mut Vec<(&'a str, &'a str, Range)>,
+    ) {
+        match node.kind() {
+            "class_definition" => {
+                // Extract class name
+                if let Some(class_name_node) = node.child_by_field_name("name") {
+                    let class_name = &code[class_name_node.byte_range()];
+
+                    // Find all methods defined in this class
+                    if let Some(body) = node.child_by_field_name("body") {
+                        for child in body.children(&mut body.walk()) {
+                            if child.kind() == "function_definition" {
+                                if let Some(method_name_node) = child.child_by_field_name("name") {
+                                    let method_name = &code[method_name_node.byte_range()];
+                                    let range = Range::new(
+                                        child.start_position().row as u32,
+                                        child.start_position().column as u16,
+                                        child.end_position().row as u32,
+                                        child.end_position().column as u16,
+                                    );
+                                    defines.push((class_name, method_name, range));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {
+                // Recursively process children
+                for child in node.children(&mut node.walk()) {
+                    Self::find_defines_in_node(child, code, defines);
+                }
+            }
+        }
+    }
 }
 
 impl LanguageParser for PythonParser {
@@ -1175,9 +1214,17 @@ impl LanguageParser for PythonParser {
         Vec::new()
     }
 
-    fn find_defines<'a>(&mut self, _code: &'a str) -> Vec<(&'a str, &'a str, Range)> {
-        // Stub implementation - will be implemented in Phase 3
-        Vec::new()
+    fn find_defines<'a>(&mut self, code: &'a str) -> Vec<(&'a str, &'a str, Range)> {
+        let tree = match self.parser.parse(code, None) {
+            Some(tree) => tree,
+            None => return Vec::new(),
+        };
+
+        let root_node = tree.root_node();
+        let mut defines = Vec::new();
+
+        Self::find_defines_in_node(root_node, code, &mut defines);
+        defines
     }
 
     fn find_imports(&mut self, code: &str, file_id: FileId) -> Vec<Import> {

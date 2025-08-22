@@ -10,12 +10,12 @@ fn test_python_find_calls_simple() {
 def outer():
     inner()           # Function call
     helper(123)       # Function call with args
-    
+
     x = process()     # Function call in assignment
-    
+
     # Nested calls
     transform(get_data())
-    
+
     # Should NOT find these (method calls):
     print("test")     # Built-in, but still a function call
     obj.method()      # Method call
@@ -125,18 +125,18 @@ class MyClass:
         # Constructor calls
         self.setup_internal()  # Method call (should NOT find)
         validate_input()       # Function call (should find)
-    
+
     def process(self):
         # Mix of calls
         preprocess()           # Function call
         self.helper()          # Method call (should NOT find)
         result = compute(x, y) # Function call
         return finalize(result) # Function call
-    
+
     @staticmethod
     def static_method():
         do_something()         # Function call
-    
+
     @classmethod
     def class_method(cls):
         cls.factory()          # Method call (should NOT find)
@@ -145,10 +145,10 @@ class MyClass:
 def nested_calls():
     # Complex nested calls
     result = map(lambda x: process_item(x), filter(is_valid, get_items()))
-    
+
     # List comprehension with calls
     values = [transform(x) for x in get_list() if validate(x)]
-    
+
     # Dict comprehension
     mapping = {key_func(x): value_func(x) for x in source()}
 

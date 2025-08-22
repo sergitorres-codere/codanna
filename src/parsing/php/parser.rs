@@ -1104,14 +1104,22 @@ impl PhpParser {
                 if let Some(name_node) = node.child_by_field_name("name") {
                     let type_name = &code[name_node.byte_range()];
 
-                    // Find methods within the type
+                    // Find methods within the type - they're inside declaration_list
                     let mut cursor = node.walk();
                     for child in node.children(&mut cursor) {
-                        if child.kind() == "method_declaration" {
-                            if let Some(method_name_node) = child.child_by_field_name("name") {
-                                let method_name = &code[method_name_node.byte_range()];
-                                let range = self.node_to_range(method_name_node);
-                                defines.push((type_name, method_name, range));
+                        if child.kind() == "declaration_list" {
+                            // Methods are inside declaration_list, not direct children
+                            let mut decl_cursor = child.walk();
+                            for decl_child in child.children(&mut decl_cursor) {
+                                if decl_child.kind() == "method_declaration" {
+                                    if let Some(method_name_node) =
+                                        decl_child.child_by_field_name("name")
+                                    {
+                                        let method_name = &code[method_name_node.byte_range()];
+                                        let range = self.node_to_range(method_name_node);
+                                        defines.push((type_name, method_name, range));
+                                    }
+                                }
                             }
                         }
                     }

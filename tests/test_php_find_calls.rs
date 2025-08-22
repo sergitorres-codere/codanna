@@ -12,18 +12,18 @@ fn test_php_find_calls_simple() {
 function outer() {
     inner();           // Function call
     helper(123);       // Function call with args
-    
+
     $x = process();    // Function call in assignment
-    
+
     // Nested calls
     transform(getData());
-    
+
     // Should NOT find these (method calls):
     $obj->method();      // Method call
     $this->method();     // Method call
     self::staticMethod(); // Static method call
     parent::method();    // Parent method call
-    
+
     // Built-in functions
     print("test");       // Built-in function
     echo "hello";        // Language construct (might not be tracked)
@@ -41,7 +41,7 @@ class MyClass {
         $this->helper(); // Method call (should NOT be tracked)
         self::init();    // Static method (should NOT be tracked)
     }
-    
+
     public static function staticMethod() {
         doSomething();   // Function call from static method
     }
@@ -147,7 +147,7 @@ class Calculator {
         $this->setupInternal();  // Method call (should NOT find)
         validateInput();         // Function call (should find)
     }
-    
+
     public function process() {
         // Mix of calls
         preprocess();            // Function call
@@ -155,7 +155,7 @@ class Calculator {
         $result = compute($x, $y); // Function call
         return finalize($result);   // Function call
     }
-    
+
     public static function staticMethod() {
         doSomething();           // Function call
     }
@@ -163,10 +163,10 @@ class Calculator {
 
 function nestedCalls() {
     // Complex nested calls
-    $result = array_map(function($x) { 
-        return processItem($x); 
+    $result = array_map(function($x) {
+        return processItem($x);
     }, array_filter($items, 'isValid'));
-    
+
     // Array functions
     $sorted = sort($data);
     $mapped = array_map('transform', $list);

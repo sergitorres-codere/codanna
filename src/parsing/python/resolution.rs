@@ -217,6 +217,51 @@ impl ResolutionScope for PythonResolutionContext {
 
         symbols
     }
+
+    fn resolve_relationship(
+        &self,
+        _from_name: &str,
+        to_name: &str,
+        kind: crate::RelationKind,
+        _from_file: FileId,
+    ) -> Option<SymbolId> {
+        use crate::RelationKind;
+
+        match kind {
+            RelationKind::Defines => {
+                // Python: methods are always on classes, no trait/inherent distinction
+                // Decorators like @property, @classmethod, @staticmethod don't change resolution
+                // Just resolve the method name directly
+                self.resolve(to_name)
+            }
+            RelationKind::Calls => {
+                // Python: handle module.function patterns
+                if to_name.contains('.') {
+                    // Module qualified name like json.loads or os.path.join
+                    // Try to resolve the full qualified name first
+                    if let Some(id) = self.resolve(to_name) {
+                        return Some(id);
+                    }
+                    // If not found, try just the function name
+                    // (might be imported directly)
+                    if let Some(last_part) = to_name.rsplit('.').next() {
+                        return self.resolve(last_part);
+                    }
+                }
+                // Simple function call
+                self.resolve(to_name)
+            }
+            RelationKind::Extends => {
+                // Python: inheritance from base classes
+                // Just resolve the base class name
+                self.resolve(to_name)
+            }
+            _ => {
+                // For other relationship types, use standard resolution
+                self.resolve(to_name)
+            }
+        }
+    }
 }
 
 /// Python class inheritance resolver

@@ -119,6 +119,39 @@ impl LanguageBehavior for RustBehavior {
         Box::new(resolver.clone())
     }
 
+    fn is_resolvable_symbol(&self, symbol: &crate::Symbol) -> bool {
+        use crate::SymbolKind;
+        use crate::symbol::ScopeContext;
+
+        // Check scope_context first if available
+        if let Some(ref scope_context) = symbol.scope_context {
+            match scope_context {
+                ScopeContext::Module | ScopeContext::Global | ScopeContext::Package => true,
+                ScopeContext::Local { .. } | ScopeContext::Parameter => false,
+                ScopeContext::ClassMember => {
+                    // Rust-specific: trait methods and impl methods should be resolvable
+                    // even if they're private, for within-file resolution
+                    matches!(symbol.kind, SymbolKind::Method)
+                        || matches!(symbol.visibility, crate::Visibility::Public)
+                }
+            }
+        } else {
+            // Fallback to symbol kind for backward compatibility
+            matches!(
+                symbol.kind,
+                SymbolKind::Function
+                    | SymbolKind::Method
+                    | SymbolKind::Struct
+                    | SymbolKind::Trait
+                    | SymbolKind::Interface
+                    | SymbolKind::Class
+                    | SymbolKind::TypeAlias
+                    | SymbolKind::Enum
+                    | SymbolKind::Constant
+            )
+        }
+    }
+
     fn add_trait_impl(&self, type_name: String, trait_name: String, file_id: FileId) {
         // Activate the actual functionality from RustTraitResolver
         let mut resolver = self.trait_resolver.write().unwrap();

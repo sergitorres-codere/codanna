@@ -278,6 +278,59 @@ impl ResolutionScope for TypeScriptResolutionContext {
 
         symbols
     }
+
+    fn resolve_relationship(
+        &self,
+        _from_name: &str,
+        to_name: &str,
+        kind: crate::RelationKind,
+        _from_file: FileId,
+    ) -> Option<SymbolId> {
+        use crate::RelationKind;
+
+        match kind {
+            RelationKind::Implements => {
+                // TypeScript: classes implement interfaces
+                // Just resolve the interface name
+                self.resolve(to_name)
+            }
+            RelationKind::Extends => {
+                // TypeScript: both classes and interfaces can extend
+                // Classes extend classes, interfaces extend interfaces
+                self.resolve(to_name)
+            }
+            RelationKind::Calls => {
+                // TypeScript: handle Class.method patterns and module.function
+                if to_name.contains('.') {
+                    // Qualified name like Utils.helper or console.log
+                    // Try to resolve the full qualified name first
+                    if let Some(id) = self.resolve(to_name) {
+                        return Some(id);
+                    }
+                    // If not found, try just the method/function name
+                    // (might be a method call on an instance)
+                    if let Some(last_part) = to_name.rsplit('.').next() {
+                        return self.resolve(last_part);
+                    }
+                }
+                // Simple function or method call
+                self.resolve(to_name)
+            }
+            RelationKind::Uses => {
+                // TypeScript: type usage, imports, etc.
+                // Types might be in type_space
+                if let Some(id) = self.type_space.get(to_name) {
+                    return Some(*id);
+                }
+                // Otherwise use standard resolution
+                self.resolve(to_name)
+            }
+            _ => {
+                // For other relationship types, use standard resolution
+                self.resolve(to_name)
+            }
+        }
+    }
 }
 
 /// TypeScript inheritance resolution system

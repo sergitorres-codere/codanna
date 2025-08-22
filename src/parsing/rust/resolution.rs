@@ -193,6 +193,51 @@ impl ResolutionScope for RustResolutionContext {
 
         symbols
     }
+
+    fn resolve_relationship(
+        &self,
+        _from_name: &str,
+        to_name: &str,
+        kind: crate::RelationKind,
+        _from_file: FileId,
+    ) -> Option<SymbolId> {
+        use crate::RelationKind;
+
+        match kind {
+            RelationKind::Defines => {
+                // For Rust, "Defines" relationships need special handling for trait methods
+                // vs inherent methods. The clean solution: check if from_name is a trait
+                // or a type, then resolve the method appropriately.
+
+                // First, try to resolve the method name directly
+                // This handles inherent methods and local definitions
+                if let Some(method_id) = self.resolve(to_name) {
+                    return Some(method_id);
+                }
+
+                // If not found directly, it might be a trait method
+                // In a proper implementation, we'd check if from_name is a trait
+                // and look up the method in that trait's scope
+                // For now, return None to indicate we couldn't resolve it
+                None
+            }
+            RelationKind::Calls => {
+                // For calls, handle qualified names properly
+                // If to_name contains ::, it's a qualified call
+                if to_name.contains("::") {
+                    // Use the existing qualified name resolution logic
+                    self.resolve(to_name)
+                } else {
+                    // Simple function or method call
+                    self.resolve(to_name)
+                }
+            }
+            _ => {
+                // For other relationship kinds, use standard resolution
+                self.resolve(to_name)
+            }
+        }
+    }
 }
 
 /// Rust trait resolution system

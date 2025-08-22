@@ -12,7 +12,7 @@ fn test_python_call_tracking_proof() {
 class Calculator:
     def __init__(self):
         self.result = 0
-    
+
     def add(self, x, y):
         return x + y
 
@@ -21,7 +21,7 @@ def process_data():
     validate_input("test")      # ✅ Function call
     result = compute(5, 10)     # ✅ Function call
     print(result)               # ✅ Built-in function
-    
+
     # Method calls - should NOT be tracked by find_calls
     calc = Calculator()         # Constructor (currently not tracked)
     calc.add(1, 2)             # ❌ Instance method
@@ -30,15 +30,15 @@ def process_data():
     list.append(item)          # ❌ List method
     string.upper()             # ❌ String method
     dict.get("key")            # ❌ Dict method
-    
+
     # Chained method calls - should NOT be tracked
     response.json().get("data") # ❌ Chained methods
-    
-    # Module/class method calls - should NOT be tracked  
+
+    # Module/class method calls - should NOT be tracked
     math.sqrt(16)              # ❌ Module method
     os.path.join("a", "b")     # ❌ Nested module method
     MyClass.static_method()    # ❌ Static method
-    
+
     # More function calls
     transform(data)            # ✅ Function call
     nested(inner())           # ✅ Both nested and inner are function calls

@@ -646,6 +646,152 @@ const typed: Map<string, Session> = new Map();
     }
 
     #[test]
+    fn explore_php_defines_comprehensive() {
+        let language: Language = tree_sitter_php::LANGUAGE_PHP.into();
+        let mut parser = tree_sitter::Parser::new();
+        parser.set_language(&language).unwrap();
+
+        println!("\n=== PHP DEFINES EXPLORATION - DEBUGGING CODANNA ISSUE ===");
+
+        let code = r#"<?php
+
+interface Logger {
+    public function log(string $message): void;
+    public function warn(string $message): void;
+}
+
+class DatabaseLogger implements Logger {
+    private string $connection;
+
+    public function __construct(string $connection) {
+        $this->connection = $connection;
+    }
+
+    public function log(string $message): void {
+        echo "[DB] " . $message . "\n";
+    }
+
+    public function warn(string $message): void {
+        echo "[DB WARNING] " . $message . "\n";
+    }
+
+    public function connect(): bool {
+        return strlen($this->connection) > 0;
+    }
+}
+"#;
+
+        if let Some(tree) = parser.parse(code, None) {
+            let root = tree.root_node();
+
+            println!("=== FULL TREE STRUCTURE ===");
+            print_php_tree(root, code, 0);
+
+            println!("\n=== SEARCHING FOR DEFINES RELATIONSHIPS ===");
+            find_php_defines(root, code, 0);
+        }
+
+        fn print_php_tree(node: tree_sitter::Node, code: &str, depth: usize) {
+            let indent = "  ".repeat(depth);
+            let node_text = &code[node.byte_range()];
+            let first_line = node_text.lines().next().unwrap_or("").trim();
+
+            println!(
+                "{}[{}] '{}'",
+                indent,
+                node.kind(),
+                if first_line.len() > 50 {
+                    format!("{}...", &first_line[..50])
+                } else {
+                    first_line.to_string()
+                }
+            );
+
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                print_php_tree(child, code, depth + 1);
+            }
+        }
+
+        fn find_php_defines(node: tree_sitter::Node, code: &str, depth: usize) {
+            let indent = "  ".repeat(depth);
+
+            match node.kind() {
+                "interface_declaration" => {
+                    println!("{indent}🎯 FOUND INTERFACE_DECLARATION!");
+                    if let Some(name_node) = node.child_by_field_name("name") {
+                        let interface_name = &code[name_node.byte_range()];
+                        println!("{indent}  Interface name: '{interface_name}'");
+
+                        // Look for methods within interface
+                        let mut cursor = node.walk();
+                        for child in node.children(&mut cursor) {
+                            println!(
+                                "{}    Child: [{}] '{}'",
+                                indent,
+                                child.kind(),
+                                &code[child.byte_range()].lines().next().unwrap_or("")
+                            );
+
+                            if child.kind() == "method_declaration" {
+                                println!("{indent}      🎯 FOUND METHOD_DECLARATION in interface!");
+                                if let Some(method_name_node) = child.child_by_field_name("name") {
+                                    let method_name = &code[method_name_node.byte_range()];
+                                    println!(
+                                        "{indent}        DEFINES: {interface_name} -> {method_name}"
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+                "class_declaration" => {
+                    println!("{indent}🎯 FOUND CLASS_DECLARATION!");
+                    if let Some(name_node) = node.child_by_field_name("name") {
+                        let class_name = &code[name_node.byte_range()];
+                        println!("{indent}  Class name: '{class_name}'");
+
+                        // Look for methods within class
+                        let mut cursor = node.walk();
+                        for child in node.children(&mut cursor) {
+                            println!(
+                                "{}    Child: [{}] '{}'",
+                                indent,
+                                child.kind(),
+                                &code[child.byte_range()].lines().next().unwrap_or("")
+                            );
+
+                            if child.kind() == "method_declaration" {
+                                println!("{indent}      🎯 FOUND METHOD_DECLARATION in class!");
+                                if let Some(method_name_node) = child.child_by_field_name("name") {
+                                    let method_name = &code[method_name_node.byte_range()];
+                                    println!(
+                                        "{indent}        DEFINES: {class_name} -> {method_name}"
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+
+            // Recurse
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                find_php_defines(child, code, depth + 1);
+            }
+        }
+
+        println!("\n=== SUMMARY ===");
+        println!("This test shows exactly what PHP tree-sitter produces.");
+        println!("If we see interface_declaration and class_declaration nodes");
+        println!("with method_declaration children, then the PHP parser");
+        println!("extract_defines_from_node method should work.");
+        println!("If not, we need to fix the implementation.");
+    }
+
+    #[test]
     fn explore_php_abi15_features() {
         let language: Language = tree_sitter_php::LANGUAGE_PHP.into();
 

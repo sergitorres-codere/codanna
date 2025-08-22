@@ -490,184 +490,66 @@ pub fn retrieve_describe(
             }
         }
     } else {
-        // Get the first matching symbol and describe it
+        // Get the first matching symbol for basic info, but aggregate relationships from ALL symbols
         let symbol = symbols[0].clone();
         let base_path = indexer
             .get_file_path(symbol.file_id)
             .unwrap_or_else(|| "unknown".to_string());
         let file_path = format!("{}:{}", base_path, symbol.range.start_line + 1);
 
-        // Build contextual data with all relationships
+        // Build context with relationships using the same working methods as retrieve calls/callers
         let mut context = SymbolContext {
             symbol: symbol.clone(),
             file_path,
             relationships: Default::default(),
         };
 
-        // Get type-appropriate relationships based on symbol kind
+        // Aggregate calls and callers from ALL symbols with this name (same as retrieve calls/callers)
+        let mut all_calls = Vec::new();
+        let mut all_callers = Vec::new();
+
+        for sym in &symbols {
+            // Collect calls from this symbol
+            let calls = indexer.get_called_functions_with_metadata(sym.id);
+            for (called, metadata) in calls {
+                if !all_calls
+                    .iter()
+                    .any(|(s, _): &(Symbol, Option<String>)| s.id == called.id)
+                {
+                    all_calls.push((called, metadata));
+                }
+            }
+
+            // Collect callers of this symbol
+            let callers = indexer.get_calling_functions_with_metadata(sym.id);
+            for (caller, metadata) in callers {
+                if !all_callers
+                    .iter()
+                    .any(|(s, _): &(Symbol, Option<String>)| s.id == caller.id)
+                {
+                    all_callers.push((caller, metadata));
+                }
+            }
+        }
+
+        // Set aggregated relationships
+        if !all_calls.is_empty() {
+            context.relationships.calls = Some(all_calls);
+        }
+        if !all_callers.is_empty() {
+            context.relationships.called_by = Some(all_callers);
+        }
+
+        // Load implementations (for traits/interfaces)
         use crate::SymbolKind;
         match symbol.kind {
-            SymbolKind::Function | SymbolKind::Method => {
-                // For functions/methods: show callers and calls
-                let callers = indexer.get_calling_functions_with_metadata(symbol.id);
-                let calls = indexer.get_called_functions_with_metadata(symbol.id);
-
-                if !callers.is_empty() {
-                    let mut called_by = Vec::new();
-                    for (caller, metadata) in callers {
-                        called_by.push((caller, metadata));
-                    }
-                    context.relationships.called_by = Some(called_by);
-                }
-
-                if !calls.is_empty() {
-                    let mut calls_list = Vec::new();
-                    for (called, metadata) in calls {
-                        calls_list.push((called, metadata));
-                    }
-                    context.relationships.calls = Some(calls_list);
-                }
-            }
-            SymbolKind::Struct | SymbolKind::Class => {
-                // For structs/classes: show methods that belong to this struct
-                // Strategy: Find methods in the same file that have "Self" in their signature
-                let mut methods: Vec<Symbol> = Vec::new();
-
-                // Search for various method names and check if they belong to this struct
-                let method_searches = vec![
-                    "new", "from", "with", "get", "set", "is", "to", "as", "unified", "error",
-                    "success", "json", "text", "write",
-                ];
-
-                for search_term in method_searches {
-                    if let Ok(results) =
-                        indexer.search(search_term, 50, Some(SymbolKind::Method), None, None)
-                    {
-                        for result in &results {
-                            if let Some(method_symbol) = indexer.get_symbol(result.symbol_id) {
-                                // Check if method is in the same file as the struct
-                                if method_symbol.file_id == symbol.file_id {
-                                    // Check if the signature contains "self" or "Self" (indicating it's a method of this struct)
-                                    if let Some(ref sig) = method_symbol.signature {
-                                        if sig.contains("self")
-                                            || sig.contains("Self")
-                                            || sig.contains(&format!("-> {}", symbol.name.as_ref()))
-                                        {
-                                            // Avoid duplicates
-                                            if !methods.iter().any(|m| m.id == method_symbol.id) {
-                                                methods.push(method_symbol);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if !methods.is_empty() {
-                    context.relationships.defines = Some(methods);
-                }
-
-                // Also check if anyone uses this struct (look for constructor calls)
-                // Find methods named "new" that belong to this struct
-                if let Ok(new_results) =
-                    indexer.search("new", 100, Some(SymbolKind::Method), None, None)
-                {
-                    for result in &new_results {
-                        if let Some(constructor) = indexer.get_symbol(result.symbol_id) {
-                            if let Some(ref module_path) = constructor.module_path {
-                                if module_path.contains(symbol.name.as_ref()) {
-                                    // Get who calls this constructor
-                                    let callers =
-                                        indexer.get_calling_functions_with_metadata(constructor.id);
-                                    if !callers.is_empty() {
-                                        let mut called_by = Vec::new();
-                                        for (caller, metadata) in callers.iter().take(10) {
-                                            called_by.push((caller.clone(), metadata.clone()));
-                                        }
-                                        context.relationships.called_by = Some(called_by);
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            SymbolKind::Trait => {
-                // For traits: show implementations and required methods
+            SymbolKind::Trait | SymbolKind::Interface => {
                 let implementations = indexer.get_implementations(symbol.id);
                 if !implementations.is_empty() {
                     context.relationships.implemented_by = Some(implementations);
                 }
-
-                // Find trait methods
-                if let Ok(search_results) = indexer.search(&symbol.name, 20, None, None, None) {
-                    let mut methods: Vec<Symbol> = Vec::new();
-
-                    for result in &search_results {
-                        if result.kind == SymbolKind::Method {
-                            if let Some(method_symbol) = indexer.get_symbol(result.symbol_id) {
-                                if let Some(ref module_path) = method_symbol.module_path {
-                                    if module_path.contains(symbol.name.as_ref()) {
-                                        methods.push(method_symbol);
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    if !methods.is_empty() {
-                        context.relationships.defines = Some(methods);
-                    }
-                }
             }
-            SymbolKind::Enum => {
-                // For enums: show variants and usage
-                // Find enum variants (they might be tagged as Constants or other)
-                if let Ok(search_results) = indexer.search(&symbol.name, 20, None, None, None) {
-                    let mut variants: Vec<Symbol> = Vec::new();
-
-                    for result in &search_results {
-                        if let Some(variant_symbol) = indexer.get_symbol(result.symbol_id) {
-                            if let Some(ref module_path) = variant_symbol.module_path {
-                                if module_path.contains(symbol.name.as_ref())
-                                    && variant_symbol.id != symbol.id
-                                {
-                                    // Don't include the enum itself
-                                    variants.push(variant_symbol);
-                                }
-                            }
-                        }
-                    }
-
-                    if !variants.is_empty() {
-                        context.relationships.defines = Some(variants);
-                    }
-                }
-            }
-            _ => {
-                // For other types, use the original logic
-                let callers = indexer.get_calling_functions_with_metadata(symbol.id);
-                let calls = indexer.get_called_functions_with_metadata(symbol.id);
-
-                if !callers.is_empty() {
-                    let mut called_by = Vec::new();
-                    for (caller, metadata) in callers {
-                        called_by.push((caller, metadata));
-                    }
-                    context.relationships.called_by = Some(called_by);
-                }
-
-                if !calls.is_empty() {
-                    let mut calls_list = Vec::new();
-                    for (called, metadata) in calls {
-                        calls_list.push((called, metadata));
-                    }
-                    context.relationships.calls = Some(calls_list);
-                }
-            }
+            _ => {}
         }
 
         let unified = UnifiedOutput {

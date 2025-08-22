@@ -48,6 +48,35 @@ pub trait ResolutionScope: Send + Sync {
 
     /// Get as Any for downcasting (needed for language-specific operations)
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
+
+    /// Resolve a relationship-aware symbol reference
+    ///
+    /// This method allows languages to handle relationship-specific resolution logic.
+    /// For example, Rust needs special handling for trait method definitions vs
+    /// inherent method definitions.
+    ///
+    /// Default implementation just delegates to standard resolve() for backward compatibility.
+    ///
+    /// # Parameters
+    /// - `from_name`: The source symbol name (e.g., "Display" for trait)
+    /// - `to_name`: The target symbol name (e.g., "fmt" for method)
+    /// - `kind`: The relationship kind (Defines, Calls, Implements, etc.)
+    /// - `from_file`: The file where the relationship originates
+    ///
+    /// # Returns
+    /// The resolved SymbolId if found, None otherwise
+    fn resolve_relationship(
+        &self,
+        from_name: &str,
+        to_name: &str,
+        kind: crate::RelationKind,
+        from_file: FileId,
+    ) -> Option<SymbolId> {
+        // Default: use standard resolution
+        // Languages can override for relationship-specific logic
+        let _ = (from_name, kind, from_file); // Unused in default impl
+        self.resolve(to_name)
+    }
 }
 
 /// Language-agnostic inheritance resolver

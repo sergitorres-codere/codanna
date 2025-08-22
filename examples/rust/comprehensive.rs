@@ -5,6 +5,33 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::marker::PhantomData;
 
+// === TEST SCENARIO: Clear Relationship Testing ===
+
+/// Test service for demonstrating clear relationships
+pub struct TestService {
+    pub name: String,
+    config: Config,
+}
+
+impl TestService {
+    /// Create new test service - this should show up in defines
+    pub fn new(name: String) -> Self {
+        let config = Config::default();  // CALLS: Config::default
+        Self { name, config }
+    }
+
+    /// Process data using config - this should show calls
+    pub fn process(&self) -> String {
+        let result = self.get_config_name();  // CALLS: TestService::get_config_name
+        format!("Processing: {}", result)
+    }
+
+    /// Helper method that will be called by process
+    fn get_config_name(&self) -> String {
+        self.config.get_display_name()  // CALLS: Config::get_display_name
+    }
+}
+
 // Module declaration
 mod inner {
     pub struct InnerStruct;
@@ -35,6 +62,23 @@ pub struct Config {
     #[deprecated]
     enabled: bool,
     phantom: PhantomData<()>,
+}
+
+impl Config {
+    /// Create default config - will be called by TestService::new
+    pub fn default() -> Self {
+        Self {
+            name: "default".to_string(),
+            port: 8080,
+            enabled: true,
+            phantom: PhantomData,
+        }
+    }
+
+    /// Get display name - will be called by TestService::get_config_name
+    pub fn get_display_name(&self) -> String {
+        format!("Config: {}", self.name)
+    }
 }
 
 // Tuple struct
@@ -320,8 +364,13 @@ mod benches {
     }
 }
 
-// Main function
+// Main function - demonstrates clear call relationships
 fn main() {
-    let config = Config::new("app".to_string());
-    println!("Config: {:?}", config);
+    // This should show main CALLS TestService::new
+    let service = TestService::new("test-app".to_string());
+
+    // This should show main CALLS TestService::process
+    let result = service.process();
+
+    println!("Result: {}", result);
 }

@@ -331,7 +331,7 @@ fn test_calls() {
     // These should be tracked as different qualified calls
     let f = Foo::new();  // Should be "Foo::new"
     let b = Bar::new();  // Should be "Bar::new"
-    
+
     // Standard library calls
     let s = String::new();  // Should be "String::new"
     let v = Vec::<i32>::new();  // Should be "Vec::new" or "Vec::<i32>::new"
