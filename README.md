@@ -424,7 +424,7 @@ codanna benchmark python       # Test specific language
 
 ## Roadmap
 
-### v.0.5.2 (Current Release)
+### v.0.5.6 (Current Release)
 
 | Feature | Description | Status |
 |---------|-------------|--------|

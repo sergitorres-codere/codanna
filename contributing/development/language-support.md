@@ -7,7 +7,7 @@
 
 Languages self-register via the modular registry system. Each language lives in its own subdirectory with complete isolation and language-specific resolution capabilities.
 
-## Current Status (v0.5.5)
+## Current Status (v0.5.6)
 
 **✅ Production Ready:**
 - Language registry architecture with self-registration
