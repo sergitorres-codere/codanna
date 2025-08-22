@@ -89,6 +89,7 @@ pub trait LanguageBehavior: Send + Sync {
     /// - Rust: `"crate::module::submodule"`
     /// - Python: `"module.submodule"`
     /// - PHP: `"\\Namespace\\Subnamespace"`
+    /// - Go: `"module/submodule"`
     fn format_module_path(&self, base_path: &str, symbol_name: &str) -> String;
 
     /// Parse visibility from a symbol's signature
@@ -97,6 +98,7 @@ pub trait LanguageBehavior: Send + Sync {
     /// - Rust: `"pub fn foo()"` -> Public
     /// - Python: `"def _foo()"` -> Module (single underscore)
     /// - PHP: `"private function foo()"` -> Private
+    /// - Go: `"func foo()"` -> Public
     fn parse_visibility(&self, signature: &str) -> Visibility;
 
     /// Get the module separator for this language
@@ -105,6 +107,7 @@ pub trait LanguageBehavior: Send + Sync {
     /// - Rust: `"::"`
     /// - Python: `"."`
     /// - PHP: `"\\"`
+    /// - Go: `"/"`
     fn module_separator(&self) -> &'static str;
 
     /// Check if this language supports trait/interface concepts
@@ -158,6 +161,7 @@ pub trait LanguageBehavior: Send + Sync {
     /// - Rust: `"src/foo/bar.rs"` → `"crate::foo::bar"`
     /// - Python: `"src/package/module.py"` → `"package.module"`
     /// - PHP: `"src/Namespace/Class.php"` → `"\\Namespace\\Class"`
+    /// - Go: `"src/module/submodule.go"` → `"module/submodule"`
     ///
     /// # Default Implementation
     /// Returns None by default. Languages should override this if they have
@@ -176,6 +180,7 @@ pub trait LanguageBehavior: Send + Sync {
     /// - Rust: `"crate::foo::Bar"` → looks for Bar in module crate::foo
     /// - Python: `"package.module.Class"` → looks for Class in package.module
     /// - PHP: `"\\App\\Controllers\\UserController"` → looks for UserController in \\App\\Controllers
+    /// - Go: `"module/submodule"` → looks for submodule in module
     ///
     /// # Default Implementation
     /// The default implementation:

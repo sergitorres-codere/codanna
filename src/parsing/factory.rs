@@ -4,8 +4,9 @@
 //! Validates language enablement and provides discovery of supported languages.
 
 use super::{
-    Language, LanguageBehavior, LanguageId, LanguageParser, PhpBehavior, PhpParser, PythonBehavior,
-    PythonParser, RustBehavior, RustParser, TypeScriptBehavior, TypeScriptParser, get_registry,
+    GoBehavior, GoParser, Language, LanguageBehavior, LanguageId, LanguageParser, PhpBehavior,
+    PhpParser, PythonBehavior, PythonParser, RustBehavior, RustParser, TypeScriptBehavior,
+    TypeScriptParser, get_registry,
 };
 use crate::{IndexError, IndexResult, Settings};
 use std::sync::Arc;
@@ -146,6 +147,10 @@ impl ParserFactory {
                 let parser = PhpParser::new().map_err(|e| IndexError::General(e.to_string()))?;
                 Ok(Box::new(parser))
             }
+            Language::Go => {
+                let parser = GoParser::new().map_err(|e| IndexError::General(e.to_string()))?;
+                Ok(Box::new(parser))
+            }
         }
     }
 
@@ -220,6 +225,13 @@ impl ParserFactory {
                     language.name()
                 )));
             }
+            Language::Go => {
+                let parser = GoParser::new().map_err(|e| IndexError::General(e.to_string()))?;
+                ParserWithBehavior {
+                    parser: Box::new(parser),
+                    behavior: Box::new(GoBehavior::new()),
+                }
+            }
         };
 
         Ok(result)
@@ -281,6 +293,10 @@ mod tests {
         // Test creating parser with behavior from registry
         let python_id = LanguageId::new("python");
         let parser_with_behavior = factory.create_parser_with_behavior_from_registry(python_id);
+
+        // Test creating parser with behavior for Go
+        let go_id = LanguageId::new("go");
+
         if let Err(e) = &parser_with_behavior {
             eprintln!("Failed to create Python parser with behavior: {e}");
         }
@@ -300,6 +316,7 @@ mod tests {
             factory.get_language_for_extension("php"),
             Some(LanguageId::new("php"))
         );
+        assert_eq!(factory.get_language_for_extension("go"), Some(go_id));
         assert_eq!(factory.get_language_for_extension("unknown"), None);
     }
 

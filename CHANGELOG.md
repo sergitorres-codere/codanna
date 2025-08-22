@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.5] - 2025-08-22
+
+### Added
+- Go language support with complete parser implementation
+- Go-specific symbol extraction: structs, interfaces, methods, functions, constants, variables
+- Go generics support (Go 1.18+) with type parameter parsing
+- Go package-level visibility handling (exported vs unexported symbols)
+- Go import statement parsing and relationship tracking
+- Performance benchmark: 74,545 symbols/sec (7.4x above 10k/s target)
+
+### Fixed
+- Retrieve commands relationship data parity with MCP tools
+- All 6 retrieve functions now use proper SymbolContext with complete relationship data
+- retrieve_describe aggregates relationships from all symbols with same name
+- JSON output field population for all retrieve commands
+
+### Changed
+- Language registry: Go parser integrated with self-registration architecture
+- README: Updated supported languages list to include Go (5 production languages)
+- Dependencies: Added tree-sitter-go for Go language parsing
+
 ## [0.5.4] - 2025-08-22
 
 ### Added

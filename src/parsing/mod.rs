@@ -1,6 +1,7 @@
 pub mod behavior_state;
 pub mod context;
 pub mod factory;
+pub mod go;
 pub mod import;
 pub mod language;
 pub mod language_behavior;
@@ -15,6 +16,7 @@ pub mod typescript;
 
 pub use context::{ParserContext, ScopeType};
 pub use factory::{ParserFactory, ParserWithBehavior};
+pub use go::{GoBehavior, GoParser};
 pub use import::Import;
 pub use language::Language;
 pub use language_behavior::{LanguageBehavior, LanguageMetadata};

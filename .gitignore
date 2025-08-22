@@ -7,3 +7,7 @@
 # Build artifacts
 *.rcgu.o
 *.rmeta
+
+# IDE
+.idea/
+.vscode/

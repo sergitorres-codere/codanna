@@ -35,6 +35,9 @@ struct BehaviorStateInner {
 
     /// Maps FileId to module path for quick lookup
     file_id_to_module: HashMap<FileId, String>,
+
+    /// Cache project roots by FileId for performance
+    project_roots: HashMap<FileId, PathBuf>,
 }
 
 impl BehaviorState {
@@ -98,6 +101,30 @@ impl BehaviorState {
         state.path_to_file_id.get(path).copied()
     }
 
+    /// Get the file path for a FileId
+    pub fn get_file_path(&self, file_id: FileId) -> Option<PathBuf> {
+        let state = self.inner.read().unwrap();
+        // Look through path_to_file_id to find the path for this file_id
+        for (path, &id) in &state.path_to_file_id {
+            if id == file_id {
+                return Some(path.clone());
+            }
+        }
+        None
+    }
+
+    /// Set the project root for a file (for caching)
+    pub fn set_project_root(&self, file_id: FileId, project_root: PathBuf) {
+        let mut state = self.inner.write().unwrap();
+        state.project_roots.insert(file_id, project_root);
+    }
+
+    /// Get the cached project root for a file
+    pub fn get_project_root(&self, file_id: FileId) -> Option<PathBuf> {
+        let state = self.inner.read().unwrap();
+        state.project_roots.get(&file_id).cloned()
+    }
+
     /// Clear all state (useful for testing)
     pub fn clear(&self) {
         let mut state = self.inner.write().unwrap();
@@ -106,6 +133,7 @@ impl BehaviorState {
         state.module_to_file.clear();
         state.path_to_file_id.clear();
         state.file_id_to_module.clear();
+        state.project_roots.clear();
     }
 }
 
