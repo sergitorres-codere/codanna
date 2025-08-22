@@ -93,7 +93,7 @@ replace github.com/old/module => ../local/module
 #[test]
 fn test_go_behavior_import_resolution() {
     use codanna::FileId;
-    use codanna::indexing::Import;
+    use codanna::parsing::Import;
     use codanna::parsing::LanguageBehavior;
     use codanna::parsing::go::behavior::GoBehavior;
     use codanna::storage::DocumentIndex;

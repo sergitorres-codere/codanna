@@ -195,11 +195,11 @@ impl LanguageBehavior for GoBehavior {
         self.register_file_with_state(path, file_id, module_path);
     }
 
-    fn add_import(&self, import: crate::indexing::Import) {
+    fn add_import(&self, import: crate::parsing::Import) {
         self.add_import_with_state(import);
     }
 
-    fn get_imports_for_file(&self, file_id: FileId) -> Vec<crate::indexing::Import> {
+    fn get_imports_for_file(&self, file_id: FileId) -> Vec<crate::parsing::Import> {
         self.get_imports_from_state(file_id)
     }
 
@@ -323,7 +323,7 @@ impl LanguageBehavior for GoBehavior {
     // Go-specific: Handle Go package imports with enhanced resolution
     fn resolve_import(
         &self,
-        import: &crate::indexing::Import,
+        import: &crate::parsing::Import,
         document_index: &DocumentIndex,
     ) -> Option<SymbolId> {
         // Go imports can be:
@@ -379,42 +379,6 @@ impl LanguageBehavior for GoBehavior {
     fn get_module_path_for_file(&self, file_id: FileId) -> Option<String> {
         // Use the BehaviorState to get module path (O(1) lookup)
         self.state.get_module_path(file_id)
-    }
-
-    fn resolve_symbol(
-        &self,
-        name: &str,
-        context: &dyn ResolutionScope,
-        document_index: &DocumentIndex,
-    ) -> Option<SymbolId> {
-        // Go symbol resolution order:
-        // 1. Local scope (parameters, local variables)
-        // 2. Package scope (functions, types, variables in same package)
-        // 3. Imported symbols (qualified imports like fmt.Println)
-
-        // First try the standard resolution context
-        if let Some(symbol_id) = context.resolve(name) {
-            return Some(symbol_id);
-        }
-
-        // For Go, try package-qualified names (e.g., "fmt.Println")
-        if name.contains('.') {
-            if let Some((package_name, symbol_name)) = name.split_once('.') {
-                // Try to resolve the package first
-                if let Some(_package_symbol_id) = context.resolve(package_name) {
-                    // If we found the package, try to find the symbol within it
-                    // This would require more sophisticated import resolution
-                    // For now, fall back to basic resolution
-                    return self.resolve_qualified_symbol(
-                        package_name,
-                        symbol_name,
-                        document_index,
-                    );
-                }
-            }
-        }
-
-        None
     }
 
     fn configure_symbol(&self, symbol: &mut crate::Symbol, module_path: Option<&str>) {
@@ -606,74 +570,6 @@ impl GoBehavior {
                     let project_root = project_root.to_path_buf();
                     self.state.set_project_root(file_id, project_root.clone());
                     return project_root.to_str().map(|s| s.to_string());
-                }
-            }
-        }
-
-        None
-    }
-
-    /// Helper method to resolve qualified symbol names (e.g., "fmt.Println")
-    fn resolve_qualified_symbol(
-        &self,
-        package_name: &str,
-        symbol_name: &str,
-        document_index: &DocumentIndex,
-    ) -> Option<SymbolId> {
-        // Create a temporary resolution context to use the enhanced methods
-        let context = crate::parsing::go::resolution::GoResolutionContext::new(
-            FileId::new(1).unwrap(), // Temporary file ID for resolution
-        );
-
-        // We need a file context to get current package path and project root
-        // For now, we'll use a placeholder approach since this method doesn't have file_id
-        // In practice, this should be refactored to accept a file_id parameter
-
-        // First try to resolve using the enhanced package resolution
-        // Note: We can't provide current_package_path and project_root without file context
-        if let Some(symbol_id) = context.resolve_imported_package_symbols(
-            package_name,
-            symbol_name,
-            document_index,
-            None, // current_package_path - would need file_id to determine
-            None, // project_root - would need file_id to determine
-        ) {
-            return Some(symbol_id);
-        }
-
-        // Check if it's a standard library package
-        if context.is_standard_library_package(package_name) {
-            // For standard library packages, look for symbols directly
-            if let Ok(candidates) = document_index.find_symbols_by_name(symbol_name, Some("Go")) {
-                for candidate in candidates {
-                    if let Some(ref module_path) = candidate.module_path {
-                        let module_str = module_path.as_ref();
-                        if (module_str == package_name
-                            || module_str.split('/').next_back() == Some(package_name))
-                            && candidate.visibility == crate::Visibility::Public
-                        {
-                            return Some(candidate.id);
-                        }
-                    }
-                }
-            }
-        }
-
-        // Fall back to the original implementation for compatibility
-        // Try to find symbols that match the package.symbol pattern
-        if let Ok(symbols) = document_index.get_all_symbols(1000) {
-            for symbol in symbols {
-                // Check if the symbol's module path matches the package
-                if let Some(ref module_path) = symbol.module_path {
-                    // Handle both exact package matches and last component matches
-                    let module_str = module_path.as_ref();
-                    if (module_str == package_name
-                        || module_str.split('/').next_back() == Some(package_name))
-                        && symbol.name.as_ref() == symbol_name
-                        && symbol.visibility == crate::Visibility::Public
-                    {
-                        return Some(symbol.id);
-                    }
                 }
             }
         }
