@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.4] - 2025-08-22
+
+### Added
+- ResolutionScope::resolve_relationship with default + language-specific overrides
+- Support for Defines, Calls, Implements, and qualified name resolution (e.g. Config::new, self::method)
+- TDD integration tests for Rust, Python, TypeScript, PHP with real parser validation
+- Structured, extensible abstractions for relationship resolution
+
+### Fixed
+- Replace ordering hack in SimpleIndexer with ResolutionContext delegation
+- Update retrieve describe to aggregate relationships across symbols with same name
+- Clean ~40 lines of hack code with professional architecture patterns
+
+### Changed
+- Architecture: SimpleIndexer = orchestration only; ResolutionContext = owns logic; per-language behaviors encapsulated
+- Maintains <10ms resolution via memory-mapped symbol cache
+
 ## [0.5.3] - 2025-08-22
 
 ### Added
