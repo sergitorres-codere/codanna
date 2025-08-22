@@ -377,7 +377,7 @@ Parser benchmarks on a 750-symbol test file:
 | **Python** | 75,047 symbols/sec | 7.5x faster ✓ | Production |
 | **TypeScript** | 82,156 symbols/sec | 8.2x faster ✓ | Production |
 | **PHP** | 68,432 symbols/sec | 6.8x faster ✓ | Production |
-| **Go** | ??? symbols/sec | ??? faster ✓ | Production |
+| **Go** | 74,655 symbols/second  | 7.5x faster ✓ | Production |
 | JavaScript | - | - | Planned |
 
 Key achievements:
