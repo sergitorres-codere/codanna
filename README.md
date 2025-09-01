@@ -443,7 +443,7 @@ sudo dnf install pkgconfig openssl-devel
 
 ## Roadmap
 
-### Current Release: v0.5.7
+### Current Release: v0.5.8
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed release notes and feature history.
 

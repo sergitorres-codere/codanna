@@ -1,10 +1,5 @@
 # Adding Language Support
 
-> **📝 Note: Go parser ABI upgrade planned**
-> 
-> Before adding JavaScript support, we're planning to upgrade the Go parser from tree-sitter ABI-14 to ABI-15 
-> to maintain consistency with other language parsers and ensure long-term compatibility.
-
 Languages self-register via the modular registry system. Each language lives in its own subdirectory with complete isolation and language-specific resolution capabilities.
 
 **✅ Production Ready:**

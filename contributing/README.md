@@ -9,7 +9,7 @@ Thank you for your interest in contributing to Codanna! This guide focuses on th
 - **[Development Setup](#development-setup)** - Local environment setup
 - **[Testing Workflow](#testing-your-changes)** - Pre-commit and CI/CD scripts
 
-## Current Status (v0.5.7)
+## Current Status (v0.5.8)
 
 See [CHANGELOG.md](../CHANGELOG.md) for detailed release notes and feature history.
 
@@ -23,7 +23,23 @@ See [CHANGELOG.md](../CHANGELOG.md) for detailed release notes and feature histo
 
 - Rust 1.75+ (install via [rustup](https://rustup.rs/))
 - Git
-- A code editor (VS Code with rust-analyzer recommended)
+
+### System Dependencies
+
+**Linux (Ubuntu/Debian):**
+```bash
+sudo apt update && sudo apt install pkg-config libssl-dev
+```
+
+**Linux (CentOS/RHEL):**
+```bash
+sudo yum install pkgconfig openssl-devel
+```
+
+**Linux (Fedora):**
+```bash
+sudo dnf install pkgconfig openssl-devel
+```
 
 ### Getting Started
 
