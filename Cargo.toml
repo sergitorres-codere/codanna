@@ -12,8 +12,6 @@ readme = "README.md"
 keywords = ["mcp-server", "context-engineering", "agentic-coding", "code-embedding", "ai-ide"]
 categories = ["development-tools", "command-line-utilities", "parsing", "text-processing", "compilers"]
 autoexamples = false
-
-[profile.release]
 # opt-level = 3
 # lto = true
 # codegen-units = 1
@@ -63,7 +61,6 @@ indicatif = "0.18.0"
 comfy-table = "7.1.4"
 console = "0.16.0"
 owo-colors = "4.2.2"
-atty = "0.2.14"
 axum = { version = "0.8.4", optional = true }
 tower = { version = "0.5.2", optional = true }
 tower-http = { version = "0.6.6", features = ["cors"], optional = true }
@@ -72,6 +69,7 @@ tokio-util = "0.7.16"
 axum-server = { version = "0.7.2", features = ["tls-rustls-no-provider"], optional = true }
 rustls = { version = "0.23.31", default-features = false, features = ["ring"], optional = true }
 rcgen = { version = "0.14.3", optional = true }
+is-terminal = "0.4"
 
 [dev-dependencies]
 criterion = { version = "0.7.0", features = ["html_reports"] }
