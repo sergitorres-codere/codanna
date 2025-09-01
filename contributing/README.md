@@ -9,7 +9,9 @@ Thank you for your interest in contributing to Codanna! This guide focuses on th
 - **[Development Setup](#development-setup)** - Local environment setup
 - **[Testing Workflow](#testing-your-changes)** - Pre-commit and CI/CD scripts
 
-## Current Status (v0.5.5)
+## Current Status (v0.5.7)
+
+See [CHANGELOG.md](../CHANGELOG.md) for detailed release notes and feature history.
 
 ✅ **Stable Architecture** - Language registry, resolution API, and signature extraction are production-ready
 ✅ **5 Languages Supported** - Rust, TypeScript, Python, Go, PHP with comprehensive feature parity

@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.7] - 2025-09-01
+
+### Fixed
+- rmcp 0.6.1 compatibility for `cargo install codanna --locked`
+- Symbol counts showing as 0 in `get_index_info`
+
 ## [0.5.6] - 2025-08-22
 
 ### Fixed

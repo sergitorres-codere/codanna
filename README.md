@@ -424,19 +424,11 @@ codanna benchmark python       # Test specific language
 
 ## Roadmap
 
-### v.0.5.6 (Current Release)
+### Current Release: v0.5.7
 
-| Feature | Description | Status |
-|---------|-------------|--------|
-| JSON Output Support | Structured output for all commands | ✓ |
-| Unix-Friendly CLI | Positional args and key:value syntax | ✓ |
-| Incremental Index Updates | File watching with auto re-indexing | ✓ |
-| Language Registry Architecture | Modular parser system for easy language additions | ✓ |
-| PHP Support | Full PHP parser implementation | ✓ |
-| TypeScript Support | TypeScript with type annotations | ✓ |
-| Go Support | Go with type annotations | ✓ |
+See [CHANGELOG.md](CHANGELOG.md) for detailed release notes and feature history.
 
-### Roadmap
+### Planned Features
 | Feature | Description | Status |
 |---------|-------------|--------|
 | JavaScript Support | Full JavaScript/ES6+ parser | ○ |
