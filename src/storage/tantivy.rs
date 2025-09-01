@@ -1226,18 +1226,24 @@ impl DocumentIndex {
     /// Get all symbols (use with caution on large indexes)
     pub fn get_all_symbols(&self, limit: usize) -> StorageResult<Vec<crate::Symbol>> {
         let searcher = self.reader.searcher();
-        let all_query = tantivy::query::AllQuery;
 
-        let top_docs = searcher.search(&all_query, &TopDocs::with_limit(limit))?;
+        // Use pre-filtering query instead of AllQuery + post-filtering
+        // This matches the pattern used in find_symbols_by_name and find_symbols_by_file
+        let query = BooleanQuery::from(vec![(
+            Occur::Must,
+            Box::new(TermQuery::new(
+                Term::from_field_text(self.schema.doc_type, "symbol"),
+                IndexRecordOption::Basic,
+            )) as Box<dyn Query>,
+        )]);
+
+        let top_docs = searcher.search(&query, &TopDocs::with_limit(limit))?;
+
         let mut symbols = Vec::new();
 
         for (_score, doc_address) in top_docs {
             let doc = searcher.doc::<Document>(doc_address)?;
-            if let Some(doc_type) = doc.get_first(self.schema.doc_type) {
-                if doc_type.as_str() == Some("symbol") {
-                    symbols.push(self.document_to_symbol(&doc)?);
-                }
-            }
+            symbols.push(self.document_to_symbol(&doc)?);
         }
 
         Ok(symbols)

@@ -1623,7 +1623,10 @@ impl SimpleIndexer {
     pub fn get_all_symbols(&self) -> Vec<Symbol> {
         self.document_index
             .get_all_symbols(10000)
-            .unwrap_or_default()
+            .unwrap_or_else(|e| {
+                tracing::warn!("Failed to retrieve all symbols: {}", e);
+                Vec::new()
+            })
     }
 
     /// Get all dependencies of a symbol (what it depends on)
