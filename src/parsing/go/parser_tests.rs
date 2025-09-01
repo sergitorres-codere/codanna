@@ -768,6 +768,7 @@ mod performance_tests {
     /// Test 10: Performance Benchmark
     /// Goal: Verify parser meets performance targets
     #[test]
+    #[ignore] // Performance tests should be run explicitly, not in CI
     fn test_parser_performance_benchmark() -> Result<()> {
         println!("\n=== Test 10: Performance Benchmark ===");
 
