@@ -416,6 +416,25 @@ codanna benchmark python       # Test specific language
 - ~150MB for model storage (downloaded on first use)
 - A few MB for index storage (varies by codebase size)
 
+### System Dependencies
+
+**Linux (Ubuntu/Debian):**
+```bash
+sudo apt update && sudo apt install pkg-config libssl-dev
+```
+
+**Linux (CentOS/RHEL):**
+```bash
+sudo yum install pkgconfig openssl-devel
+```
+
+**Linux (Fedora):**
+```bash
+sudo dnf install pkgconfig openssl-devel
+```
+
+**macOS/Windows:** No additional dependencies required.
+
 ## Current Limitations
 
 - Supports Rust, Python, TypeScript, Go and PHP (more language support coming)
