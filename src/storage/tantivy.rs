@@ -917,7 +917,43 @@ impl DocumentIndex {
                 self.schema.context,
             ],
         );
-        let main_query = query_parser.parse_query(query_str)?;
+
+        // Try parsing as Tantivy query syntax first, fall back to literal matching
+        // for queries with special characters (interface{}, Vec<T>, etc.)
+        let main_query = match query_parser.parse_query(query_str) {
+            Ok(query) => query,
+            Err(_parse_error) => {
+                // Query contains syntax that conflicts with Tantivy parser.
+                // Fall back to literal term matching across searchable fields.
+                let name_term = Term::from_field_text(self.schema.name, query_str);
+                let doc_term = Term::from_field_text(self.schema.doc_comment, query_str);
+                let sig_term = Term::from_field_text(self.schema.signature, query_str);
+                let ctx_term = Term::from_field_text(self.schema.context, query_str);
+
+                Box::new(BooleanQuery::new(vec![
+                    (
+                        Occur::Should,
+                        Box::new(TermQuery::new(name_term, IndexRecordOption::Basic))
+                            as Box<dyn Query>,
+                    ),
+                    (
+                        Occur::Should,
+                        Box::new(TermQuery::new(doc_term, IndexRecordOption::Basic))
+                            as Box<dyn Query>,
+                    ),
+                    (
+                        Occur::Should,
+                        Box::new(TermQuery::new(sig_term, IndexRecordOption::Basic))
+                            as Box<dyn Query>,
+                    ),
+                    (
+                        Occur::Should,
+                        Box::new(TermQuery::new(ctx_term, IndexRecordOption::Basic))
+                            as Box<dyn Query>,
+                    ),
+                ])) as Box<dyn Query>
+            }
+        };
 
         // Fuzzy query for typo tolerance on the name field
         let term = Term::from_field_text(self.schema.name, query_str);
