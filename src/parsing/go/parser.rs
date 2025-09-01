@@ -2,8 +2,8 @@
 //!
 //! Uses tree-sitter-go crate’s LANGUAGE constant (converted via .into()).
 //!
-//! Note: This parser uses ABI-14 with 383 node types and 40 fields.
-//! When migrating or updating the parser, ensure compatibility with ABI-14 features.
+//! Note: This parser uses ABI-15 (upgraded from ABI-14).
+//! When migrating or updating the parser, ensure compatibility with ABI-15 features.
 
 use crate::parsing::Import;
 use crate::parsing::{LanguageParser, MethodCall, ParserContext, ScopeType};
