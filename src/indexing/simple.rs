@@ -1466,6 +1466,11 @@ impl SimpleIndexer {
             })
     }
 
+    /// Get reference to symbol cache if available
+    pub fn symbol_cache(&self) -> Option<&crate::storage::symbol_cache::ConcurrentSymbolCache> {
+        self.symbol_cache.as_ref().map(|arc| arc.as_ref())
+    }
+
     pub fn get_called_functions(&self, symbol_id: SymbolId) -> Vec<Symbol> {
         // Query relationships where from_symbol_id = symbol_id and kind = Calls
         self.document_index
@@ -2156,7 +2161,15 @@ impl SimpleIndexer {
     fn build_resolution_context(&self, file_id: FileId) -> IndexResult<Box<dyn ResolutionScope>> {
         // Use behavior's build_resolution_context which handles imports with our new matching logic
         let behavior = self.get_behavior_for_file(file_id)?;
-        behavior.build_resolution_context(file_id, &self.document_index)
+
+        // NEW: Check if we can use cache-based resolution
+        if let Some(cache) = self.symbol_cache() {
+            // Build context with cache (fast path)
+            behavior.build_resolution_context_with_cache(file_id, cache, &self.document_index)
+        } else {
+            // Fall back to existing path (compatibility)
+            behavior.build_resolution_context(file_id, &self.document_index)
+        }
     }
 
     /// Resolve cross-file relationships using imports
@@ -2444,6 +2457,11 @@ impl SimpleIndexer {
 
         // Get all symbols from the index (use the existing public method)
         let all_symbols = self.get_all_symbols();
+        eprintln!(
+            "DEBUG: Building symbol cache with {} symbols at {:?}",
+            all_symbols.len(),
+            cache_path
+        );
 
         // Build the cache file
         crate::storage::symbol_cache::SymbolHashCache::build_from_symbols(
