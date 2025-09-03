@@ -43,25 +43,39 @@ fn test_imports_directly() {
         "Namespace import should have is_glob=true"
     );
 
-    // Test 3: Named imports only
+    // Test 3: Named imports only (per-specifier entries)
     let code = "import { Component, useState } from 'react';";
     let imports = parser.find_imports(code, file_id);
-    assert_eq!(imports.len(), 1);
-    assert_eq!(imports[0].path, "react");
-    assert_eq!(imports[0].alias, None, "Named imports should have no alias");
-    assert!(!imports[0].is_glob);
+    assert_eq!(imports.len(), 2, "should have two per-specifier imports");
+    assert!(
+        imports
+            .iter()
+            .any(|i| i.path == "react" && i.alias.as_deref() == Some("Component") && !i.is_glob)
+    );
+    assert!(
+        imports
+            .iter()
+            .any(|i| i.path == "react" && i.alias.as_deref() == Some("useState") && !i.is_glob)
+    );
 
-    // Test 4: Mixed default and named
+    // Test 4: Mixed default and named (default + per-specifier)
     let code = "import React, { Component } from 'react';";
     let imports = parser.find_imports(code, file_id);
-    assert_eq!(imports.len(), 1);
-    assert_eq!(imports[0].path, "react");
     assert_eq!(
-        imports[0].alias,
-        Some("React".to_string()),
-        "Mixed import should have default as alias"
+        imports.len(),
+        2,
+        "should have default + one named specifier"
     );
-    assert!(!imports[0].is_glob);
+    assert!(
+        imports
+            .iter()
+            .any(|i| i.path == "react" && i.alias.as_deref() == Some("React") && !i.is_glob)
+    );
+    assert!(
+        imports
+            .iter()
+            .any(|i| i.path == "react" && i.alias.as_deref() == Some("Component") && !i.is_glob)
+    );
 }
 
 #[test]

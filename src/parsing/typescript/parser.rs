@@ -2054,15 +2054,20 @@ export * from './common';
             );
         }
 
-        // Verify counts
-        assert_eq!(imports.len(), 7, "Should extract 7 imports");
+        // Verify counts (per-specifier imports now included)
+        assert_eq!(imports.len(), 8, "Should extract 8 imports");
 
         // Verify specific imports
-        // Named import creates one import with no alias
+        // Named imports create one Import per specifier with local alias
         assert!(
             imports
                 .iter()
-                .any(|i| i.path == "react" && i.alias.is_none())
+                .any(|i| i.path == "react" && i.alias == Some("Component".to_string()))
+        );
+        assert!(
+            imports
+                .iter()
+                .any(|i| i.path == "react" && i.alias == Some("useState".to_string()))
         );
         // Default import has alias
         assert!(
@@ -2076,11 +2081,11 @@ export * from './common';
                 .iter()
                 .any(|i| i.path == "./utils" && i.alias == Some("utils".to_string()) && i.is_glob)
         );
-        // Type import (named)
+        // Type import (named) captured as import with alias
         assert!(
             imports
                 .iter()
-                .any(|i| i.path == "./types" && i.alias.is_none())
+                .any(|i| i.path == "./types" && i.alias == Some("Props".to_string()))
         );
         // Side-effect import
         assert!(
@@ -2306,8 +2311,8 @@ export { default as MyButton } from './Button';
             );
         }
 
-        // Should have 4 imports: react (default), ./config, ./helper, ./Button
-        assert_eq!(imports.len(), 4, "Should have 4 imports");
+        // Should have 7 imports (per-specifier named imports)
+        assert_eq!(imports.len(), 7, "Should have 7 imports");
 
         // Check for React default import
         let react_default = imports
@@ -2315,17 +2320,24 @@ export { default as MyButton } from './Button';
             .find(|i| i.path == "react" && i.alias == Some("React".to_string()));
         assert!(react_default.is_some(), "Should find React default import");
 
-        // Check for config import (named imports, no alias)
-        let config = imports
-            .iter()
-            .find(|i| i.path == "./config" && i.alias.is_none());
-        assert!(config.is_some(), "Should find config import");
+        // Check for per-specifier config imports (Config type and createConfig function)
+        assert!(
+            imports
+                .iter()
+                .any(|i| i.path == "./config" && i.alias == Some("Config".to_string()))
+        );
+        assert!(
+            imports
+                .iter()
+                .any(|i| i.path == "./config" && i.alias == Some("createConfig".to_string()))
+        );
 
-        // Check for helper import (named imports, no alias on Import struct)
-        let helper = imports
-            .iter()
-            .find(|i| i.path == "./helper" && i.alias.is_none());
-        assert!(helper.is_some(), "Should find helper import");
+        // Check for aliased helper import
+        assert!(
+            imports
+                .iter()
+                .any(|i| i.path == "./helper" && i.alias == Some("H".to_string()))
+        );
 
         println!("✅ Complex patterns handled correctly");
     }

@@ -40,65 +40,103 @@ fn verify_typescript_imports_with_proof() {
 
     // Define our expectations based on the ACTUAL test file content
     let expectations = vec![
-        // Line 5: import { Component, useState } from 'react';
-        ("react", None, false, "Named imports from react"),
-        // Line 6: import { Helper as H, util } from './utils/helper';
+        // Named imports (per specifier)
+        (
+            "react",
+            Some("Component"),
+            false,
+            "Named imports from react - Component",
+        ),
+        (
+            "react",
+            Some("useState"),
+            false,
+            "Named imports from react - useState",
+        ),
         (
             "./utils/helper",
-            None,
+            Some("H"),
             false,
-            "Named imports with alias from helpers",
+            "Named imports with alias from helpers - H",
         ),
-        // Line 9: import React from 'react';
+        (
+            "./utils/helper",
+            Some("util"),
+            false,
+            "Named imports with alias from helpers - util",
+        ),
+        // Default imports
         ("react", Some("React"), false, "Default import React"),
-        // Line 10: import Button from './components/Button';
         (
             "./components/Button",
             Some("Button"),
             false,
             "Default import Button",
         ),
-        // Line 13: import * as lodash from 'lodash';
+        // Namespace imports
         ("lodash", Some("lodash"), true, "Namespace import lodash"),
-        // Line 14: import * as utils from '../utils';
         ("../utils", Some("utils"), true, "Namespace import utils"),
-        // Line 17: import DefaultExport, { namedExport } from './mixed';
+        // Mixed imports (default + named) -> two entries
+        ("./mixed", Some("namedExport"), false, "Mixed named export"),
         (
             "./mixed",
             Some("DefaultExport"),
             false,
-            "Mixed default and named",
+            "Mixed default export",
         ),
-        // Line 20: import type { Props, State } from './types';
-        ("./types", None, false, "Type-only named imports"),
-        // Line 21: import { type Config, createConfig } from './config';
-        ("./config", None, false, "Mixed type and value imports"),
-        // Line 24: import './styles.css';
+        // Type-only named imports (per specifier)
+        ("./types", Some("Props"), false, "Type-only Props"),
+        ("./types", Some("State"), false, "Type-only State"),
+        // Mixed type and value imports
+        (
+            "./config",
+            Some("Config"),
+            false,
+            "Mixed type import Config",
+        ),
+        (
+            "./config",
+            Some("createConfig"),
+            false,
+            "Mixed value import createConfig",
+        ),
+        // Side-effect imports
         ("./styles.css", None, false, "Side-effect import"),
-        // Line 25: import 'polyfill';
         ("polyfill", None, false, "Side-effect import (no extension)"),
-        // Line 28: export { Component } from 'react';
+        // Re-exports
         ("react", None, false, "Re-export named"),
-        // Line 29: export * from './utils';
         ("./utils", None, true, "Re-export all"),
-        // Line 30: export { default as MyButton } from './Button';
         ("./Button", None, false, "Re-export default as named"),
-        // Line 33: export { Helper as PublicHelper } from './utils/helper';
         ("./utils/helper", None, false, "Re-export with rename"),
-        // Line 36: export type { Props } from './types';
         ("./types", None, false, "Type re-export"),
-        // Line 39: import { something } from './sibling';
-        ("./sibling", None, false, "Sibling import"),
-        // Line 40: import { parent } from '../parent';
-        ("../parent", None, false, "Parent directory import"),
-        // Line 41: import { deep } from '../../deep/module';
-        ("../../deep/module", None, false, "Deep parent import"),
-        // Line 42: import { indexed } from './folder';
-        ("./folder", None, false, "Folder import (implies index)"),
-        // Line 45: import { Request } from '@types/express';
-        ("@types/express", None, false, "Scoped package import"),
-        // Line 46: import { service } from '@app/services';
-        ("@app/services", None, false, "App-scoped import"),
+        // Path variations (per specifier)
+        ("./sibling", Some("something"), false, "Sibling import"),
+        (
+            "../parent",
+            Some("parent"),
+            false,
+            "Parent directory import",
+        ),
+        (
+            "../../deep/module",
+            Some("deep"),
+            false,
+            "Deep parent import",
+        ),
+        (
+            "./folder",
+            Some("indexed"),
+            false,
+            "Folder import (implies index)",
+        ),
+        // Scoped packages (per specifier)
+        (
+            "@types/express",
+            Some("Request"),
+            false,
+            "Scoped package import",
+        ),
+        ("@app/services", Some("service"), false, "App-scoped import"),
     ];
 
     println!(
