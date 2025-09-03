@@ -9,6 +9,14 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use tree_sitter::Language;
 
+/// Debug macro honoring global settings debug flag
+macro_rules! debug_global {
+    ($($arg:tt)*) => {
+        if crate::config::is_global_debug_enabled() {
+            eprintln!($($arg)*);
+        }
+    };
+}
 /// Rust language behavior implementation
 #[derive(Clone)]
 pub struct RustBehavior {
@@ -257,13 +265,93 @@ impl LanguageBehavior for RustBehavior {
             return true;
         }
 
-        // Case 2: Only do complex matching if we have the importing module context
+        // Case 1b: Handle crate:: prefix mismatch
+        // Import might be "crate::foo::Bar" but symbol might be stored as "foo::Bar"
+        if let Some(without_crate) = import_path.strip_prefix("crate::") {
+            // Remove "crate::" prefix
+            if without_crate == symbol_module_path {
+                return true;
+            }
+        }
+
+        // Case 1c: Reverse case - symbol has crate:: but import doesn't
+        if symbol_module_path.starts_with("crate::") && !import_path.starts_with("crate::") {
+            let symbol_without_crate = &symbol_module_path[7..];
+            if import_path == symbol_without_crate {
+                return true;
+            }
+        }
+
+        // Case 1d: Common re-export pattern
+        // Allow importing a re-exported name from a higher-level module:
+        // import_path:  crate::parsing::Name
+        // symbol_path:  crate::parsing::something::Name
+        // Heuristic: same trailing name, symbol path starts with import prefix + '::'
+        if let Some((import_prefix, import_name)) = import_path.rsplit_once("::") {
+            // Only apply when both sides end with the same name
+            if symbol_module_path.ends_with(&format!("::{import_name}")) {
+                // Direct prefix check
+                if symbol_module_path.starts_with(&format!("{import_prefix}::")) {
+                    debug_global!(
+                        "DEBUG: Rust re-export heuristic matched (direct): import='{}', symbol='{}'",
+                        import_path,
+                        symbol_module_path
+                    );
+                    return true;
+                }
+
+                // crate:: prefix normalization (import has crate::, symbol doesn't)
+                if let Some(without_crate) = import_prefix.strip_prefix("crate::") {
+                    if symbol_module_path.starts_with(&format!("{without_crate}::")) {
+                        debug_global!(
+                            "DEBUG: Rust re-export heuristic matched (import had crate::): import='{}', symbol='{}'",
+                            import_path,
+                            symbol_module_path
+                        );
+                        return true;
+                    }
+                }
+
+                // crate:: prefix normalization (symbol has crate::, import doesn't)
+                if symbol_module_path.starts_with("crate::")
+                    && !import_prefix.starts_with("crate::")
+                {
+                    let symbol_without_crate = &symbol_module_path[7..];
+                    if symbol_without_crate.starts_with(&format!("{import_prefix}::")) {
+                        debug_global!(
+                            "DEBUG: Rust re-export heuristic matched (symbol had crate::): import='{}', symbol='{}'",
+                            import_path,
+                            symbol_module_path
+                        );
+                        return true;
+                    }
+                }
+            }
+        }
+
+        // Case 2: Handle super:: imports
+        if import_path.starts_with("super::") && importing_module.is_some() {
+            let importing_mod = importing_module.unwrap();
+            let relative_path = &import_path[7..]; // Remove "super::" prefix
+
+            // super:: means go up one level from the importing module
+            // Example: In crate::parsing::rust, super::LanguageBehavior -> crate::parsing::LanguageBehavior
+            if let Some(parent) = importing_mod.rsplit_once("::") {
+                let candidate = format!("{}::{}", parent.0, relative_path);
+                if candidate == symbol_module_path {
+                    return true;
+                }
+            }
+        }
+
+        // Case 3: Only do complex matching if we have the importing module context
         if let Some(importing_mod) = importing_module {
             // Check if it's a relative import (doesn't start with crate:: or std libs)
             if !import_path.starts_with("crate::")
                 && !import_path.starts_with("std::")
                 && !import_path.starts_with("core::")
                 && !import_path.starts_with("alloc::")
+                && !import_path.starts_with("super::")
             {
                 // Try as relative to importing module
                 // Example: helpers::func in crate::module -> crate::module::helpers::func

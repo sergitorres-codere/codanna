@@ -67,6 +67,15 @@ use crate::{FileId, IndexError, IndexResult, Symbol, SymbolId, Visibility};
 use std::path::{Path, PathBuf};
 use tree_sitter::Language;
 
+/// Debug macro honoring global settings debug flag
+macro_rules! debug_global {
+    ($($arg:tt)*) => {
+        if crate::config::is_global_debug_enabled() {
+            eprintln!($($arg)*);
+        }
+    };
+}
+
 /// Trait for language-specific behavior and configuration
 ///
 /// This trait extracts all language-specific logic from the indexer,
@@ -420,49 +429,68 @@ pub trait LanguageBehavior: Send + Sync {
                 .split(self.module_separator())
                 .last()
                 .unwrap_or(&import.path);
-            eprintln!(
+            debug_global!(
                 "DEBUG: Looking up '{}' (from import path '{}')",
-                symbol_name, import.path
+                symbol_name,
+                import.path
             );
 
-            let symbol_id = if let Some(id) = cache.lookup_by_name(symbol_name) {
-                eprintln!("DEBUG: CACHE HIT for '{symbol_name}' -> SymbolId({id:?})");
-                // Found in cache! Now verify it's actually the right symbol
-                // by checking if it matches our import path
-                if let Ok(Some(symbol)) = document_index.find_symbol_by_id(id) {
-                    if let Some(module_path) = &symbol.module_path {
-                        let importing_module = self.get_module_path_for_file(import.file_id);
-                        if self.import_matches_symbol(
-                            &import.path,
-                            module_path.as_ref(),
-                            importing_module.as_deref(),
-                        ) {
-                            eprintln!("DEBUG: Cache hit VERIFIED - using cached symbol");
-                            Some(id)
-                        } else {
-                            // Cache hit but wrong symbol, fall back to full resolution
-                            eprintln!(
-                                "DEBUG: Cache hit but WRONG symbol - falling back to database"
-                            );
-                            self.resolve_import(&import, document_index)
-                        }
-                    } else {
-                        eprintln!("DEBUG: Cache hit but no module path - falling back to database");
-                        self.resolve_import(&import, document_index)
-                    }
-                } else {
-                    eprintln!(
-                        "DEBUG: Cache hit but symbol not found by ID - falling back to database"
-                    );
-                    self.resolve_import(&import, document_index)
-                }
-            } else {
+            // Try multiple cache candidates to disambiguate by module path before DB fallback
+            let candidates = cache.lookup_candidates(symbol_name, 16);
+            debug_global!(
+                "DEBUG: Cache candidates for '{}' (import '{}'): {}",
+                symbol_name,
+                import.path,
+                candidates.len()
+            );
+            let symbol_id = if candidates.is_empty() {
                 // Not in cache, use full resolution
-                eprintln!(
+                debug_global!(
                     "DEBUG: CACHE MISS for '{}' (import path: '{}') - using database",
-                    symbol_name, import.path
+                    symbol_name,
+                    import.path
                 );
                 self.resolve_import(&import, document_index)
+            } else {
+                // Iterate candidates, verify with module_path and language rules
+                let mut matched: Option<SymbolId> = None;
+                for id in candidates.into_iter() {
+                    debug_global!("DEBUG: CACHE HIT for '{symbol_name}' -> SymbolId({id:?})");
+                    if let Ok(Some(symbol)) = document_index.find_symbol_by_id(id) {
+                        if let Some(module_path) = &symbol.module_path {
+                            let importing_module = self.get_module_path_for_file(import.file_id);
+                            if self.import_matches_symbol(
+                                &import.path,
+                                module_path.as_ref(),
+                                importing_module.as_deref(),
+                            ) {
+                                debug_global!("DEBUG: Cache hit VERIFIED - using cached symbol");
+                                matched = Some(id);
+                                break;
+                            }
+                            debug_global!(
+                                "DEBUG: Candidate mismatch, trying next: symbol_module='{}', import='{}'",
+                                module_path,
+                                import.path
+                            );
+                        } else {
+                            debug_global!(
+                                "DEBUG: Cache hit but no module path - trying next candidate"
+                            );
+                        }
+                    } else {
+                        debug_global!(
+                            "DEBUG: Cache hit but symbol not found by ID - trying next candidate"
+                        );
+                    }
+                }
+
+                if matched.is_some() {
+                    matched
+                } else {
+                    debug_global!("DEBUG: Cache hit but WRONG symbol - falling back to database");
+                    self.resolve_import(&import, document_index)
+                }
             };
 
             if let Some(symbol_id) = symbol_id {
@@ -514,15 +542,16 @@ pub trait LanguageBehavior: Send + Sync {
                 .unwrap_or(&import.path);
             if let Some(symbol_id) = cache.lookup_by_name(symbol_name) {
                 if let Ok(Some(symbol)) = document_index.find_symbol_by_id(symbol_id) {
-                    eprintln!(
+                    debug_global!(
                         "DEBUG: Found import source file via cache: {:?} for '{}'",
-                        symbol.file_id, import.path
+                        symbol.file_id,
+                        import.path
                     );
                     imported_files.insert(symbol.file_id);
                 }
             }
         }
-        eprintln!(
+        debug_global!(
             "DEBUG: Total imported files to load symbols from: {}",
             imported_files.len()
         );
@@ -552,7 +581,7 @@ pub trait LanguageBehavior: Send + Sync {
         // If we have no imports, we might still need some standard library symbols
         // Load a VERY small set of commonly used symbols (like String, Vec, etc.)
         if imported_files.is_empty() {
-            eprintln!(
+            debug_global!(
                 "DEBUG: No imports found - loading minimal fallback symbols (100 instead of 10000!)"
             );
             // Only load 100 most common symbols as a fallback
@@ -569,7 +598,7 @@ pub trait LanguageBehavior: Send + Sync {
                 }
             }
         } else {
-            eprintln!(
+            debug_global!(
                 "DEBUG: SKIPPING get_all_symbols! Using only symbols from {} imported files",
                 imported_files.len()
             );

@@ -21,6 +21,7 @@ use figment::{
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Settings {
@@ -827,6 +828,13 @@ __pycache__/
 
         Ok(())
     }
+}
+
+/// Global check for whether debug logging is enabled.
+/// Uses settings from .codanna/settings.toml and caches the result.
+pub fn is_global_debug_enabled() -> bool {
+    static DEBUG_FLAG: OnceLock<bool> = OnceLock::new();
+    *DEBUG_FLAG.get_or_init(|| Settings::load().map(|s| s.debug).unwrap_or(false))
 }
 
 #[cfg(test)]

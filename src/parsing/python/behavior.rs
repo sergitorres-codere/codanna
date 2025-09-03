@@ -208,15 +208,19 @@ impl LanguageBehavior for PythonBehavior {
     ) -> bool {
         // 1. Always check exact match first (performance)
         if import_path == symbol_module_path {
-            eprintln!("DEBUG: Python exact match: {import_path} == {symbol_module_path}");
+            if crate::config::is_global_debug_enabled() {
+                eprintln!("DEBUG: Python exact match: {import_path} == {symbol_module_path}");
+            }
             return true;
         }
 
         // 2. Handle Python-specific import patterns
         if let Some(importing_mod) = importing_module {
-            eprintln!(
-                "DEBUG: Python import_matches_symbol: import='{import_path}', symbol='{symbol_module_path}', from='{importing_mod}'"
-            );
+            if crate::config::is_global_debug_enabled() {
+                eprintln!(
+                    "DEBUG: Python import_matches_symbol: import='{import_path}', symbol='{symbol_module_path}', from='{importing_mod}'"
+                );
+            }
             // Handle relative imports starting with dots
             if import_path.starts_with('.') {
                 let resolved = self.resolve_python_relative_import(import_path, importing_mod);

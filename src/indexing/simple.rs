@@ -2457,10 +2457,11 @@ impl SimpleIndexer {
 
         // Get all symbols from the index (use the existing public method)
         let all_symbols = self.get_all_symbols();
-        eprintln!(
-            "DEBUG: Building symbol cache with {} symbols at {:?}",
+        debug_print!(
+            self,
+            "Building symbol cache with {} symbols at {}",
             all_symbols.len(),
-            cache_path
+            cache_path.display()
         );
 
         // Build the cache file
