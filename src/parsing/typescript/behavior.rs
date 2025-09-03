@@ -39,6 +39,14 @@ impl StatefulBehavior for TypeScriptBehavior {
 }
 
 impl LanguageBehavior for TypeScriptBehavior {
+    fn configure_symbol(&self, symbol: &mut crate::Symbol, module_path: Option<&str>) {
+        // Preserve parser-derived visibility (export detection), only set module path.
+        if let Some(path) = module_path {
+            let full_path = self.format_module_path(path, &symbol.name);
+            symbol.module_path = Some(full_path.into());
+        }
+    }
+
     fn format_module_path(&self, base_path: &str, _symbol_name: &str) -> String {
         // TypeScript uses file paths as module paths, not including the symbol name
         // All symbols in the same file share the same module path for visibility
@@ -226,6 +234,219 @@ impl LanguageBehavior for TypeScriptBehavior {
         Ok(Box::new(context))
     }
 
+    /// Build resolution context using symbol cache (fast path) with TypeScript semantics
+    fn build_resolution_context_with_cache(
+        &self,
+        file_id: FileId,
+        cache: &crate::storage::symbol_cache::ConcurrentSymbolCache,
+        document_index: &DocumentIndex,
+    ) -> crate::error::IndexResult<Box<dyn ResolutionScope>> {
+        use crate::error::IndexError;
+        // Create TypeScript-specific resolution context
+        let mut context = TypeScriptResolutionContext::new(file_id);
+
+        // Helper: normalize TS import to module path relative to importing module
+        fn normalize_ts_import(import_path: &str, importing_mod: &str) -> String {
+            // Helper: parent module (drop the last segment of the importing module)
+            fn parent_module(m: &str) -> String {
+                let mut parts: Vec<&str> = if m.is_empty() {
+                    Vec::new()
+                } else {
+                    m.split('.').collect()
+                };
+                if !parts.is_empty() {
+                    parts.pop();
+                }
+                parts.join(".")
+            }
+
+            if import_path.starts_with("./") {
+                // Same directory as the file: use parent of importing module
+                let base_owned = parent_module(importing_mod);
+                let base = base_owned.as_str();
+                let rel = import_path.trim_start_matches("./").replace('/', ".");
+                if base.is_empty() {
+                    rel
+                } else {
+                    format!("{base}.{rel}")
+                }
+            } else if import_path.starts_with("../") {
+                // Walk up segments from the importing module's parent
+                let base_owned = parent_module(importing_mod);
+                let mut parts: Vec<&str> = base_owned.split('.').collect();
+                let mut rest = import_path;
+                while rest.starts_with("../") {
+                    if !parts.is_empty() {
+                        parts.pop();
+                    }
+                    rest = &rest[3..];
+                }
+                let rest = rest.trim_start_matches("./").replace('/', ".");
+                let mut combined = parts.join(".");
+                if !rest.is_empty() {
+                    combined = if combined.is_empty() {
+                        rest
+                    } else {
+                        format!("{combined}.{rest}")
+                    };
+                }
+                combined
+            } else {
+                // Bare module or path alias; leave as-is (converted separators)
+                import_path.replace('/', ".")
+            }
+        }
+
+        // 1) Imports: prefer cache for imported names; skip side-effect and unnamed named imports
+        let imports = self.get_imports_for_file(file_id);
+        if crate::config::is_global_debug_enabled() {
+            eprintln!("DEBUG: TS building context: {} imports", imports.len());
+        }
+        let importing_module = self.get_module_path_for_file(file_id).unwrap_or_default();
+        for import in imports {
+            // Determine the local name to bind in this file (alias or named import).
+            let Some(local_name) = import.alias.clone() else {
+                // Named imports without explicit alias are not captured individually yet.
+                // Fall back to database resolution which may still assist via module-level usage.
+                if crate::config::is_global_debug_enabled() {
+                    eprintln!("DEBUG: TS import without alias skipped: '{}'", import.path);
+                }
+                continue;
+            };
+
+            let target_module = normalize_ts_import(&import.path, &importing_module);
+            if crate::config::is_global_debug_enabled() {
+                eprintln!(
+                    "DEBUG: TS import lookup: local='{local_name}', target_module='{target_module}'"
+                );
+            }
+
+            // Try cache candidates by local name
+            let mut matched: Option<SymbolId> = None;
+            let candidates = cache.lookup_candidates(&local_name, 16);
+            if crate::config::is_global_debug_enabled() {
+                eprintln!(
+                    "DEBUG: TS cache candidates for '{}': {}",
+                    local_name,
+                    candidates.len()
+                );
+            }
+            for id in candidates {
+                if let Ok(Some(symbol)) = document_index.find_symbol_by_id(id) {
+                    if let Some(module_path) = &symbol.module_path {
+                        if module_path.as_ref() == target_module {
+                            if crate::config::is_global_debug_enabled() {
+                                eprintln!(
+                                    "DEBUG: TS cache hit verified for '{local_name}': {id:?}"
+                                );
+                            }
+                            matched = Some(id);
+                            break;
+                        }
+                        if crate::config::is_global_debug_enabled() {
+                            eprintln!(
+                                "DEBUG: TS candidate mismatch: symbol_module='{module_path}' vs target='{target_module}'"
+                            );
+                        }
+                    }
+                }
+            }
+
+            // Fallback to DB by name if cache path match not found
+            if matched.is_none() {
+                if crate::config::is_global_debug_enabled() {
+                    eprintln!("DEBUG: TS cache miss for '{local_name}', falling back to DB");
+                }
+                if let Ok(cands) = document_index.find_symbols_by_name(&local_name, None) {
+                    for s in cands {
+                        if let Some(module_path) = &s.module_path {
+                            if module_path.as_ref() == target_module {
+                                if crate::config::is_global_debug_enabled() {
+                                    eprintln!(
+                                        "DEBUG: TS DB match for '{}': {:?}",
+                                        local_name, s.id
+                                    );
+                                }
+                                matched = Some(s.id);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if let Some(symbol_id) = matched {
+                // Respect type-only imports for proper space placement
+                context.add_import_symbol(local_name, symbol_id, import.is_type_only);
+            } else if crate::config::is_global_debug_enabled() {
+                eprintln!(
+                    "DEBUG: TS import unresolved: local='{local_name}', module='{target_module}'"
+                );
+            }
+        }
+
+        // 2) File's own symbols (module-level, with scope context)
+        let file_symbols =
+            document_index
+                .find_symbols_by_file(file_id)
+                .map_err(|e| IndexError::TantivyError {
+                    operation: "find_symbols_by_file".to_string(),
+                    cause: e.to_string(),
+                })?;
+
+        for symbol in file_symbols {
+            if self.is_resolvable_symbol(&symbol) {
+                context.add_symbol_with_context(
+                    symbol.name.to_string(),
+                    symbol.id,
+                    symbol.scope_context.as_ref(),
+                );
+            }
+        }
+
+        // 3) Avoid global get_all_symbols; we rely on imported files where possible
+        // Collect imported files via cache to add visible symbols sparingly
+        let mut imported_files = std::collections::HashSet::new();
+        for import in self.get_imports_for_file(file_id) {
+            if let Some(alias) = &import.alias {
+                for id in cache.lookup_candidates(alias, 4) {
+                    if let Ok(Some(sym)) = document_index.find_symbol_by_id(id) {
+                        imported_files.insert(sym.file_id);
+                    }
+                }
+            }
+        }
+        if crate::config::is_global_debug_enabled() {
+            eprintln!(
+                "DEBUG: TS imported files discovered via cache: {}",
+                imported_files.len()
+            );
+        }
+
+        for imported_file_id in imported_files {
+            if imported_file_id == file_id {
+                continue;
+            }
+            let imported_syms = document_index
+                .find_symbols_by_file(imported_file_id)
+                .map_err(|e| IndexError::TantivyError {
+                    operation: "find_symbols_by_file for imports".to_string(),
+                    cause: e.to_string(),
+                })?;
+            for symbol in imported_syms {
+                if self.is_symbol_visible_from_file(&symbol, file_id) {
+                    context.add_symbol(
+                        symbol.name.to_string(),
+                        symbol.id,
+                        crate::parsing::ScopeLevel::Global,
+                    );
+                }
+            }
+        }
+
+        Ok(Box::new(context))
+    }
+
     // TypeScript-specific: Support hoisting
     fn is_resolvable_symbol(&self, symbol: &crate::Symbol) -> bool {
         use crate::SymbolKind;
@@ -272,16 +493,75 @@ impl LanguageBehavior for TypeScriptBehavior {
         import: &crate::parsing::Import,
         document_index: &DocumentIndex,
     ) -> Option<SymbolId> {
-        // TypeScript imports can be:
-        // 1. Relative imports: ./foo, ../bar, ./utils/helper
-        // 2. Absolute imports: @app/utils, lodash
-        // 3. Named imports: import { foo } from './bar'
-        // 4. Default imports: import foo from './bar'
-        // 5. Namespace imports: import * as foo from './bar'
+        // Prefer resolving by the imported local name when available (named/default imports)
+        let importing_module = self
+            .get_module_path_for_file(import.file_id)
+            .unwrap_or_default();
 
-        // For now, use basic resolution
-        // TODO: Implement full ES module resolution algorithm
-        self.resolve_import_path(&import.path, document_index)
+        // Normalize import path to module path (relative to importing module)
+        fn normalize_ts_import(import_path: &str, importing_mod: &str) -> String {
+            fn parent_module(m: &str) -> String {
+                let mut parts: Vec<&str> = if m.is_empty() {
+                    Vec::new()
+                } else {
+                    m.split('.').collect()
+                };
+                if !parts.is_empty() {
+                    parts.pop();
+                }
+                parts.join(".")
+            }
+            if import_path.starts_with("./") {
+                let base_owned = parent_module(importing_mod);
+                let base = base_owned.as_str();
+                let rel = import_path.trim_start_matches("./").replace('/', ".");
+                if base.is_empty() {
+                    rel
+                } else {
+                    format!("{base}.{rel}")
+                }
+            } else if import_path.starts_with("../") {
+                let base_owned = parent_module(importing_mod);
+                let mut parts: Vec<&str> = base_owned.split('.').collect();
+                let mut rest = import_path;
+                while rest.starts_with("../") {
+                    if !parts.is_empty() {
+                        parts.pop();
+                    }
+                    rest = &rest[3..];
+                }
+                let rest = rest.trim_start_matches("./").replace('/', ".");
+                let mut combined = parts.join(".");
+                if !rest.is_empty() {
+                    combined = if combined.is_empty() {
+                        rest
+                    } else {
+                        format!("{combined}.{rest}")
+                    };
+                }
+                combined
+            } else {
+                import_path.replace('/', ".")
+            }
+        }
+
+        let target_module = normalize_ts_import(&import.path, &importing_module);
+
+        if let Some(local_name) = &import.alias {
+            if let Ok(cands) = document_index.find_symbols_by_name(local_name, None) {
+                for s in cands {
+                    if let Some(module_path) = &s.module_path {
+                        if module_path.as_ref() == target_module {
+                            return Some(s.id);
+                        }
+                    }
+                }
+            }
+            None
+        } else {
+            // Namespace or side-effect import: cannot map to a single symbol reliably
+            None
+        }
     }
 
     fn get_module_path_for_file(&self, file_id: FileId) -> Option<String> {

@@ -662,27 +662,38 @@ impl TypeScriptParser {
 
     /// Determine visibility based on export keywords
     fn determine_visibility(&self, node: Node, code: &str) -> Visibility {
-        // Check if preceded by export keyword
+        // 1) Ancestor check: many TS grammars wrap declarations in export_statement
+        let mut anc = node.parent();
+        for _ in 0..3 {
+            // walk a few levels conservatively
+            if let Some(a) = anc {
+                if a.kind() == "export_statement" {
+                    return Visibility::Public;
+                }
+                anc = a.parent();
+            } else {
+                break;
+            }
+        }
+
+        // 2) Sibling check (rare, but safe)
         if let Some(prev) = node.prev_sibling() {
             if prev.kind() == "export_statement" {
                 return Visibility::Public;
             }
         }
 
-        // Check parent for export
-        if let Some(parent) = node.parent() {
-            if parent.kind() == "export_statement" {
-                return Visibility::Public;
-            }
+        // 3) Token check: if the source preceding the node contains 'export '
+        // This catches inline modifiers when export is not represented as a wrapper.
+        let start = node.start_byte();
+        let prefix_start = start.saturating_sub(10); // small window
+        let prefix = &code[prefix_start..start];
+        if prefix.contains("export ") || prefix.contains("export\n") {
+            return Visibility::Public;
         }
 
-        // Check the signature itself
-        let signature = &code[node.byte_range()];
-        if signature.starts_with("export ") {
-            Visibility::Public
-        } else {
-            Visibility::Private
-        }
+        // Default: not exported
+        Visibility::Private
     }
 
     /// Determine method/property visibility
@@ -928,28 +939,36 @@ impl TypeScriptParser {
         file_id: FileId,
         imports: &mut Vec<Import>,
     ) {
-        eprintln!(
-            "ENTERING process_import_statement, code: {}",
-            &code[node.byte_range()]
-        );
+        if crate::config::is_global_debug_enabled() {
+            eprintln!(
+                "ENTERING process_import_statement, code: {}",
+                &code[node.byte_range()]
+            );
+        }
 
         // Debug: print all children
         let mut cursor = node.walk();
-        eprintln!("  Node has {} children:", node.child_count());
+        if crate::config::is_global_debug_enabled() {
+            eprintln!("  Node has {} children:", node.child_count());
+        }
 
         // Check if this is a type-only import (has 'type' keyword after 'import')
         let mut is_type_only = false;
         for (i, child) in node.children(&mut cursor).enumerate() {
-            eprintln!(
-                "    child[{}]: kind='{}', field_name={:?}",
-                i,
-                child.kind(),
-                node.field_name_for_child(i as u32)
-            );
+            if crate::config::is_global_debug_enabled() {
+                eprintln!(
+                    "    child[{}]: kind='{}', field_name={:?}",
+                    i,
+                    child.kind(),
+                    node.field_name_for_child(i as u32)
+                );
+            }
             // Check for 'type' keyword (appears in type-only imports)
             if child.kind() == "type" && i == 1 {
                 is_type_only = true;
-                eprintln!("    Detected type-only import!");
+                if crate::config::is_global_debug_enabled() {
+                    eprintln!("    Detected type-only import!");
+                }
             }
         }
 
@@ -971,10 +990,12 @@ impl TypeScriptParser {
         };
 
         if let Some(import_clause) = import_clause {
-            eprintln!(
-                "  Found import_clause: {}",
-                &code[import_clause.byte_range()]
-            );
+            if crate::config::is_global_debug_enabled() {
+                eprintln!(
+                    "  Found import_clause: {}",
+                    &code[import_clause.byte_range()]
+                );
+            }
 
             // Check for different import types
             let mut has_default = false;
@@ -985,22 +1006,47 @@ impl TypeScriptParser {
 
             let mut cursor = import_clause.walk();
             for child in import_clause.children(&mut cursor) {
-                eprintln!(
-                    "    Child kind: {}, text: {}",
-                    child.kind(),
-                    &code[child.byte_range()]
-                );
+                if crate::config::is_global_debug_enabled() {
+                    eprintln!(
+                        "    Child kind: {}, text: {}",
+                        child.kind(),
+                        &code[child.byte_range()]
+                    );
+                }
                 match child.kind() {
                     "identifier" => {
                         // Default import
                         has_default = true;
                         let name = code[child.byte_range()].to_string();
-                        eprintln!("      Setting default_name = {name}");
+                        if crate::config::is_global_debug_enabled() {
+                            eprintln!("      Setting default_name = {name}");
+                        }
                         default_name = Some(name);
                     }
                     "named_imports" => {
                         // Named imports exist
                         has_named = true;
+                        // Extract named import specifiers: { Foo as Bar, Baz }
+                        let mut nc = child.walk();
+                        for ni in child.children(&mut nc) {
+                            if ni.kind() == "import_specifier" {
+                                let mut sp = ni.walk();
+                                let mut local: Option<String> = None;
+                                // Prefer the aliased local name if present
+                                for part in ni.children(&mut sp) {
+                                    if part.kind() == "identifier" {
+                                        local = Some(code[part.byte_range()].to_string());
+                                    }
+                                }
+                                imports.push(Import {
+                                    path: source_path.to_string(),
+                                    alias: local,
+                                    file_id,
+                                    is_glob: false,
+                                    is_type_only,
+                                });
+                            }
+                        }
                     }
                     "namespace_import" => {
                         // * as name
@@ -1019,10 +1065,12 @@ impl TypeScriptParser {
 
             // Add imports based on what we found
             // Following Rust pattern: one Import per module, with alias for default/namespace
-            eprintln!(
-                "  Summary: has_default={has_default}, has_named={has_named}, has_namespace={has_namespace}"
-            );
-            eprintln!("  default_name={default_name:?}, namespace_name={namespace_name:?}");
+            if crate::config::is_global_debug_enabled() {
+                eprintln!(
+                    "  Summary: has_default={has_default}, has_named={has_named}, has_namespace={has_namespace}"
+                );
+                eprintln!("  default_name={default_name:?}, namespace_name={namespace_name:?}");
+            }
 
             if has_namespace {
                 // Namespace import: import * as utils from './utils'
@@ -1045,9 +1093,11 @@ impl TypeScriptParser {
                 });
             } else if has_default {
                 // Default only: import React from 'react'
-                eprintln!(
-                    "  Adding default import: path='{source_path}', alias={default_name:?}, type_only={is_type_only}"
-                );
+                if crate::config::is_global_debug_enabled() {
+                    eprintln!(
+                        "  Adding default import: path='{source_path}', alias={default_name:?}, type_only={is_type_only}"
+                    );
+                }
                 imports.push(Import {
                     path: source_path.to_string(),
                     alias: default_name,
@@ -1056,14 +1106,7 @@ impl TypeScriptParser {
                     is_type_only,
                 });
             } else if has_named {
-                // Named only: import { Component } from 'react'
-                imports.push(Import {
-                    path: source_path.to_string(),
-                    alias: None,
-                    file_id,
-                    is_glob: false,
-                    is_type_only,
-                });
+                // Named-only already pushed per specifier above
             }
         } else {
             // Side-effect import (no import clause)
@@ -1354,6 +1397,24 @@ impl TypeScriptParser {
     ) {
         // Find the actual type identifier
         if let Some(type_name) = self.extract_simple_type_name(type_node, code) {
+            // Filter out TS primitive/predefined types to avoid noisy unresolved relationships
+            if matches!(
+                type_name,
+                "string"
+                    | "number"
+                    | "boolean"
+                    | "any"
+                    | "void"
+                    | "unknown"
+                    | "never"
+                    | "null"
+                    | "undefined"
+                    | "object"
+                    | "bigint"
+                    | "symbol"
+            ) {
+                return;
+            }
             let range = Range::new(
                 type_node.start_position().row as u32,
                 type_node.start_position().column as u16,
@@ -1881,6 +1942,79 @@ impl LanguageParser for TypeScriptParser {
     fn language(&self) -> crate::parsing::Language {
         crate::parsing::Language::TypeScript
     }
+
+    fn find_variable_types<'a>(&mut self, code: &'a str) -> Vec<(&'a str, &'a str, Range)> {
+        // Basic TS variable type inference for `const/let/var x = new Type()` patterns
+        let mut bindings = Vec::new();
+        if let Some(tree) = self.parser.parse(code, None) {
+            let root = tree.root_node();
+
+            fn walk<'a>(
+                node: &tree_sitter::Node,
+                code: &'a str,
+                out: &mut Vec<(&'a str, &'a str, Range)>,
+            ) {
+                // Look for lexical_declaration -> variable_declarator with new_expression initializer
+                if node.kind() == "lexical_declaration" || node.kind() == "variable_declaration" {
+                    let mut cursor = node.walk();
+                    for child in node.children(&mut cursor) {
+                        if child.kind() == "variable_declarator" {
+                            let name = child.child_by_field_name("name").and_then(|n| {
+                                if n.kind() == "identifier" {
+                                    Some(&code[n.byte_range()])
+                                } else {
+                                    None
+                                }
+                            });
+                            let init = child.child_by_field_name("value");
+                            if let (Some(var), Some(init_node)) = (name, init) {
+                                if init_node.kind() == "new_expression" {
+                                    // Extract constructor type: new TypeName(...)
+                                    if let Some(constructor) =
+                                        init_node.child_by_field_name("constructor")
+                                    {
+                                        // constructor might be an identifier or qualified name
+                                        // We take the last identifier as the type name
+                                        let type_name = if constructor.kind() == "identifier" {
+                                            Some(&code[constructor.byte_range()])
+                                        } else {
+                                            // Fallback: try to find a trailing identifier
+                                            let mut last_ident: Option<&str> = None;
+                                            let mut c2 = constructor.walk();
+                                            for part in constructor.children(&mut c2) {
+                                                if part.kind() == "identifier" {
+                                                    last_ident = Some(&code[part.byte_range()]);
+                                                }
+                                            }
+                                            last_ident
+                                        };
+                                        if let Some(typ) = type_name {
+                                            let range = Range::new(
+                                                child.start_position().row as u32,
+                                                child.start_position().column as u16,
+                                                child.end_position().row as u32,
+                                                child.end_position().column as u16,
+                                            );
+                                            out.push((var, typ, range));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                // Recurse
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    walk(&child, code, out);
+                }
+            }
+
+            walk(&root, code, &mut bindings);
+        }
+
+        bindings
+    }
 }
 
 #[cfg(test)]
@@ -2194,6 +2328,75 @@ export { default as MyButton } from './Button';
         assert!(helper.is_some(), "Should find helper import");
 
         println!("✅ Complex patterns handled correctly");
+    }
+
+    #[test]
+    fn test_typescript_export_visibility_is_public() {
+        let mut parser = TypeScriptParser::new().unwrap();
+        let file_id = FileId::new(1).unwrap();
+        let code = r#"export function createChat() { return 'ok'; }"#;
+
+        let mut counter = SymbolCounter::new();
+        // Use internal parse path by calling parse directly via trait impl in a minimal way
+        let symbols = parser.parse(code, file_id, &mut counter);
+        // Should produce exactly one function symbol named createChat with Public visibility
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name.as_ref() == "createChat"
+                    && matches!(s.visibility, Visibility::Public))
+        );
+    }
+
+    #[test]
+    fn test_typescript_find_variable_types_new_expression() {
+        let mut parser = TypeScriptParser::new().unwrap();
+        let code = r#"
+            class ChatSDK { createChat(): string { return 'x'; } }
+            function start() {
+                const sdk = new ChatSDK();
+                sdk.createChat();
+            }
+        "#;
+        let bindings = parser.find_variable_types(code);
+        // Expect a binding for sdk -> ChatSDK
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "sdk" && *typ == "ChatSDK")
+        );
+    }
+
+    #[test]
+    fn test_typescript_find_method_calls_extraction() {
+        let mut parser = TypeScriptParser::new().unwrap();
+        let code = r#"
+            class ChatSDK { createChat(): string { return 'x'; } }
+            function startVoiceConversation() {
+                const sdk = new ChatSDK();
+                sdk.createChat();
+            }
+        "#;
+        let calls = parser.find_method_calls(code);
+        // Check that we have at least one call to createChat with receiver sdk
+        assert!(calls.iter().any(|c| c.caller == "startVoiceConversation"
+            && c.method_name == "createChat"
+            && c.receiver.as_deref() == Some("sdk")));
+    }
+
+    #[test]
+    fn test_typescript_filter_primitive_uses() {
+        let mut parser = TypeScriptParser::new().unwrap();
+        let code = r#"
+            function f(): string { return '' }
+            function g(): number { return 1 }
+        "#;
+        let uses = parser.find_uses(code);
+        // No primitive types should be reported
+        assert!(
+            uses.is_empty(),
+            "primitive type uses should be filtered out"
+        );
     }
 
     #[test]

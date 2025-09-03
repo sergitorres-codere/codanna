@@ -848,32 +848,18 @@ impl SimpleIndexer {
         module_path: &Option<String>,
         behavior: &dyn crate::parsing::LanguageBehavior,
     ) {
-        // Set module path if available
-        if symbol.module_path.is_none() {
-            if let Some(mod_path) = module_path {
-                // Use behavior to format the module path according to language conventions
-                let full_path = behavior.format_module_path(mod_path, &symbol.name);
-                symbol.module_path = Some(full_path.into());
-                debug_print!(
-                    self,
-                    "Set module path for symbol '{}': {:?}",
-                    symbol.name,
-                    symbol.module_path
-                );
-            }
-        } else {
-            debug_print!(
-                self,
-                "Symbol '{}' already has module path: {:?}",
-                symbol.name,
-                symbol.module_path
-            );
-        }
+        // Delegate full configuration to the language behavior.
+        // This allows languages to preserve parser-derived visibility and
+        // apply custom module path rules.
+        behavior.configure_symbol(symbol, module_path.as_deref());
 
-        // Parse visibility using language-specific behavior
-        if let Some(sig) = &symbol.signature {
-            symbol.visibility = behavior.parse_visibility(sig);
-        }
+        debug_print!(
+            self,
+            "Configured symbol '{}' -> module={:?}, visibility={:?}",
+            symbol.name,
+            symbol.module_path,
+            symbol.visibility
+        );
     }
 
     /// Store a single symbol in Tantivy
@@ -925,6 +911,9 @@ impl SimpleIndexer {
         file_id: FileId,
         behavior: &dyn crate::parsing::LanguageBehavior,
     ) -> IndexResult<()> {
+        use std::collections::HashSet;
+        // Track relationships added in this file to avoid duplicates
+        let mut added: HashSet<(String, String, RelationKind)> = HashSet::new();
         // 1. Function/method calls
         let method_calls: Vec<MethodCall> = parser.find_method_calls(content);
         debug_print!(
@@ -1000,13 +989,28 @@ impl SimpleIndexer {
                     ))
             });
 
-            self.add_relationships_by_name(
-                &method_call.caller,
-                &method_call.method_name,
-                file_id,
-                behavior.map_relationship("calls"),
-                metadata,
-            )?;
+            let kind = behavior.map_relationship("calls");
+            if added.insert((
+                method_call.caller.clone(),
+                method_call.method_name.clone(),
+                kind,
+            )) {
+                self.add_relationships_by_name(
+                    &method_call.caller,
+                    &method_call.method_name,
+                    file_id,
+                    kind,
+                    metadata,
+                )?;
+            } else {
+                debug_print!(
+                    self,
+                    "Skipping duplicate relationship: {} -> {} ({:?})",
+                    method_call.caller,
+                    method_call.method_name,
+                    kind
+                );
+            }
         }
 
         // Process plain function calls
@@ -1033,13 +1037,18 @@ impl SimpleIndexer {
                     .with_context("function_call".to_string()),
             );
 
-            self.add_relationships_by_name(
-                caller,
-                called_function,
-                file_id,
-                behavior.map_relationship("calls"),
-                metadata,
-            )?;
+            let kind = behavior.map_relationship("calls");
+            if added.insert((caller.to_string(), called_function.to_string(), kind)) {
+                self.add_relationships_by_name(caller, called_function, file_id, kind, metadata)?;
+            } else {
+                debug_print!(
+                    self,
+                    "Skipping duplicate relationship: {} -> {} ({:?})",
+                    caller,
+                    called_function,
+                    kind
+                );
+            }
         }
 
         // 2. Trait implementations
