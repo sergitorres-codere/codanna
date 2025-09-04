@@ -37,7 +37,25 @@
 - Initialize config: `cargo run -- init` creates `.codanna/settings.toml`. Use `--config` to point at custom files; `--info` prints load details.
 - Do not commit local indexes or secrets. Local caches live under `.codanna/` (ignored); keep credentials and tokens out of the repo.
 
-## Codanna Tools
+## Codanna MCP Tools
 - Start with semantic tools to anchor on the right files and APIs; they provide the highest‑quality context.
 - Then use find_symbol and search_symbols to lock onto exact files and kinds.
 - Treat get_calls/find_callers/analyze_impact as hints; confirm with code reading or tighter queries (unique names, kind filters).
+
+## Development Guidelines
+
+### Mandatory Reading
+
+**IMPORTANT**: All code must follow our [Rust Development Guidelines](contributing/development/guidelines.md). Key principles:
+
+1. **Zero-Cost Abstractions**: No unnecessary allocations
+2. **Type Safety**: Use newtypes, not primitives
+3. **Performance**: Must meet performance targets
+4. **Error Handling**: Structured errors with suggestions
+5. **Function Design**: Decompose complex logic into focused helper methods
+
+## Current Sprint
+
+**IMPORTANT** before start implementing make sure you read an understand the documentation below! Think deeper for this session.
+
+[Current Sprint Focus Document](docs/enhancements/cross-lang-resolution-engine/tsconfig-paths-sprint.md)

@@ -388,6 +388,7 @@ mod tests {
                 enabled: true,
                 extensions: vec!["rs".to_string()],
                 parser_options: HashMap::new(),
+                config_files: Vec::new(),
             },
         );
 
@@ -398,6 +399,7 @@ mod tests {
                 enabled: true,
                 extensions: vec!["py".to_string()],
                 parser_options: HashMap::new(),
+                config_files: Vec::new(),
             },
         );
 
@@ -408,6 +410,7 @@ mod tests {
                 enabled: true,
                 extensions: vec!["php".to_string()],
                 parser_options: HashMap::new(),
+                config_files: Vec::new(),
             },
         );
 
@@ -515,6 +518,7 @@ mod tests {
                 enabled: true,
                 extensions: vec!["py".to_string()],
                 parser_options: HashMap::new(),
+                config_files: Vec::new(),
             },
         );
         settings.languages = languages;

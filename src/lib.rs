@@ -6,6 +6,7 @@ pub mod indexing;
 pub mod io;
 pub mod mcp;
 pub mod parsing;
+pub mod project_resolver;
 pub mod relationship;
 pub mod retrieve;
 pub mod semantic;
