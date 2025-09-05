@@ -72,6 +72,8 @@ axum-server = { version = "0.7.2", features = ["tls-rustls-no-provider"], option
 rustls = { version = "0.23.31", default-features = false, features = ["ring"], optional = true }
 rcgen = { version = "0.14.3", optional = true }
 is-terminal = "0.4"
+json5 = "0.4.1"
+regex = "1.11.2"
 
 [dev-dependencies]
 criterion = { version = "0.7.0", features = ["html_reports"] }
