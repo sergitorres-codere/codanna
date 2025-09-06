@@ -46,6 +46,16 @@ macro_rules! debug_print {
     };
 }
 
+// Helper enum for doc comment type classification
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum DocCommentType {
+    OuterLine,     // ///
+    OuterBlock,    // /**
+    InnerLine,     // //!
+    InnerBlock,    // /*!
+    NotDocComment, // Regular comment
+}
+
 pub struct RustParser {
     parser: Parser,
     debug: bool,
@@ -1438,32 +1448,116 @@ impl RustParser {
         Some(symbol)
     }
 
+    /// Classify comment text into doc comment type with exact rules
+    fn classify_doc_comment(&self, comment_text: &str) -> DocCommentType {
+        if comment_text.starts_with("///") && !comment_text.starts_with("////") {
+            DocCommentType::OuterLine
+        } else if comment_text.starts_with("//!") {
+            DocCommentType::InnerLine
+        } else if comment_text.starts_with("/**")
+            && !comment_text.starts_with("/***")
+            && comment_text != "/**/"
+        {
+            DocCommentType::OuterBlock
+        } else if comment_text.starts_with("/*!") && comment_text != "/*!" {
+            DocCommentType::InnerBlock
+        } else {
+            DocCommentType::NotDocComment
+        }
+    }
+
+    /// Check if comment is outer doc comment type
+    fn is_outer_doc_comment(&self, comment_text: &str) -> bool {
+        matches!(
+            self.classify_doc_comment(comment_text),
+            DocCommentType::OuterLine | DocCommentType::OuterBlock
+        )
+    }
+
+    /// Check if comment is inner doc comment type  
+    fn is_inner_doc_comment(&self, comment_text: &str) -> bool {
+        matches!(
+            self.classify_doc_comment(comment_text),
+            DocCommentType::InnerLine | DocCommentType::InnerBlock
+        )
+    }
+
+    /// Extract inner doc comments from inside a container node
+    fn extract_inner_doc_comments(&self, node: &Node, code: &str) -> Option<String> {
+        let mut inner_doc_parts = Vec::new();
+
+        // Recursively scan for inner doc comments (they might be deep in the structure)
+        self.collect_inner_doc_comments_recursive(node, code, &mut inner_doc_parts);
+
+        if inner_doc_parts.is_empty() {
+            None
+        } else {
+            // Single allocation - join all borrowed parts
+            Some(inner_doc_parts.join("\n"))
+        }
+    }
+
+    /// Recursively collect inner doc comments from node and its descendants
+    fn collect_inner_doc_comments_recursive<'a>(
+        &self,
+        node: &Node,
+        code: &'a str,
+        parts: &mut Vec<&'a str>,
+    ) {
+        let mut cursor = node.walk();
+
+        for child in node.children(&mut cursor) {
+            if matches!(child.kind(), "line_comment" | "block_comment") {
+                if let Ok(text) = child.utf8_text(code.as_bytes()) {
+                    if self.is_inner_doc_comment(text) {
+                        if text.starts_with("//!") {
+                            let content = text.trim_start_matches("//!").trim();
+                            if !content.is_empty() {
+                                parts.push(content);
+                            }
+                        } else if text.starts_with("/*!") {
+                            let content = text.trim_start_matches("/*!").trim_end_matches("*/");
+                            // Process block content, work with borrowed strings
+                            for line in content.lines() {
+                                let cleaned = line.trim().trim_start_matches('*').trim();
+                                if !cleaned.is_empty() {
+                                    parts.push(cleaned);
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                // Recursively scan children for inner doc comments
+                self.collect_inner_doc_comments_recursive(&child, code, parts);
+            }
+        }
+    }
+
     fn extract_doc_comments(&self, node: &Node, code: &str) -> Option<String> {
         let mut doc_lines = Vec::new();
         let mut current = node.prev_sibling();
 
         while let Some(sibling) = current {
             match sibling.kind() {
-                "line_comment" => {
+                "line_comment" | "block_comment" => {
                     if let Ok(text) = sibling.utf8_text(code.as_bytes()) {
-                        // Check for exactly "///" not "////"
-                        if text.starts_with("///") && !text.starts_with("////") {
-                            let content = text.trim_start_matches("///").trim();
-                            doc_lines.push(content.to_string());
+                        if self.is_outer_doc_comment(text) {
+                            let comment_type = self.classify_doc_comment(text);
+                            let content = match comment_type {
+                                DocCommentType::OuterLine => {
+                                    text.trim_start_matches("///").trim().to_string()
+                                }
+                                DocCommentType::OuterBlock => text
+                                    .trim_start_matches("/**")
+                                    .trim_end_matches("*/")
+                                    .trim()
+                                    .to_string(),
+                                _ => break, // Should not happen due to is_outer_doc_comment check
+                            };
+                            doc_lines.push(content);
                         } else {
-                            break; // Non-doc comment ends the sequence
-                        }
-                    }
-                }
-                "block_comment" => {
-                    if let Ok(text) = sibling.utf8_text(code.as_bytes()) {
-                        // Check for exactly "/**" not "/***" and not "/**/"
-                        if text.starts_with("/**") && !text.starts_with("/***") && text != "/**/" {
-                            let content =
-                                text.trim_start_matches("/**").trim_end_matches("*/").trim();
-                            doc_lines.push(content.to_string());
-                        } else {
-                            break; // Non-doc comment ends the sequence
+                            break; // Non-outer-doc comment ends the sequence
                         }
                     }
                 }
@@ -1496,7 +1590,22 @@ impl LanguageParser for RustParser {
     }
 
     fn extract_doc_comment(&self, node: &Node, code: &str) -> Option<String> {
-        self.extract_doc_comments(node, code)
+        // Extract outer documentation (current functionality)
+        let outer_docs = self.extract_doc_comments(node, code);
+
+        // Extract inner documentation (NEW functionality)
+        let inner_docs = self.extract_inner_doc_comments(node, code);
+
+        // Combine with precedence (outer first, then inner)
+        match (outer_docs, inner_docs) {
+            (Some(outer), Some(inner)) => {
+                // Combine with clear separation
+                Some(format!("{outer}\n\n{inner}"))
+            }
+            (Some(outer), None) => Some(outer),
+            (None, Some(inner)) => Some(inner),
+            (None, None) => None,
+        }
     }
 
     fn find_calls<'a>(&mut self, code: &'a str) -> Vec<(&'a str, &'a str, Range)> {
@@ -2370,5 +2479,339 @@ fn trim_test() {}
 
         // Should have some method calls from the test code
         assert!(method_calls.len() >= 2); // At least Data::new and data.process
+    }
+
+    // Doc Comment extraction tests using examples/rust/doc_comments_comprehensive.rs patterns
+
+    #[test]
+    fn test_extract_doc_comment_basic_outer_line() {
+        let mut parser = RustParser::new().unwrap();
+        let code = r#"
+/// This is proper outer line documentation for documented_function
+/// It spans multiple lines and should be collected together
+/// Each line starts with exactly three slashes
+pub fn documented_function() {
+    // Regular comment inside function
+}
+        "#;
+
+        // Parse code to get AST nodes
+        let tree = parser.parser.parse(code, None).unwrap();
+        let root = tree.root_node();
+
+        // Find the function node
+        let mut function_node = None;
+        let mut cursor = root.walk();
+        for child in root.children(&mut cursor) {
+            if child.kind() == "function_item" {
+                function_node = Some(child);
+                break;
+            }
+        }
+
+        let function_node = function_node.expect("Should find function node");
+
+        // Test doc comment extraction
+        let doc_comment = parser.extract_doc_comment(&function_node, code);
+        let expected = "This is proper outer line documentation for documented_function\nIt spans multiple lines and should be collected together\nEach line starts with exactly three slashes";
+
+        println!("=== BASELINE TEST: Basic Outer Line Doc Comments ===");
+        println!("Expected: {expected}");
+        println!("Actual:   {doc_comment:?}");
+
+        assert!(doc_comment.is_some(), "Should extract doc comment");
+        assert_eq!(
+            doc_comment.unwrap(),
+            expected,
+            "Doc comment should match expected text"
+        );
+    }
+
+    #[test]
+    fn test_extract_doc_comment_exact_recognition() {
+        let mut parser = RustParser::new().unwrap();
+
+        // Test that 4+ slashes are NOT treated as doc comments
+        let code = r#"
+//// This is NOT a doc comment (4 slashes)
+pub fn not_doc_commented_function() {}
+        "#;
+
+        let tree = parser.parser.parse(code, None).unwrap();
+        let root = tree.root_node();
+
+        let mut function_node = None;
+        let mut cursor = root.walk();
+        for child in root.children(&mut cursor) {
+            if child.kind() == "function_item" {
+                function_node = Some(child);
+                break;
+            }
+        }
+
+        let function_node = function_node.expect("Should find function node");
+        let doc_comment = parser.extract_doc_comment(&function_node, code);
+
+        println!("=== BASELINE TEST: Exact Recognition (4 slashes) ===");
+        println!("Expected: None");
+        println!("Actual:   {doc_comment:?}");
+
+        assert!(
+            doc_comment.is_none(),
+            "4 slashes should NOT be treated as doc comment"
+        );
+    }
+
+    #[test]
+    fn test_extract_doc_comment_block_format() {
+        let mut parser = RustParser::new().unwrap();
+        let code = r#"
+/** 
+ * This is proper outer block documentation for block_documented_function
+ * It uses the standard block comment format
+ * With asterisks for formatting
+ */
+pub fn block_documented_function() {
+    /* Regular block comment inside function */
+}
+        "#;
+
+        let tree = parser.parser.parse(code, None).unwrap();
+        let root = tree.root_node();
+
+        let mut function_node = None;
+        let mut cursor = root.walk();
+        for child in root.children(&mut cursor) {
+            if child.kind() == "function_item" {
+                function_node = Some(child);
+                break;
+            }
+        }
+
+        let function_node = function_node.expect("Should find function node");
+        let doc_comment = parser.extract_doc_comment(&function_node, code);
+
+        println!("=== BASELINE TEST: Block Doc Comments ===");
+        println!("Expected: (block comment content)");
+        println!("Actual:   {doc_comment:?}");
+
+        assert!(doc_comment.is_some(), "Should extract block doc comment");
+        // Note: We allow formatting differences in block comments
+        let content = doc_comment.unwrap();
+        assert!(
+            content.contains("block documentation for block_documented_function"),
+            "Should contain main text"
+        );
+    }
+
+    #[test]
+    fn test_extract_doc_comment_multiple_blocks() {
+        let mut parser = RustParser::new().unwrap();
+        let code = r#"
+/// First documentation block
+/// Multiple lines in first block
+
+/// Second documentation block  
+/// This should also be collected
+
+/** 
+ * Third block in different format
+ * Should be combined with the line comments above
+ */
+pub fn multiple_comment_blocks() {}
+        "#;
+
+        let tree = parser.parser.parse(code, None).unwrap();
+        let root = tree.root_node();
+
+        let mut function_node = None;
+        let mut cursor = root.walk();
+        for child in root.children(&mut cursor) {
+            if child.kind() == "function_item" {
+                function_node = Some(child);
+                break;
+            }
+        }
+
+        let function_node = function_node.expect("Should find function node");
+        let doc_comment = parser.extract_doc_comment(&function_node, code);
+
+        println!("=== BASELINE TEST: Multiple Comment Blocks ===");
+        println!("Expected: All blocks combined");
+        println!("Actual:   {doc_comment:?}");
+
+        assert!(
+            doc_comment.is_some(),
+            "Should extract combined doc comments"
+        );
+        let content = doc_comment.unwrap();
+        assert!(
+            content.contains("First documentation block"),
+            "Should contain first block"
+        );
+        assert!(
+            content.contains("Second documentation block"),
+            "Should contain second block"
+        );
+        assert!(
+            content.contains("Third block in different format"),
+            "Should contain third block"
+        );
+    }
+
+    #[test]
+    fn test_extract_doc_comment_inner_docs_now_supported() {
+        let mut parser = RustParser::new().unwrap();
+        let code = r#"
+/// Documentation for a public struct
+/// This should be extracted as the doc comment
+pub struct DocumentedStruct {
+    //! Inner documentation for the struct itself
+    //! This describes the struct from the inside
+    
+    /// Documentation for a field
+    pub documented_field: String,
+}
+        "#;
+
+        let tree = parser.parser.parse(code, None).unwrap();
+        let root = tree.root_node();
+
+        let mut struct_node = None;
+        let mut cursor = root.walk();
+        for child in root.children(&mut cursor) {
+            if child.kind() == "struct_item" {
+                struct_node = Some(child);
+                break;
+            }
+        }
+
+        let struct_node = struct_node.expect("Should find struct node");
+        let doc_comment = parser.extract_doc_comment(&struct_node, code);
+
+        println!("=== ENHANCED TEST: Inner Docs Now Supported! ===");
+        println!("Expected: Outer docs + Inner docs combined");
+        println!("Actual:   {doc_comment:?}");
+        println!("SUCCESS: Inner docs are now included!");
+
+        assert!(doc_comment.is_some(), "Should extract combined doc comment");
+        let content = doc_comment.unwrap();
+        assert!(
+            content.contains("Documentation for a public struct"),
+            "Should contain outer docs"
+        );
+        // NEW: Inner docs are now supported!
+        assert!(
+            content.contains("Inner documentation for the struct"),
+            "Inner docs now supported!"
+        );
+    }
+
+    #[test]
+    fn test_classify_doc_comment_exact_rules() {
+        let parser = RustParser::new().unwrap();
+
+        println!("=== FOUNDATION TEST: Comment Type Classification ===");
+
+        // Test outer line comments (exactly 3 slashes)
+        let comment = "/// This is an outer line doc comment";
+        let result = parser.classify_doc_comment(comment);
+        println!("Test: '{comment}' -> {result:?}");
+        assert_eq!(result, DocCommentType::OuterLine);
+
+        // Test 4+ slashes should NOT be doc comments
+        let comment = "//// This is NOT a doc comment";
+        let result = parser.classify_doc_comment(comment);
+        println!("Test: '{comment}' -> {result:?}");
+        assert_eq!(result, DocCommentType::NotDocComment);
+
+        // Test inner line comments
+        let comment = "//! This is an inner line doc comment";
+        let result = parser.classify_doc_comment(comment);
+        println!("Test: '{comment}' -> {result:?}");
+        assert_eq!(result, DocCommentType::InnerLine);
+
+        // Test outer block comments (exactly 2 asterisks)
+        let comment = "/** This is an outer block doc comment */";
+        let result = parser.classify_doc_comment(comment);
+        println!("Test: '{comment}' -> {result:?}");
+        assert_eq!(result, DocCommentType::OuterBlock);
+
+        // Test 3+ asterisks should NOT be doc comments
+        let comment = "/*** This is NOT a doc comment */";
+        let result = parser.classify_doc_comment(comment);
+        println!("Test: '{comment}' -> {result:?}");
+        assert_eq!(result, DocCommentType::NotDocComment);
+
+        // Test empty block should NOT be doc comment
+        let comment = "**/";
+        let result = parser.classify_doc_comment(comment);
+        println!("Test: '{comment}' -> {result:?}");
+        assert_eq!(result, DocCommentType::NotDocComment);
+
+        // Test inner block comments
+        let comment = "/*! This is an inner block doc comment */";
+        let result = parser.classify_doc_comment(comment);
+        println!("Test: '{comment}' -> {result:?}");
+        assert_eq!(result, DocCommentType::InnerBlock);
+
+        println!("=== All comment type classifications correct ===");
+    }
+
+    #[test]
+    fn test_inner_doc_comments_extraction() {
+        let mut parser = RustParser::new().unwrap();
+        let code = r#"
+/// Outer documentation for DocumentedStruct
+pub struct DocumentedStruct {
+    //! Inner documentation for the struct itself
+    //! This describes the struct from the inside
+    
+    /// Field documentation
+    pub field: String,
+}
+        "#;
+
+        // Parse code to get AST nodes
+        let tree = parser.parser.parse(code, None).unwrap();
+        let root = tree.root_node();
+
+        // Find the struct node
+        let mut struct_node = None;
+        let mut cursor = root.walk();
+        for child in root.children(&mut cursor) {
+            if child.kind() == "struct_item" {
+                struct_node = Some(child);
+                break;
+            }
+        }
+
+        let struct_node = struct_node.expect("Should find struct node");
+
+        // Test enhanced doc comment extraction
+        let doc_comment = parser.extract_doc_comment(&struct_node, code);
+
+        println!("=== ENHANCED TEST: Inner Doc Comments ===");
+        println!("Expected: Outer docs + Inner docs combined");
+        println!("Actual:   {doc_comment:?}");
+
+        assert!(doc_comment.is_some(), "Should extract combined doc comment");
+        let content = doc_comment.unwrap();
+
+        // Should contain both outer and inner docs
+        assert!(
+            content.contains("Outer documentation for DocumentedStruct"),
+            "Should contain outer docs"
+        );
+        assert!(
+            content.contains("Inner documentation for the struct itself"),
+            "Should contain inner docs"
+        );
+        assert!(
+            content.contains("This describes the struct from the inside"),
+            "Should contain full inner docs"
+        );
+
+        println!("=== SUCCESS: Inner doc comments now supported! ===");
     }
 }

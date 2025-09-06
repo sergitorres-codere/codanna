@@ -4,7 +4,7 @@
       "command": "npx",
       "args": ["-y", "@upstash/context7-mcp"]
     },
-    "codanna": {
+    "codanna-stdio": {
       "command": "codanna",
       "args": ["serve", "--watch", "--watch-interval", "5"]
     },

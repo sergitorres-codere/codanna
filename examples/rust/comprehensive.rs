@@ -264,7 +264,21 @@ where
     Ok(reference)
 }
 
-// Async function
+/// Embedding regeneration test for stdio MCP server hot-reload functionality
+/// 
+/// This async function specifically validates embedding synchronization when documentation changes.
+/// It ensures that documentation updates are properly indexed and searchable through
+/// natural language queries in the MCP server environment during hot-reload operations.
+///
+/// # Purpose
+/// Tests that semantic search can find this function using natural language queries
+/// about "embedding regeneration", "stdio MCP server", and "hot-reload functionality".
+/// 
+/// # Parameters
+/// - `url`: The URL to process during the async operation
+///
+/// # Returns
+/// A Result containing the processed URL string or an error
 pub async fn async_operation(url: &str) -> Result<String> {
     Ok(url.to_string())
 }
@@ -362,6 +376,12 @@ mod benches {
     fn bench_create(b: &mut Bencher) {
         b.iter(|| Config::new("bench".to_string()));
     }
+}
+
+/// Simple test for embedding regeneration debugging
+/// This should be found in semantic search if our fix works
+pub fn simple_embedding_test() {
+    println!("Simple embedding test function");
 }
 
 // Main function - demonstrates clear call relationships

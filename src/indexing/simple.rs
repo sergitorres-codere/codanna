@@ -283,9 +283,17 @@ impl SimpleIndexer {
         &self,
         path: &Path,
     ) -> Result<(), crate::semantic::SemanticSearchError> {
+        debug_print!(self, "save_semantic_search called with path: {:?}", path);
         if let Some(semantic) = &self.semantic_search {
-            semantic.lock().unwrap().save(path)
+            debug_print!(self, "Semantic search exists, calling save()");
+            let result = semantic.lock().unwrap().save(path);
+            match &result {
+                Ok(_) => debug_print!(self, "Semantic save() succeeded"),
+                Err(e) => eprintln!("Semantic save() failed: {e}"),
+            }
+            result
         } else {
+            debug_print!(self, "No semantic search to save");
             Ok(())
         }
     }
@@ -446,12 +454,31 @@ impl SimpleIndexer {
         force: bool,
     ) -> IndexResult<crate::IndexingResult> {
         let path = path.as_ref();
-        let path_str = path.to_str().ok_or_else(|| IndexError::FileRead {
-            path: path.to_path_buf(),
-            source: std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid UTF-8 in path"),
-        })?;
 
-        // Read file and calculate hash
+        // Normalize path relative to workspace_root for consistent storage
+        // Zero-cost: we only work with references, no allocations
+        let normalized_path = if path.is_absolute() {
+            if let Some(workspace_root) = &self.settings.workspace_root {
+                path.strip_prefix(workspace_root).unwrap_or(path)
+            } else {
+                path
+            }
+        } else {
+            path
+        };
+
+        let path_str = normalized_path
+            .to_str()
+            .ok_or_else(|| IndexError::FileRead {
+                path: path.to_path_buf(),
+                source: std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "Invalid UTF-8 in path",
+                ),
+            })?;
+
+        // Read file using the ORIGINAL path (absolute or relative as provided)
+        // This ensures file reading always works
         let (content, content_hash) = self.read_file_with_hash(path)?;
 
         // Check if file already exists by querying Tantivy
@@ -484,6 +511,14 @@ impl SimpleIndexer {
             if let Some(symbol_ids) = symbols_to_remove {
                 if let Some(semantic) = &self.semantic_search {
                     semantic.lock().unwrap().remove_embeddings(&symbol_ids);
+
+                    // CRITICAL: Save embeddings to disk after removal to prevent cache desync
+                    let semantic_path = std::path::Path::new(".codanna/index/semantic");
+                    if let Err(e) = semantic.lock().unwrap().save(semantic_path) {
+                        eprintln!(
+                            "Warning: Failed to save semantic search after embedding removal: {e}"
+                        );
+                    }
                 }
             }
         }
@@ -492,7 +527,8 @@ impl SimpleIndexer {
         let file_id = self.register_file(path_str, content_hash)?;
 
         // Index the file content
-        self.reindex_file_content(path, path_str, file_id, &content)?;
+        // Pass normalized_path for consistent processing
+        self.reindex_file_content(normalized_path, path_str, file_id, &content)?;
 
         Ok(crate::IndexingResult::Indexed(file_id))
     }
@@ -873,14 +909,27 @@ impl SimpleIndexer {
                 .map(|lang_id| lang_id.as_str())
                 .unwrap_or("unknown");
 
+            debug_print!(
+                self,
+                "Indexing doc comment for '{}' with doc: '{}'",
+                symbol.name,
+                doc.chars().take(50).collect::<String>()
+            );
+
             if let Err(e) = semantic
                 .lock()
                 .unwrap()
                 .index_doc_comment_with_language(symbol.id, doc, language)
             {
                 eprintln!(
-                    "WARNING: Failed to index doc comment for symbol {}: {}",
+                    "Failed to index doc comment for symbol {}: {}",
                     symbol.name, e
+                );
+            } else {
+                debug_print!(
+                    self,
+                    "Successfully stored embedding for symbol '{}'",
+                    symbol.name
                 );
             }
         }
