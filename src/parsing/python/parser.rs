@@ -141,17 +141,44 @@ impl PythonParser {
                 context.set_current_class(saved_class);
             }
             "expression_statement" => {
-                // Check for assignments at module level
-                if let Some(child) = node.child(0) {
-                    if child.kind() == "assignment" && context.is_module_level() {
-                        if let Some(symbol) =
-                            self.process_assignment(child, code, file_id, counter, context)
-                        {
-                            symbols.push(symbol);
-                        }
+                // Process children (including assignments handled by direct "assignment" case)
+                self.process_children(node, code, file_id, symbols, counter, context);
+            }
+            "decorated_definition" => {
+                // Handle decorated functions and classes (@property, @staticmethod, etc.)
+                // The actual function/class is typically the last child
+                let mut target_node = None;
+                for child in node.children(&mut node.walk()) {
+                    if child.kind() == "function_definition" || child.kind() == "class_definition" {
+                        target_node = Some(child);
+                        break;
                     }
                 }
-                // Continue processing children
+
+                if let Some(target) = target_node {
+                    self.extract_symbols_from_node(
+                        target, code, file_id, symbols, counter, context,
+                    );
+                }
+                // Note: Removed fallback to process_children to avoid duplication
+            }
+            "assignment" => {
+                // Direct assignment at any scope level
+                if let Some(symbol) = self.process_assignment(node, code, file_id, counter, context)
+                {
+                    symbols.push(symbol);
+                }
+            }
+            "type_alias_statement" => {
+                // Handle type aliases: UserId = int
+                if let Some(symbol) = self.process_type_alias(node, code, file_id, counter, context)
+                {
+                    symbols.push(symbol);
+                }
+            }
+            "import_statement" | "import_from_statement" => {
+                // For now, just process children to find any nested symbols
+                // TODO: Consider creating import symbols for better cross-file resolution
                 self.process_children(node, code, file_id, symbols, counter, context);
             }
             _ => {
@@ -307,6 +334,33 @@ impl PythonParser {
         }
 
         None
+    }
+
+    /// Process a type alias statement (e.g., UserId = int, Vector = List[float])
+    fn process_type_alias(
+        &self,
+        node: Node,
+        code: &str,
+        file_id: FileId,
+        counter: &mut SymbolCounter,
+        context: &ParserContext,
+    ) -> Option<Symbol> {
+        // Type alias: type_name = type_expression
+        let name_node = node.child_by_field_name("name")?;
+        let name = &code[name_node.byte_range()];
+        let range = self.node_to_range(node);
+        let symbol_id = counter.next_id();
+
+        let mut symbol = Symbol::new(symbol_id, name, SymbolKind::TypeAlias, file_id, range);
+        symbol.scope_context = Some(context.current_scope_context());
+
+        // Extract the type alias definition as signature
+        if let Some(value_node) = node.child_by_field_name("value") {
+            let type_def = &code[value_node.byte_range()];
+            symbol.signature = Some(format!("{name} = {type_def}").into());
+        }
+
+        Some(symbol)
     }
 
     /// Extract function name from function_definition node
@@ -2259,8 +2313,18 @@ class APIClient:
 "#;
         let symbols = parser.parse(code, FileId::new(1).unwrap(), &mut SymbolCounter::new());
 
-        // Should find class and both methods
-        assert_eq!(symbols.len(), 3);
+        println!("=== ASYNC METHOD DETECTION TEST ===");
+        println!("Found {len} symbols:", len = symbols.len());
+        for symbol in &symbols {
+            println!(
+                "  {name} ({kind:?})",
+                name = symbol.name.as_ref(),
+                kind = symbol.kind
+            );
+        }
+
+        // Should find class, both methods, and response variable (enhanced extraction)
+        assert_eq!(symbols.len(), 4);
 
         let fetch_method = symbols.iter().find(|s| s.name.as_ref() == "fetch").unwrap();
         let sync_method = symbols
@@ -2391,8 +2455,18 @@ async def process_batch(items: List[str]) -> Dict[str, Any]:
 
         let symbols = parser.parse(code, FileId::new(1).unwrap(), &mut SymbolCounter::new());
 
-        // Should find: class, async method, sync method, async function
-        assert_eq!(symbols.len(), 4);
+        println!("=== ASYNC INTEGRATION TEST ===");
+        println!("Found {len} symbols:", len = symbols.len());
+        for symbol in &symbols {
+            println!(
+                "  {name} ({kind:?})",
+                name = symbol.name.as_ref(),
+                kind = symbol.kind
+            );
+        }
+
+        // Should find: class, async method, sync method, async function, and local variables (enhanced extraction)
+        assert_eq!(symbols.len(), 7);
 
         let class_symbol = symbols
             .iter()
@@ -2656,5 +2730,201 @@ class Outer:
         }
 
         print_node_with_fields(root, code, 0);
+    }
+
+    // ===== BASELINE TESTS FOR PYTHON DOC COMMENT ENHANCEMENT =====
+
+    #[test]
+    fn test_python_baseline_module_docstring() {
+        let mut parser = PythonParser::new().unwrap();
+        let code = r#"""This is a module-level docstring.
+
+It should be attached to the file/module symbol.
+"""
+
+def some_function():
+    pass
+"#;
+
+        println!("=== BASELINE TEST: Module Docstring (EXPECTED GAP) ===");
+        let symbols = parser.parse(code, FileId::new(1).unwrap(), &mut SymbolCounter::new());
+
+        // Look for module-level symbol with docstring
+        let module_symbol = symbols
+            .iter()
+            .find(|s| s.doc_comment.is_some() && s.name.as_ref().contains("module"));
+
+        println!("Expected: Module symbol with docstring 'This is a module-level docstring.'");
+        println!(
+            "Actual:   {:?}",
+            module_symbol.map(|s| (s.name.as_ref(), s.doc_comment.as_ref().unwrap().as_ref()))
+        );
+
+        // This should currently fail - module docstrings not supported
+        if module_symbol.is_none() {
+            println!("✓ CONFIRMED GAP: Module docstrings not currently extracted");
+        }
+    }
+
+    #[test]
+    fn test_python_baseline_method_docstring() {
+        let mut parser = PythonParser::new().unwrap();
+        let code = r#"
+class TestClass:
+    """Class docstring (should work)."""
+    
+    def method_with_docs(self):
+        """Method docstring that should be extracted.
+        
+        This is currently a GAP in functionality.
+        """
+        pass
+"#;
+
+        println!("=== BASELINE TEST: Method Docstring (EXPECTED GAP) ===");
+        let symbols = parser.parse(code, FileId::new(1).unwrap(), &mut SymbolCounter::new());
+
+        // Find the class (should have docstring)
+        let class_symbol = symbols.iter().find(|s| s.name.as_ref() == "TestClass");
+        assert!(class_symbol.is_some());
+        assert!(class_symbol.unwrap().doc_comment.is_some());
+        println!(
+            "✓ Class docstring works: {:?}",
+            class_symbol.unwrap().doc_comment.as_ref().unwrap().as_ref()
+        );
+
+        // Find the method (should have docstring but probably doesn't)
+        let method_symbol = symbols
+            .iter()
+            .find(|s| s.name.as_ref() == "method_with_docs");
+
+        println!(
+            "Expected: Method symbol with docstring 'Method docstring that should be extracted.'"
+        );
+        println!(
+            "Actual:   {:?}",
+            method_symbol.map(|s| (s.name.as_ref(), s.doc_comment.as_ref().map(|d| d.as_ref())))
+        );
+
+        if method_symbol.is_some() && method_symbol.unwrap().doc_comment.is_none() {
+            println!("✓ CONFIRMED GAP: Method docstrings not currently extracted");
+        }
+    }
+
+    #[test]
+    fn test_python_baseline_current_strengths() {
+        let mut parser = PythonParser::new().unwrap();
+        let code = r#"
+def function_with_docs():
+    """Function docstring (should work)."""
+    pass
+
+class ClassWithDocs:
+    """Class docstring (should work)."""
+    pass
+"#;
+
+        println!("=== BASELINE TEST: Current Strengths (SHOULD WORK) ===");
+        let symbols = parser.parse(code, FileId::new(1).unwrap(), &mut SymbolCounter::new());
+
+        // Function docstring (existing functionality)
+        let func_symbol = symbols
+            .iter()
+            .find(|s| s.name.as_ref() == "function_with_docs");
+        assert!(func_symbol.is_some());
+        let func_doc = func_symbol.unwrap().doc_comment.as_ref();
+
+        println!("Function docstring:");
+        println!("  Expected: 'Function docstring (should work).'");
+        println!("  Actual:   {:?}", func_doc.map(|d| d.as_ref()));
+        assert!(func_doc.is_some());
+        assert!(func_doc.unwrap().contains("Function docstring"));
+        println!("  ✅ WORKS CORRECTLY");
+
+        // Class docstring (existing functionality)
+        let class_symbol = symbols.iter().find(|s| s.name.as_ref() == "ClassWithDocs");
+        assert!(class_symbol.is_some());
+        let class_doc = class_symbol.unwrap().doc_comment.as_ref();
+
+        println!("Class docstring:");
+        println!("  Expected: 'Class docstring (should work).'");
+        println!("  Actual:   {:?}", class_doc.map(|d| d.as_ref()));
+        assert!(class_doc.is_some());
+        assert!(class_doc.unwrap().contains("Class docstring"));
+        println!("  ✅ WORKS CORRECTLY");
+    }
+
+    #[test]
+    fn test_comprehensive_docstring_extraction() {
+        let mut parser = PythonParser::new().unwrap();
+        let code = std::fs::read_to_string("examples/python/comprehensive.py")
+            .expect("Should find comprehensive test file");
+
+        println!("=== COMPREHENSIVE PYTHON DOCSTRING EXTRACTION TEST ===");
+        let symbols = parser.parse(&code, FileId::new(1).unwrap(), &mut SymbolCounter::new());
+
+        println!("Found {} symbols total:", symbols.len());
+
+        // Print each symbol and its docstring status
+        for symbol in &symbols {
+            println!();
+            println!("Symbol: {} ({:?})", symbol.name.as_ref(), symbol.kind);
+            println!(
+                "  Location: {}:{}",
+                symbol.range.start_line, symbol.range.start_column
+            );
+
+            if let Some(doc) = &symbol.doc_comment {
+                println!("  Docstring: \"{}\"", doc.as_ref().trim());
+            } else {
+                println!("  Docstring: None");
+            }
+
+            if let Some(sig) = &symbol.signature {
+                println!("  Signature: {}", sig.as_ref());
+            }
+        }
+
+        // Check for specific expected symbols
+        println!();
+        println!("=== SPECIFIC SYMBOL CHECKS ===");
+
+        // Module docstring check
+        let has_module_symbol = symbols
+            .iter()
+            .any(|s| s.name.as_ref().contains("module") || s.kind == crate::SymbolKind::Module);
+        println!("Module symbol found: {has_module_symbol}");
+
+        // Function docstring check (comprehensive.py has simple_function)
+        let simple_function = symbols
+            .iter()
+            .find(|s| s.name.as_ref() == "simple_function");
+        println!("simple_function found: {}", simple_function.is_some());
+        if let Some(func) = simple_function {
+            println!("  Has docstring: {}", func.doc_comment.is_some());
+        }
+
+        // Class docstring check (comprehensive.py has SimpleClass)
+        let simple_class = symbols.iter().find(|s| s.name.as_ref() == "SimpleClass");
+        println!("SimpleClass found: {}", simple_class.is_some());
+        if let Some(class) = simple_class {
+            println!("  Has docstring: {}", class.doc_comment.is_some());
+        }
+
+        // Method docstring check (comprehensive.py has method inside SimpleClass)
+        let method = symbols.iter().find(|s| s.name.as_ref() == "method");
+        println!("method found: {}", method.is_some());
+        if let Some(method_sym) = method {
+            println!("  Has docstring: {}", method_sym.doc_comment.is_some());
+        }
+
+        // Constants check
+        let module_constant = symbols
+            .iter()
+            .find(|s| s.name.as_ref() == "MODULE_CONSTANT");
+        println!("MODULE_CONSTANT found: {}", module_constant.is_some());
+        if let Some(constant) = module_constant {
+            println!("  Has docstring: {}", constant.doc_comment.is_some());
+        }
     }
 }
