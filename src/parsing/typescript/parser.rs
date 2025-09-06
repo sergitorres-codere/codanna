@@ -51,6 +51,37 @@ impl TypeScriptParser {
         symbol
     }
 
+    /// Parse TypeScript source code and extract all symbols
+    pub fn parse(
+        &mut self,
+        code: &str,
+        file_id: FileId,
+        symbol_counter: &mut SymbolCounter,
+    ) -> Vec<Symbol> {
+        // Reset context for each file
+        self.context = ParserContext::new();
+        let mut symbols = Vec::new();
+
+        match self.parser.parse(code, None) {
+            Some(tree) => {
+                let root_node = tree.root_node();
+                self.extract_symbols_from_node(
+                    root_node,
+                    code,
+                    file_id,
+                    symbol_counter,
+                    &mut symbols,
+                    "", // Module path will be determined by behavior
+                );
+            }
+            None => {
+                eprintln!("Failed to parse TypeScript file");
+            }
+        }
+
+        symbols
+    }
+
     /// Create a new TypeScript parser
     pub fn new() -> Result<Self, String> {
         let mut parser = Parser::new();
@@ -1783,28 +1814,7 @@ impl LanguageParser for TypeScriptParser {
         file_id: FileId,
         symbol_counter: &mut SymbolCounter,
     ) -> Vec<Symbol> {
-        // Reset context for each file
-        self.context = ParserContext::new();
-        let mut symbols = Vec::new();
-
-        match self.parser.parse(code, None) {
-            Some(tree) => {
-                let root_node = tree.root_node();
-                self.extract_symbols_from_node(
-                    root_node,
-                    code,
-                    file_id,
-                    symbol_counter,
-                    &mut symbols,
-                    "", // Module path will be determined by behavior
-                );
-            }
-            None => {
-                eprintln!("Failed to parse TypeScript file");
-            }
-        }
-
-        symbols
+        self.parse(code, file_id, symbol_counter)
     }
 
     fn as_any(&self) -> &dyn Any {

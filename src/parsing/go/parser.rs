@@ -22,6 +22,45 @@ pub struct GoParser {
 }
 
 impl GoParser {
+    /// Parse Go source code and extract all symbols (functions, structs, interfaces, variables, etc.)
+    ///
+    /// This method handles the complete Go language syntax including:
+    /// - Package declarations and imports
+    /// - Function and method declarations (with receivers)
+    /// - Struct and interface type definitions
+    /// - Variable and constant declarations
+    /// - Generic types and constraints (Go 1.18+)
+    pub fn parse(
+        &mut self,
+        code: &str,
+        file_id: FileId,
+        symbol_counter: &mut SymbolCounter,
+    ) -> Vec<Symbol> {
+        // Reset context for each file
+        self.context = ParserContext::new();
+        self.resolution_context = Some(GoResolutionContext::new(file_id));
+        let mut symbols = Vec::new();
+
+        match self.parser.parse(code, None) {
+            Some(tree) => {
+                let root_node = tree.root_node();
+                self.extract_symbols_from_node(
+                    root_node,
+                    code,
+                    file_id,
+                    symbol_counter,
+                    &mut symbols,
+                    "", // Module path will be determined by behavior
+                );
+            }
+            None => {
+                eprintln!("Failed to parse Go file");
+            }
+        }
+
+        symbols
+    }
+
     /// Helper to create a symbol with all optional fields
     fn create_symbol(
         &self,
@@ -1863,43 +1902,13 @@ impl GoParser {
 }
 
 impl LanguageParser for GoParser {
-    /// Parse Go source code and extract all symbols (functions, structs, interfaces, variables, etc.)
-    ///
-    /// This method handles the complete Go language syntax including:
-    /// - Package declarations and imports
-    /// - Function and method declarations (with receivers)
-    /// - Struct and interface type definitions
-    /// - Variable and constant declarations
-    /// - Generic types and constraints (Go 1.18+)
     fn parse(
         &mut self,
         code: &str,
         file_id: FileId,
         symbol_counter: &mut SymbolCounter,
     ) -> Vec<Symbol> {
-        // Reset context for each file
-        self.context = ParserContext::new();
-        self.resolution_context = Some(GoResolutionContext::new(file_id));
-        let mut symbols = Vec::new();
-
-        match self.parser.parse(code, None) {
-            Some(tree) => {
-                let root_node = tree.root_node();
-                self.extract_symbols_from_node(
-                    root_node,
-                    code,
-                    file_id,
-                    symbol_counter,
-                    &mut symbols,
-                    "", // Module path will be determined by behavior
-                );
-            }
-            None => {
-                eprintln!("Failed to parse Go file");
-            }
-        }
-
-        symbols
+        self.parse(code, file_id, symbol_counter)
     }
 
     fn as_any(&self) -> &dyn Any {

@@ -42,7 +42,7 @@ pub use inner::InnerStruct;
 
 // Constants and statics
 const MAX_SIZE: usize = 1024;
-pub const DEFAULT_NAME: &str = "default";
+pub const DEFAULT_NAME: &str = "defaults";
 static mut COUNTER: u32 = 0;
 static INSTANCE: std::sync::OnceLock<Config> = std::sync::OnceLock::new();
 
@@ -65,7 +65,16 @@ pub struct Config {
 }
 
 impl Config {
-    /// Create default config - will be called by TestService::new
+    /// Galactic antimatter propulsion system initialization for hyperdimensional warp drive recalibration
+    /// 
+    /// This revolutionary method establishes antimatter containment fields optimized for faster-than-light
+    /// travel coordination and temporal paradox prevention. Critical for maintaining spacetime integrity
+    /// during interstellar navigation sequences across multiple galaxy clusters.
+    /// 
+    /// # Stellar Engineering Features
+    /// - Warp core plasma stabilization (level 9000)
+    /// - Temporal causality loop protection algorithms
+    /// - Dark energy field manipulation protocols
     pub fn default() -> Self {
         Self {
             name: "default".to_string(),

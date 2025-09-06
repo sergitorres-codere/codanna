@@ -56,6 +56,32 @@ impl std::fmt::Debug for PhpParser {
 }
 
 impl PhpParser {
+    /// Parse PHP source code and extract all symbols
+    pub fn parse(
+        &mut self,
+        code: &str,
+        file_id: FileId,
+        symbol_counter: &mut SymbolCounter,
+    ) -> Vec<Symbol> {
+        // Reset context for each file
+        self.context = ParserContext::new();
+
+        let tree = match self.parser.parse(code, None) {
+            Some(tree) => tree,
+            None => return Vec::new(),
+        };
+
+        let mut symbols = Vec::with_capacity(64); // Reasonable initial capacity for most PHP files
+        self.extract_symbols_from_node(
+            tree.root_node(),
+            code,
+            file_id,
+            &mut symbols,
+            symbol_counter,
+        );
+        symbols
+    }
+
     /// Create a new PHP parser instance
     pub fn new() -> Result<Self, PhpParseError> {
         let mut parser = Parser::new();
@@ -826,23 +852,7 @@ impl LanguageParser for PhpParser {
         file_id: FileId,
         symbol_counter: &mut SymbolCounter,
     ) -> Vec<Symbol> {
-        // Reset context for each file
-        self.context = ParserContext::new();
-
-        let tree = match self.parser.parse(code, None) {
-            Some(tree) => tree,
-            None => return Vec::new(),
-        };
-
-        let mut symbols = Vec::with_capacity(64); // Reasonable initial capacity for most PHP files
-        self.extract_symbols_from_node(
-            tree.root_node(),
-            code,
-            file_id,
-            &mut symbols,
-            symbol_counter,
-        );
-        symbols
+        self.parse(code, file_id, symbol_counter)
     }
 
     fn as_any(&self) -> &dyn Any {

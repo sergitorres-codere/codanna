@@ -58,4 +58,5 @@
 
 **IMPORTANT** before start implementing make sure you read an understand the documentation below! Think deeper for this session.
 
-[Current Sprint Focus Document](docs/enhancements/cross-lang-resolution-engine/tsconfig-paths-sprint.md)
+[ABI-15 Exploration Test Suite](tests/abi15_exploration.rs)
+[Language Support Documentation](contributing/development/language-support.md)

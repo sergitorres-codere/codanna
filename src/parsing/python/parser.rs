@@ -57,6 +57,35 @@ impl std::fmt::Debug for PythonParser {
 }
 
 impl PythonParser {
+    /// Parse Python source code and extract all symbols
+    pub fn parse(
+        &mut self,
+        code: &str,
+        file_id: FileId,
+        symbol_counter: &mut SymbolCounter,
+    ) -> Vec<Symbol> {
+        let tree = match self.parser.parse(code, None) {
+            Some(tree) => tree,
+            None => return Vec::new(),
+        };
+
+        let root_node = tree.root_node();
+        let mut symbols = Vec::new();
+        // Create a parser context starting at module scope
+        let mut context = ParserContext::new();
+
+        self.extract_symbols_from_node(
+            root_node,
+            code,
+            file_id,
+            &mut symbols,
+            symbol_counter,
+            &mut context,
+        );
+
+        symbols
+    }
+
     /// Create a new Python parser instance
     pub fn new() -> Result<Self, PythonParseError> {
         let mut parser = Parser::new();
@@ -1184,26 +1213,7 @@ impl LanguageParser for PythonParser {
         file_id: FileId,
         symbol_counter: &mut SymbolCounter,
     ) -> Vec<Symbol> {
-        let tree = match self.parser.parse(code, None) {
-            Some(tree) => tree,
-            None => return Vec::new(),
-        };
-
-        let root_node = tree.root_node();
-        let mut symbols = Vec::new();
-        // Create a parser context starting at module scope
-        let mut context = ParserContext::new();
-
-        self.extract_symbols_from_node(
-            root_node,
-            code,
-            file_id,
-            &mut symbols,
-            symbol_counter,
-            &mut context,
-        );
-
-        symbols
+        self.parse(code, file_id, symbol_counter)
     }
 
     fn as_any(&self) -> &dyn Any {
