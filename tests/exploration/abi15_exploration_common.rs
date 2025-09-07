@@ -20,6 +20,10 @@ pub fn parse_code(parser: &mut Parser, code: &str) -> tree_sitter::Tree {
 }
 
 /// Print a node and its children in a tree format for exploration
+///
+/// This is a debugging utility that's intentionally kept for development.
+/// It's only used when DEBUG_TREE environment variable is set.
+#[allow(dead_code)]
 pub fn print_node_tree(node: Node, code: &str, indent: usize) {
     let node_text = &code[node.byte_range()];
     let truncated = if node_text.len() > 60 {

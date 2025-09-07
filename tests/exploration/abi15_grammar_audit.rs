@@ -12,7 +12,7 @@
 //!
 //! Run with: cargo test abi15_grammar_audit -- --nocapture
 
-// Import the common utilities at the top level
+// Import the common utilities at the module level
 mod abi15_exploration_common;
 
 #[cfg(test)]
@@ -1029,7 +1029,7 @@ mod tests {
     fn generate_php_node_discovery() -> String {
         use tree_sitter::{Language, Parser};
         // Import from the common module properly
-        use crate::abi15_exploration_common::print_node_tree;
+        use super::abi15_exploration_common::print_node_tree;
 
         let mut output = String::new();
         output.push_str("=== PHP Language ABI-15 COMPREHENSIVE NODE MAPPING ===\n");
@@ -1199,7 +1199,7 @@ mod tests {
     fn generate_go_node_discovery() -> String {
         use tree_sitter::{Language, Parser};
         // Import from the common module properly
-        use crate::abi15_exploration_common::print_node_tree;
+        use super::abi15_exploration_common::print_node_tree;
 
         let mut output = String::new();
         output.push_str("=== Go Language ABI-15 COMPREHENSIVE NODE MAPPING ===\n");
@@ -1373,7 +1373,7 @@ mod tests {
     }
 
     fn generate_python_node_discovery() -> String {
-        use crate::abi15_exploration_common::print_node_tree;
+        use super::abi15_exploration_common::print_node_tree;
         use tree_sitter::{Language, Parser};
 
         let mut output = String::new();
@@ -1550,7 +1550,7 @@ mod tests {
     }
 
     fn generate_rust_node_discovery() -> String {
-        use crate::abi15_exploration_common::print_node_tree;
+        use super::abi15_exploration_common::print_node_tree;
         use tree_sitter::{Language, Parser};
 
         let mut output = String::new();
@@ -1747,7 +1747,7 @@ mod tests {
     }
 
     fn generate_typescript_node_discovery() -> String {
-        use crate::abi15_exploration_common::print_node_tree;
+        use super::abi15_exploration_common::print_node_tree;
         use tree_sitter::{Language, Parser};
 
         let mut output = String::new();
@@ -2149,7 +2149,7 @@ mod tests {
     fn generate_c_node_discovery() -> String {
         use tree_sitter::{Language, Parser};
         // Import from the common module properly
-        use crate::abi15_exploration_common::print_node_tree;
+        use super::abi15_exploration_common::print_node_tree;
 
         let mut output = String::new();
         output.push_str("=== C Language ABI-15 COMPREHENSIVE NODE MAPPING ===\n");
@@ -2421,7 +2421,7 @@ mod tests {
     fn generate_cpp_node_discovery() -> String {
         use tree_sitter::{Language, Parser};
         // Import from the common module properly
-        use crate::abi15_exploration_common::print_node_tree;
+        use super::abi15_exploration_common::print_node_tree;
 
         let mut output = String::new();
         output.push_str("=== C++ Language ABI-15 COMPREHENSIVE NODE MAPPING ===\n");

@@ -1,5 +1,6 @@
 //! C++-specific language behavior implementation
 
+use super::resolution::CppResolutionContext;
 use crate::FileId;
 use crate::Visibility;
 use crate::parsing::behavior_state::{BehaviorState, StatefulBehavior};
@@ -101,9 +102,7 @@ impl LanguageBehavior for CppBehavior {
     }
 
     fn create_resolution_context(&self, file_id: FileId) -> Box<dyn ResolutionScope> {
-        Box::new(crate::parsing::resolution::GenericResolutionContext::new(
-            file_id,
-        ))
+        Box::new(CppResolutionContext::new(file_id))
     }
 
     fn create_inheritance_resolver(&self) -> Box<dyn crate::parsing::InheritanceResolver> {
