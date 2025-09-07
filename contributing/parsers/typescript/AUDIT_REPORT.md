@@ -2,7 +2,7 @@
 
 ## Summary
 - Nodes in file: 193
-- Nodes handled by parser: 19
+- Nodes handled by parser: 122
 - Symbol kinds extracted: 9
 
 ## Coverage Table
@@ -27,11 +27,11 @@
 | namespace_import | 177 | ✅ implemented |
 | named_imports | 178 | ✅ implemented |
 | required_parameter | 296 | ✅ implemented |
-| optional_parameter | 297 | ✅ implemented |
+| optional_parameter | 297 | ⚠️ gap |
 | rest_parameter | - | ❌ not found |
-| type_parameter | 341 | ⚠️ gap |
-| type_annotation | 302 | ⚠️ gap |
-| predefined_type | 335 | ⚠️ gap |
+| type_parameter | 341 | ✅ implemented |
+| type_annotation | 302 | ✅ implemented |
+| predefined_type | 335 | ✅ implemented |
 | namespace_declaration | - | ❌ not found |
 | module_declaration | - | ❌ not found |
 
@@ -46,9 +46,7 @@
 ### Priority 1: Implementation Gaps
 These nodes exist in your code but aren't being captured:
 
-- `type_parameter`: Add parsing logic in parser.rs
-- `type_annotation`: Add parsing logic in parser.rs
-- `predefined_type`: Add parsing logic in parser.rs
+- `optional_parameter`: Add parsing logic in parser.rs
 
 ### Priority 2: Missing Examples
 These nodes aren't in the comprehensive example. Consider:

@@ -6,7 +6,9 @@
 //! When migrating or updating the parser, ensure compatibility with ABI-14 features.
 
 use crate::parsing::Import;
-use crate::parsing::{LanguageParser, MethodCall, ParserContext, ScopeType};
+use crate::parsing::{
+    LanguageParser, MethodCall, NodeTracker, NodeTrackingState, ParserContext, ScopeType,
+};
 use crate::types::SymbolCounter;
 use crate::{FileId, Range, Symbol, SymbolKind, Visibility};
 use std::any::Any;
@@ -16,6 +18,7 @@ use tree_sitter::{Language, Node, Parser};
 pub struct TypeScriptParser {
     parser: Parser,
     context: ParserContext,
+    node_tracker: NodeTrackingState,
 }
 
 impl TypeScriptParser {
@@ -93,6 +96,7 @@ impl TypeScriptParser {
         Ok(Self {
             parser,
             context: ParserContext::new(),
+            node_tracker: NodeTrackingState::new(),
         })
     }
 
@@ -108,6 +112,7 @@ impl TypeScriptParser {
     ) {
         match node.kind() {
             "function_declaration" => {
+                self.register_handled_node(node.kind(), node.kind_id());
                 // Extract function name for parent tracking
                 let func_name = node
                     .child_by_field_name("name")
@@ -150,6 +155,7 @@ impl TypeScriptParser {
                 self.context.set_current_class(saved_class);
             }
             "class_declaration" | "abstract_class_declaration" => {
+                self.register_handled_node(node.kind(), node.kind_id());
                 // Extract class name for parent tracking
                 let class_name = node
                     .children(&mut node.walk())
@@ -181,6 +187,7 @@ impl TypeScriptParser {
                 }
             }
             "interface_declaration" => {
+                self.register_handled_node(node.kind(), node.kind_id());
                 if let Some(symbol) =
                     self.process_interface(node, code, file_id, counter, module_path)
                 {
@@ -188,6 +195,7 @@ impl TypeScriptParser {
                 }
             }
             "type_alias_declaration" => {
+                self.register_handled_node(node.kind(), node.kind_id());
                 if let Some(symbol) =
                     self.process_type_alias(node, code, file_id, counter, module_path)
                 {
@@ -195,11 +203,13 @@ impl TypeScriptParser {
                 }
             }
             "enum_declaration" => {
+                self.register_handled_node(node.kind(), node.kind_id());
                 if let Some(symbol) = self.process_enum(node, code, file_id, counter, module_path) {
                     symbols.push(symbol);
                 }
             }
             "lexical_declaration" | "variable_declaration" => {
+                self.register_handled_node(node.kind(), node.kind_id());
                 self.process_variable_declaration(
                     node,
                     code,
@@ -210,6 +220,7 @@ impl TypeScriptParser {
                 );
             }
             "arrow_function" => {
+                self.register_handled_node(node.kind(), node.kind_id());
                 // Handle arrow functions assigned to variables
                 if let Some(symbol) =
                     self.process_arrow_function(node, code, file_id, counter, module_path)
@@ -218,6 +229,8 @@ impl TypeScriptParser {
                 }
             }
             _ => {
+                // Track all nodes we encounter, even if not extracting symbols
+                self.register_handled_node(node.kind(), node.kind_id());
                 // For unhandled node types, recursively process children
                 let mut cursor = node.walk();
                 for child in node.children(&mut cursor) {
@@ -320,6 +333,7 @@ impl TypeScriptParser {
             for child in body.children(&mut cursor) {
                 match child.kind() {
                     "method_definition" => {
+                        self.register_handled_node(child.kind(), child.kind_id());
                         // Extract method name for parent tracking
                         let method_name = child
                             .child_by_field_name("name")
@@ -363,13 +377,16 @@ impl TypeScriptParser {
                         }
                     }
                     "public_field_definition" | "property_declaration" => {
+                        self.register_handled_node(child.kind(), child.kind_id());
                         if let Some(symbol) =
                             self.process_property(child, code, file_id, counter, module_path)
                         {
                             symbols.push(symbol);
                         }
                     }
-                    _ => {}
+                    _ => {
+                        self.register_handled_node(child.kind(), child.kind_id());
+                    }
                 }
             }
         }
@@ -1804,6 +1821,16 @@ impl TypeScriptParser {
             }
             _ => None,
         }
+    }
+}
+
+impl NodeTracker for TypeScriptParser {
+    fn get_handled_nodes(&self) -> &std::collections::HashSet<crate::parsing::HandledNode> {
+        self.node_tracker.get_handled_nodes()
+    }
+
+    fn register_handled_node(&mut self, node_kind: &str, node_id: u16) {
+        self.node_tracker.register_handled_node(node_kind, node_id);
     }
 }
 

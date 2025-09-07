@@ -3,29 +3,11 @@
 ## Statistics
 - Total nodes in grammar JSON: 161
 - Nodes found in comprehensive.php: 177
-- Nodes handled by parser: 15
+- Nodes handled by parser: 176
 - Symbol kinds extracted: 8
 
 ## ✅ Successfully Handled Nodes
 These nodes are in examples and handled by parser:
-- anonymous_function
-- arrow_function
-- class_declaration
-- const_declaration
-- enum_declaration
-- function_definition
-- interface_declaration
-- method_declaration
-- namespace_definition
-- namespace_use_declaration
-- property_declaration
-- property_promotion_parameter
-- simple_parameter
-- trait_declaration
-- variadic_parameter
-
-## ⚠️ Implementation Gaps
-These nodes appear in comprehensive.php but aren't handled:
 - !
 - "
 - #[
@@ -60,12 +42,14 @@ These nodes appear in comprehensive.php but aren't handled:
 - abstract
 - abstract_modifier
 - anonymous_class
+- anonymous_function
 - anonymous_function_use_clause
 - argument
 - arguments
 - array
 - array_creation_expression
 - array_element_initializer
+- arrow_function
 - as
 - assignment_expression
 - attribute
@@ -81,6 +65,7 @@ These nodes appear in comprehensive.php but aren't handled:
 - catch_clause
 - class
 - class_constant_access_expression
+- class_declaration
 - class_interface_clause
 - clone
 - clone_expression
@@ -88,6 +73,7 @@ These nodes appear in comprehensive.php but aren't handled:
 - compound_statement
 - conditional_expression
 - const
+- const_declaration
 - const_element
 - declaration_list
 - declare
@@ -100,6 +86,7 @@ These nodes appear in comprehensive.php but aren't handled:
 - encapsed_string
 - enum
 - enum_case
+- enum_declaration
 - enum_declaration_list
 - escape_sequence
 - expression_statement
@@ -114,12 +101,14 @@ These nodes appear in comprehensive.php but aren't handled:
 - formal_parameters
 - function
 - function_call_expression
+- function_definition
 - if
 - if_statement
 - implements
 - int
 - integer
 - interface
+- interface_declaration
 - intersection_type
 - list_literal
 - match
@@ -130,11 +119,14 @@ These nodes appear in comprehensive.php but aren't handled:
 - match_expression
 - member_access_expression
 - member_call_expression
+- method_declaration
 - name
 - named_type
 - namespace
+- namespace_definition
 - namespace_name
 - namespace_use_clause
+- namespace_use_declaration
 - namespace_use_group
 - new
 - null
@@ -148,7 +140,8 @@ These nodes appear in comprehensive.php but aren't handled:
 - primitive_type
 - private
 - program
-- property_element
+- property_declaration
+- property_promotion_parameter
 - protected
 - public
 - qualified_name
@@ -159,6 +152,7 @@ These nodes appear in comprehensive.php but aren't handled:
 - return_statement
 - scoped_call_expression
 - self
+- simple_parameter
 - static
 - static_modifier
 - strict_types
@@ -168,6 +162,7 @@ These nodes appear in comprehensive.php but aren't handled:
 - throw
 - throw_expression
 - trait
+- trait_declaration
 - try
 - try_statement
 - type_list
@@ -179,6 +174,7 @@ These nodes appear in comprehensive.php but aren't handled:
 - use
 - use_declaration
 - variable_name
+- variadic_parameter
 - variadic_placeholder
 - variadic_unpacking
 - visibility_modifier
@@ -188,6 +184,10 @@ These nodes appear in comprehensive.php but aren't handled:
 - |
 - ||
 - }
+
+## ⚠️ Implementation Gaps
+These nodes appear in comprehensive.php but aren't handled:
+- property_element
 
 ## 📝 Missing from Examples
 These grammar nodes aren't in comprehensive.php:

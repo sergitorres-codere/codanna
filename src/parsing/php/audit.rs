@@ -4,6 +4,7 @@
 //! This helps identify gaps in our symbol extraction.
 
 use super::PhpParser;
+use crate::parsing::NodeTracker;
 use crate::types::FileId;
 use std::collections::{HashMap, HashSet};
 use thiserror::Error;
@@ -67,49 +68,18 @@ impl PhpParserAudit {
             extracted_symbol_kinds.insert(format!("{:?}", symbol.kind));
         }
 
-        // Track which nodes our parser handles by analyzing the source
-        let implemented_nodes = Self::find_implemented_nodes();
+        // Get dynamically tracked nodes from the parser (zero maintenance!)
+        let implemented_nodes: HashSet<String> = php_parser
+            .get_handled_nodes()
+            .iter()
+            .map(|handled_node| handled_node.name.clone())
+            .collect();
 
         Ok(Self {
             grammar_nodes,
             implemented_nodes,
             extracted_symbol_kinds,
         })
-    }
-
-    /// Find which nodes are handled in parser implementation
-    /// This is a simple approach - in production we might instrument the parser
-    fn find_implemented_nodes() -> HashSet<String> {
-        // For now, we'll hardcode based on our knowledge
-        // In a real implementation, we could:
-        // 1. Parse the parser.rs file itself
-        // 2. Or add instrumentation to track visited nodes
-        // 3. Or use compile-time reflection
-
-        let mut nodes = HashSet::new();
-
-        // Main symbol-producing nodes
-        nodes.insert("class_declaration".to_string());
-        nodes.insert("interface_declaration".to_string());
-        nodes.insert("trait_declaration".to_string());
-        nodes.insert("enum_declaration".to_string());
-        nodes.insert("function_definition".to_string());
-        nodes.insert("method_declaration".to_string());
-        nodes.insert("property_declaration".to_string());
-        nodes.insert("const_declaration".to_string());
-        nodes.insert("namespace_definition".to_string());
-        nodes.insert("namespace_use_declaration".to_string());
-
-        // Closure and arrow functions
-        nodes.insert("anonymous_function".to_string());
-        nodes.insert("arrow_function".to_string());
-
-        // Parameters
-        nodes.insert("simple_parameter".to_string());
-        nodes.insert("property_promotion_parameter".to_string());
-        nodes.insert("variadic_parameter".to_string());
-
-        nodes
     }
 
     /// Generate coverage report

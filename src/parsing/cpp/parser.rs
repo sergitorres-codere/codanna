@@ -1,7 +1,7 @@
 //! C++ language parser implementation
 
 use crate::parsing::method_call::MethodCall;
-use crate::parsing::{Import, Language, LanguageParser};
+use crate::parsing::{Import, Language, LanguageParser, NodeTracker, NodeTrackingState};
 use crate::types::{Range, SymbolCounter};
 use crate::{FileId, Symbol, SymbolKind};
 use std::any::Any;
@@ -9,6 +9,7 @@ use tree_sitter::{Node, Parser};
 
 pub struct CppParser {
     parser: Parser,
+    node_tracker: NodeTrackingState,
 }
 
 impl std::fmt::Debug for CppParser {
@@ -26,7 +27,10 @@ impl CppParser {
             .set_language(&tree_sitter_cpp::LANGUAGE.into())
             .map_err(|e| format!("Failed to set C++ language: {e}"))?;
 
-        Ok(Self { parser })
+        Ok(Self {
+            parser,
+            node_tracker: NodeTrackingState::new(),
+        })
     }
 
     /// Parse C++ code and extract symbols
@@ -73,6 +77,7 @@ impl CppParser {
     }
 
     fn extract_symbols_from_node(
+        &mut self,
         node: Node,
         code: &str,
         file_id: FileId,
@@ -81,6 +86,7 @@ impl CppParser {
     ) {
         match node.kind() {
             "function_definition" => {
+                self.register_handled_node(node.kind(), node.kind_id());
                 if let Some(declarator) = node.child_by_field_name("declarator") {
                     if let Some(name_node) = declarator.child_by_field_name("declarator") {
                         let name = &code[name_node.byte_range()];
@@ -104,6 +110,7 @@ impl CppParser {
                 }
             }
             "class_specifier" => {
+                self.register_handled_node(node.kind(), node.kind_id());
                 if let Some(name_node) = node.child_by_field_name("name") {
                     let name = &code[name_node.byte_range()];
                     let symbol_id = counter.next_id();
@@ -125,6 +132,7 @@ impl CppParser {
                 }
             }
             "struct_specifier" => {
+                self.register_handled_node(node.kind(), node.kind_id());
                 if let Some(name_node) = node.child_by_field_name("name") {
                     let name = &code[name_node.byte_range()];
                     let symbol_id = counter.next_id();
@@ -146,6 +154,7 @@ impl CppParser {
                 }
             }
             "enum_specifier" => {
+                self.register_handled_node(node.kind(), node.kind_id());
                 if let Some(name_node) = node.child_by_field_name("name") {
                     let name = &code[name_node.byte_range()];
                     let symbol_id = counter.next_id();
@@ -166,13 +175,16 @@ impl CppParser {
                     );
                 }
             }
-            _ => {}
+            _ => {
+                // Track all nodes we encounter, even if not extracting symbols
+                self.register_handled_node(node.kind(), node.kind_id());
+            }
         }
 
         // Process children
         for i in 0..node.child_count() {
             if let Some(child) = node.child(i) {
-                Self::extract_symbols_from_node(child, code, file_id, symbols, counter);
+                self.extract_symbols_from_node(child, code, file_id, symbols, counter);
             }
         }
     }
@@ -502,6 +514,16 @@ impl CppParser {
     }
 }
 
+impl NodeTracker for CppParser {
+    fn get_handled_nodes(&self) -> &std::collections::HashSet<crate::parsing::HandledNode> {
+        self.node_tracker.get_handled_nodes()
+    }
+
+    fn register_handled_node(&mut self, node_kind: &str, node_id: u16) {
+        self.node_tracker.register_handled_node(node_kind, node_id);
+    }
+}
+
 impl LanguageParser for CppParser {
     fn parse(
         &mut self,
@@ -517,7 +539,7 @@ impl LanguageParser for CppParser {
         let root_node = tree.root_node();
         let mut symbols = Vec::new();
 
-        Self::extract_symbols_from_node(root_node, code, file_id, &mut symbols, symbol_counter);
+        self.extract_symbols_from_node(root_node, code, file_id, &mut symbols, symbol_counter);
 
         symbols
     }

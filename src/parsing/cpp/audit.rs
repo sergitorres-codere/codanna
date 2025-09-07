@@ -4,6 +4,7 @@
 //! This helps identify gaps in our symbol extraction.
 
 use super::CppParser;
+use crate::parsing::NodeTracker;
 use crate::types::FileId;
 use std::collections::{HashMap, HashSet};
 use thiserror::Error;
@@ -67,8 +68,12 @@ impl CppParserAudit {
             extracted_symbol_kinds.insert(format!("{:?}", symbol.kind));
         }
 
-        // For now, we don't track which nodes are implemented - would need parser instrumentation
-        let implemented_nodes = HashSet::new();
+        // Get dynamically tracked nodes from the parser (zero maintenance!)
+        let implemented_nodes: HashSet<String> = cpp_parser
+            .get_handled_nodes()
+            .iter()
+            .map(|handled_node| handled_node.name.clone())
+            .collect();
 
         Ok(CppParserAudit {
             grammar_nodes,
