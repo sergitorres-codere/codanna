@@ -1,7 +1,7 @@
 //! C language parser implementation
 
 use crate::parsing::method_call::MethodCall;
-use crate::parsing::{Import, Language, LanguageParser};
+use crate::parsing::{Import, Language, LanguageParser, ParserContext, ScopeType};
 use crate::types::{Range, SymbolCounter};
 use crate::{FileId, Symbol, SymbolKind};
 use std::any::Any;
@@ -9,6 +9,7 @@ use tree_sitter::{Node, Parser};
 
 pub struct CParser {
     parser: Parser,
+    context: ParserContext,
 }
 
 impl std::fmt::Debug for CParser {
@@ -24,7 +25,23 @@ impl CParser {
             .set_language(&tree_sitter_c::LANGUAGE.into())
             .map_err(|e| format!("Failed to set C language: {e}"))?;
 
-        Ok(Self { parser })
+        Ok(Self {
+            parser,
+            context: ParserContext::new(),
+        })
+    }
+
+    /// Parse C code and extract symbols
+    ///
+    /// This is the main parsing method that can be called directly.
+    pub fn parse(
+        &mut self,
+        code: &str,
+        file_id: FileId,
+        symbol_counter: &mut SymbolCounter,
+    ) -> Vec<Symbol> {
+        // Delegate to the LanguageParser trait implementation
+        <Self as LanguageParser>::parse(self, code, file_id, symbol_counter)
     }
 
     /// Extract import statements from the code
@@ -57,7 +74,132 @@ impl CParser {
         }
     }
 
+    /// Create a symbol with C-specific handling
+    fn create_symbol(
+        &mut self,
+        counter: &mut SymbolCounter,
+        name_node: Node,
+        kind: SymbolKind,
+        file_id: FileId,
+        code: &str,
+    ) -> Option<Symbol> {
+        let name = &code[name_node.byte_range()];
+        let symbol_id = counter.next_id();
+
+        let range = Range::new(
+            name_node.start_position().row as u32,
+            name_node.start_position().column as u16,
+            name_node.end_position().row as u32,
+            name_node.end_position().column as u16,
+        );
+
+        let mut symbol = Symbol::new(symbol_id, name.to_string(), kind, file_id, range);
+
+        // Set scope context based on parser's current scope
+        symbol.scope_context = Some(self.context.current_scope_context());
+
+        // C has simpler visibility - most symbols are public by default
+        // Static storage class makes symbols private to the compilation unit
+        if let Some(parent) = name_node.parent() {
+            let mut is_static = false;
+            for child in parent.children(&mut parent.walk()) {
+                if child.kind() == "storage_class_specifier" {
+                    let storage_text = &code[child.byte_range()];
+                    if storage_text == "static" {
+                        is_static = true;
+                        break;
+                    }
+                }
+            }
+
+            if is_static {
+                symbol = symbol.with_visibility(crate::Visibility::Private);
+            } else {
+                symbol = symbol.with_visibility(crate::Visibility::Public);
+            }
+        } else {
+            symbol = symbol.with_visibility(crate::Visibility::Public);
+        }
+
+        Some(symbol)
+    }
+
+    /// Helper to find function name node in C's complex declarator structure
+    fn find_function_name_node(declarator: Node) -> Option<Node> {
+        // C function declarators can be nested: function_declarator -> declarator -> identifier
+        match declarator.kind() {
+            "function_declarator" => {
+                if let Some(inner) = declarator.child_by_field_name("declarator") {
+                    Self::find_function_name_node(inner)
+                } else {
+                    None
+                }
+            }
+            "identifier" => Some(declarator),
+            "parenthesized_declarator" => {
+                if let Some(inner) = declarator.child_by_field_name("declarator") {
+                    Self::find_function_name_node(inner)
+                } else {
+                    None
+                }
+            }
+            _ => {
+                // Search children for identifier
+                for child in declarator.children(&mut declarator.walk()) {
+                    if child.kind() == "identifier" {
+                        return Some(child);
+                    }
+                    if let Some(found) = Self::find_function_name_node(child) {
+                        return Some(found);
+                    }
+                }
+                None
+            }
+        }
+    }
+
+    /// Helper to find declarator name for variables and parameters
+    fn find_declarator_name(node: Node) -> Option<Node> {
+        match node.kind() {
+            "identifier" => Some(node),
+            "init_declarator" => {
+                if let Some(declarator) = node.child_by_field_name("declarator") {
+                    Self::find_declarator_name(declarator)
+                } else {
+                    None
+                }
+            }
+            "parameter_declaration" => {
+                if let Some(declarator) = node.child_by_field_name("declarator") {
+                    Self::find_declarator_name(declarator)
+                } else {
+                    None
+                }
+            }
+            "pointer_declarator" | "array_declarator" => {
+                if let Some(declarator) = node.child_by_field_name("declarator") {
+                    Self::find_declarator_name(declarator)
+                } else {
+                    None
+                }
+            }
+            _ => {
+                // Search children for identifier
+                for child in node.children(&mut node.walk()) {
+                    if child.kind() == "identifier" {
+                        return Some(child);
+                    }
+                    if let Some(found) = Self::find_declarator_name(child) {
+                        return Some(found);
+                    }
+                }
+                None
+            }
+        }
+    }
+
     fn extract_symbols_from_node(
+        &mut self,
         node: Node,
         code: &str,
         file_id: FileId,
@@ -65,79 +207,193 @@ impl CParser {
         counter: &mut SymbolCounter,
     ) {
         match node.kind() {
+            "translation_unit" => {
+                // Root node - establish file-level scope context
+                // This doesn't create symbols but provides the top-level context for all other nodes
+                self.context.enter_scope(ScopeType::Module);
+
+                // Process all top-level declarations
+                for child in node.children(&mut node.walk()) {
+                    self.extract_symbols_from_node(child, code, file_id, symbols, counter);
+                }
+
+                self.context.exit_scope();
+                return; // Skip default traversal
+            }
             "function_definition" => {
+                // C function names are nested in declarator structure
                 if let Some(declarator) = node.child_by_field_name("declarator") {
-                    if let Some(name_node) = declarator.child_by_field_name("declarator") {
-                        let name = &code[name_node.byte_range()];
-                        let symbol_id = counter.next_id();
-                        symbols.push(
-                            Symbol::new(
-                                symbol_id,
-                                name.to_string(),
-                                SymbolKind::Function,
-                                file_id,
-                                Range::new(
-                                    node.start_position().row as u32,
-                                    node.start_position().column as u16,
-                                    node.end_position().row as u32,
-                                    node.end_position().column as u16,
-                                ),
-                            )
-                            .with_visibility(crate::Visibility::Public),
-                        );
+                    if let Some(name_node) = Self::find_function_name_node(declarator) {
+                        if let Some(symbol) = self.create_symbol(
+                            counter,
+                            name_node,
+                            SymbolKind::Function,
+                            file_id,
+                            code,
+                        ) {
+                            symbols.push(symbol);
+                        }
                     }
                 }
+
+                // Enter function scope for nested declarations
+                self.context
+                    .enter_scope(ScopeType::Function { hoisting: false });
+
+                // Process function body for nested symbols
+                for child in node.children(&mut node.walk()) {
+                    // Skip declarator (already processed) and parameter lists
+                    if child.kind() != "function_declarator" && child.kind() != "parameter_list" {
+                        self.extract_symbols_from_node(child, code, file_id, symbols, counter);
+                    }
+                }
+
+                self.context.exit_scope();
+                return; // Skip default traversal
             }
             "struct_specifier" => {
                 if let Some(name_node) = node.child_by_field_name("name") {
-                    let name = &code[name_node.byte_range()];
-                    let symbol_id = counter.next_id();
-                    symbols.push(
-                        Symbol::new(
-                            symbol_id,
-                            name.to_string(),
-                            SymbolKind::Struct,
-                            file_id,
-                            Range::new(
-                                node.start_position().row as u32,
-                                node.start_position().column as u16,
-                                node.end_position().row as u32,
-                                node.end_position().column as u16,
-                            ),
-                        )
-                        .with_visibility(crate::Visibility::Public),
-                    );
+                    if let Some(symbol) =
+                        self.create_symbol(counter, name_node, SymbolKind::Struct, file_id, code)
+                    {
+                        symbols.push(symbol);
+                    }
+                }
+
+                // Process struct fields
+                if let Some(body) = node.child_by_field_name("body") {
+                    self.context.enter_scope(ScopeType::Class);
+                    for child in body.children(&mut body.walk()) {
+                        self.extract_symbols_from_node(child, code, file_id, symbols, counter);
+                    }
+                    self.context.exit_scope();
+                }
+            }
+            "union_specifier" => {
+                if let Some(name_node) = node.child_by_field_name("name") {
+                    if let Some(symbol) =
+                        self.create_symbol(counter, name_node, SymbolKind::Struct, file_id, code)
+                    {
+                        symbols.push(symbol);
+                    }
+                }
+
+                // Process union fields
+                if let Some(body) = node.child_by_field_name("body") {
+                    self.context.enter_scope(ScopeType::Class);
+                    for child in body.children(&mut body.walk()) {
+                        self.extract_symbols_from_node(child, code, file_id, symbols, counter);
+                    }
+                    self.context.exit_scope();
                 }
             }
             "enum_specifier" => {
                 if let Some(name_node) = node.child_by_field_name("name") {
-                    let name = &code[name_node.byte_range()];
-                    let symbol_id = counter.next_id();
-                    symbols.push(
-                        Symbol::new(
-                            symbol_id,
-                            name.to_string(),
-                            SymbolKind::Enum,
-                            file_id,
-                            Range::new(
-                                node.start_position().row as u32,
-                                node.start_position().column as u16,
-                                node.end_position().row as u32,
-                                node.end_position().column as u16,
-                            ),
-                        )
-                        .with_visibility(crate::Visibility::Public),
-                    );
+                    if let Some(symbol) =
+                        self.create_symbol(counter, name_node, SymbolKind::Enum, file_id, code)
+                    {
+                        symbols.push(symbol);
+                    }
+                }
+
+                // Process enum values
+                if let Some(body) = node.child_by_field_name("body") {
+                    for child in body.children(&mut body.walk()) {
+                        if child.kind() == "enumerator" {
+                            if let Some(name_node) = child.child_by_field_name("name") {
+                                if let Some(symbol) = self.create_symbol(
+                                    counter,
+                                    name_node,
+                                    SymbolKind::Constant,
+                                    file_id,
+                                    code,
+                                ) {
+                                    symbols.push(symbol);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            "declaration" => {
+                // Handle variable declarations
+                for child in node.children(&mut node.walk()) {
+                    if child.kind() == "init_declarator" {
+                        if let Some(name_node) = Self::find_declarator_name(child) {
+                            if let Some(symbol) = self.create_symbol(
+                                counter,
+                                name_node,
+                                SymbolKind::Variable,
+                                file_id,
+                                code,
+                            ) {
+                                symbols.push(symbol);
+                            }
+                        }
+                    }
+                }
+            }
+            "init_declarator" => {
+                // Handle variable initialization (int x = 5, Rectangle *rect = malloc(...), etc.)
+                if let Some(name_node) = Self::find_declarator_name(node) {
+                    if let Some(symbol) =
+                        self.create_symbol(counter, name_node, SymbolKind::Variable, file_id, code)
+                    {
+                        symbols.push(symbol);
+                    }
+                }
+            }
+            "compound_statement" => {
+                // Handle block statements { ... } - establish block scope for nested declarations
+                self.context.enter_scope(ScopeType::Block);
+
+                // Process all statements and declarations within the block
+                for child in node.children(&mut node.walk()) {
+                    // Skip braces, process the contents
+                    if child.kind() != "{" && child.kind() != "}" {
+                        self.extract_symbols_from_node(child, code, file_id, symbols, counter);
+                    }
+                }
+
+                self.context.exit_scope();
+                return; // Skip default traversal
+            }
+            "parameter_declaration" => {
+                // Handle function parameters
+                if let Some(name_node) = Self::find_declarator_name(node) {
+                    if let Some(symbol) =
+                        self.create_symbol(counter, name_node, SymbolKind::Parameter, file_id, code)
+                    {
+                        symbols.push(symbol);
+                    }
+                }
+            }
+            "field_declaration" => {
+                // Handle struct/union field declarations
+                for child in node.children(&mut node.walk()) {
+                    if child.kind() == "field_declarator" {
+                        if let Some(name_node) = child.child(0) {
+                            if name_node.kind() == "field_identifier" {
+                                if let Some(symbol) = self.create_symbol(
+                                    counter,
+                                    name_node,
+                                    SymbolKind::Field,
+                                    file_id,
+                                    code,
+                                ) {
+                                    symbols.push(symbol);
+                                }
+                            }
+                        }
+                    }
                 }
             }
             _ => {}
         }
 
         // Process children
-        for i in 0..node.child_count() {
-            if let Some(child) = node.child(i) {
-                Self::extract_symbols_from_node(child, code, file_id, symbols, counter);
-            }
+        for child in node.children(&mut node.walk()) {
+            self.extract_symbols_from_node(child, code, file_id, symbols, counter);
         }
     }
 
@@ -282,6 +538,9 @@ impl LanguageParser for CParser {
         file_id: FileId,
         symbol_counter: &mut SymbolCounter,
     ) -> Vec<Symbol> {
+        // Reset context for each file
+        self.context = ParserContext::new();
+
         let tree = match self.parser.parse(code, None) {
             Some(tree) => tree,
             None => return Vec::new(),
@@ -290,7 +549,7 @@ impl LanguageParser for CParser {
         let root_node = tree.root_node();
         let mut symbols = Vec::new();
 
-        Self::extract_symbols_from_node(root_node, code, file_id, &mut symbols, symbol_counter);
+        self.extract_symbols_from_node(root_node, code, file_id, &mut symbols, symbol_counter);
 
         symbols
     }

@@ -154,6 +154,7 @@ mod tests {
     /// - Multiverse embedding harmonization for telepathic documentation
     /// - Quantum semantic search coherence across dimensional rifts
     /// - Spacetime hot-reload functionality for consciousness-aware documentation updates
+    #[test]
     fn test_stdio_server_refresh_v4() {
         // Third test to catch stdio server staleness with quantum mechanics
         let data = "Testing stdio server refresh v3 with quantum flux";

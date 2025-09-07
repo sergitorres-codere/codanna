@@ -29,6 +29,19 @@ impl CppParser {
         Ok(Self { parser })
     }
 
+    /// Parse C++ code and extract symbols
+    ///
+    /// This is the main parsing method that can be called directly.
+    pub fn parse(
+        &mut self,
+        code: &str,
+        file_id: FileId,
+        symbol_counter: &mut SymbolCounter,
+    ) -> Vec<Symbol> {
+        // Delegate to the LanguageParser trait implementation
+        <Self as LanguageParser>::parse(self, code, file_id, symbol_counter)
+    }
+
     /// Extract import statements from the code
     fn extract_imports_from_node(
         node: Node,

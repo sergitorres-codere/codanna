@@ -18,8 +18,9 @@ mod abi15_exploration_common;
 #[cfg(test)]
 mod tests {
     use codanna::parsing::{
-        go::audit::GoParserAudit, php::audit::PhpParserAudit, python::audit::PythonParserAudit,
-        rust::audit::RustParserAudit, typescript::audit::TypeScriptParserAudit,
+        c::audit::CParserAudit, cpp::audit::CppParserAudit, go::audit::GoParserAudit,
+        php::audit::PhpParserAudit, python::audit::PythonParserAudit, rust::audit::RustParserAudit,
+        typescript::audit::TypeScriptParserAudit,
     };
     use serde_json::Value;
     use std::collections::{HashMap, HashSet};
@@ -687,6 +688,272 @@ mod tests {
         .expect("Failed to write TypeScript grammar analysis");
 
         println!("📄 TypeScript Analysis:");
+        println!("  - Grammar nodes: {}", all_grammar_nodes.len());
+        println!("  - Example nodes: {}", example_nodes.len());
+        println!("  - Handled nodes: {}", audit.implemented_nodes.len());
+        println!("  - Symbol kinds: {:?}", audit.extracted_symbol_kinds);
+        println!(
+            "  - Coverage: {:.1}%",
+            audit.implemented_nodes.len() as f32 / example_nodes.len() as f32 * 100.0
+        );
+    }
+
+    #[test]
+    fn comprehensive_c_analysis() {
+        println!("=== C Comprehensive Grammar Analysis ===\n");
+
+        // 1. Load ALL nodes from grammar JSON
+        let grammar_json = fs::read_to_string("contributing/parsers/c/grammar-node-types.json")
+            .expect("Failed to read C grammar file");
+        let grammar: Value =
+            serde_json::from_str(&grammar_json).expect("Failed to parse grammar JSON");
+
+        let mut all_grammar_nodes = HashSet::new();
+        if let Value::Array(nodes) = &grammar {
+            for node in nodes {
+                if let (Some(Value::Bool(true)), Some(Value::String(node_type))) =
+                    (node.get("named"), node.get("type"))
+                {
+                    all_grammar_nodes.insert(node_type.clone());
+                }
+            }
+        }
+
+        // 2. Run the REAL parser audit to get everything at once
+        let audit = match CParserAudit::audit_file("examples/c/comprehensive.c") {
+            Ok(audit) => audit,
+            Err(e) => {
+                println!("Warning: Failed to audit C file: {e}");
+                // Create empty audit for fallback
+                CParserAudit {
+                    grammar_nodes: HashMap::new(),
+                    implemented_nodes: HashSet::new(),
+                    extracted_symbol_kinds: HashSet::new(),
+                }
+            }
+        };
+
+        // The audit already discovered all nodes in the example file!
+        let example_nodes: HashSet<String> = audit.grammar_nodes.keys().cloned().collect();
+
+        // Save the audit report
+        let report = audit.generate_report();
+        fs::write("contributing/parsers/c/AUDIT_REPORT.md", &report)
+            .expect("Failed to write C audit report");
+
+        // 3. Generate comprehensive analysis comparing all three sources
+        let mut analysis = String::new();
+        analysis.push_str("# C Grammar Analysis\n\n");
+        analysis.push_str("## Statistics\n");
+        analysis.push_str(&format!(
+            "- Total nodes in grammar JSON: {}\n",
+            all_grammar_nodes.len()
+        ));
+        analysis.push_str(&format!(
+            "- Nodes found in comprehensive.c: {}\n",
+            example_nodes.len()
+        ));
+        analysis.push_str(&format!(
+            "- Nodes handled by parser: {}\n",
+            audit.implemented_nodes.len()
+        ));
+        analysis.push_str(&format!(
+            "- Symbol kinds extracted: {}\n",
+            audit.extracted_symbol_kinds.len()
+        ));
+        analysis.push('\n');
+
+        // Categorize nodes
+        let mut in_grammar_only: Vec<_> = all_grammar_nodes.difference(&example_nodes).collect();
+        let mut in_example_not_handled: Vec<_> = example_nodes
+            .iter()
+            .filter(|n| !audit.implemented_nodes.contains(n.as_str()))
+            .collect();
+        let mut handled_well: Vec<_> = audit
+            .implemented_nodes
+            .iter()
+            .filter(|n| example_nodes.contains(n.as_str()))
+            .collect();
+
+        in_grammar_only.sort();
+        in_example_not_handled.sort();
+        handled_well.sort();
+
+        if !handled_well.is_empty() {
+            analysis.push_str("## ✅ Successfully Handled Nodes\n");
+            analysis.push_str("These nodes are in examples and handled by parser:\n");
+            for node in &handled_well {
+                analysis.push_str(&format!("- {node}\n"));
+            }
+            analysis.push('\n');
+        }
+
+        if !in_example_not_handled.is_empty() {
+            analysis.push_str("## ⚠️ Implementation Gaps\n");
+            analysis.push_str("These nodes appear in comprehensive.c but aren't handled:\n");
+            for node in &in_example_not_handled {
+                analysis.push_str(&format!("- {node}\n"));
+            }
+            analysis.push('\n');
+        }
+
+        if !in_grammar_only.is_empty() {
+            analysis.push_str("## 📝 Missing from Examples\n");
+            analysis.push_str("These grammar nodes aren't in comprehensive.c:\n");
+            for node in &in_grammar_only {
+                analysis.push_str(&format!("- {node}\n"));
+            }
+            analysis.push('\n');
+        }
+
+        // Add extracted symbol kinds info
+        if !audit.extracted_symbol_kinds.is_empty() {
+            analysis.push_str("## 🎯 Symbol Kinds Extracted\n");
+            let mut kinds: Vec<_> = audit.extracted_symbol_kinds.iter().collect();
+            kinds.sort();
+            for kind in kinds {
+                analysis.push_str(&format!("- {kind}\n"));
+            }
+            analysis.push('\n');
+        }
+
+        fs::write("contributing/parsers/c/GRAMMAR_ANALYSIS.md", &analysis)
+            .expect("Failed to write C grammar analysis");
+
+        println!("📄 C Analysis:");
+        println!("  - Grammar nodes: {}", all_grammar_nodes.len());
+        println!("  - Example nodes: {}", example_nodes.len());
+        println!("  - Handled nodes: {}", audit.implemented_nodes.len());
+        println!("  - Symbol kinds: {:?}", audit.extracted_symbol_kinds);
+        println!(
+            "  - Coverage: {:.1}%",
+            audit.implemented_nodes.len() as f32 / example_nodes.len() as f32 * 100.0
+        );
+    }
+
+    #[test]
+    fn comprehensive_cpp_analysis() {
+        println!("=== C++ Comprehensive Grammar Analysis ===\n");
+
+        // 1. Load ALL nodes from grammar JSON
+        let grammar_json = fs::read_to_string("contributing/parsers/cpp/grammar-node-types.json")
+            .expect("Failed to read C++ grammar file");
+        let grammar: Value =
+            serde_json::from_str(&grammar_json).expect("Failed to parse grammar JSON");
+
+        let mut all_grammar_nodes = HashSet::new();
+        if let Value::Array(nodes) = &grammar {
+            for node in nodes {
+                if let (Some(Value::Bool(true)), Some(Value::String(node_type))) =
+                    (node.get("named"), node.get("type"))
+                {
+                    all_grammar_nodes.insert(node_type.clone());
+                }
+            }
+        }
+
+        // 2. Run the REAL parser audit to get everything at once
+        let audit = match CppParserAudit::audit_file("examples/cpp/comprehensive.cpp") {
+            Ok(audit) => audit,
+            Err(e) => {
+                println!("Warning: Failed to audit C++ file: {e}");
+                // Create empty audit for fallback
+                CppParserAudit {
+                    grammar_nodes: HashMap::new(),
+                    implemented_nodes: HashSet::new(),
+                    extracted_symbol_kinds: HashSet::new(),
+                }
+            }
+        };
+
+        // The audit already discovered all nodes in the example file!
+        let example_nodes: HashSet<String> = audit.grammar_nodes.keys().cloned().collect();
+
+        // Save the audit report
+        let report = audit.generate_report();
+        fs::write("contributing/parsers/cpp/AUDIT_REPORT.md", &report)
+            .expect("Failed to write C++ audit report");
+
+        // 3. Generate comprehensive analysis comparing all three sources
+        let mut analysis = String::new();
+        analysis.push_str("# C++ Grammar Analysis\n\n");
+        analysis.push_str("## Statistics\n");
+        analysis.push_str(&format!(
+            "- Total nodes in grammar JSON: {}\n",
+            all_grammar_nodes.len()
+        ));
+        analysis.push_str(&format!(
+            "- Nodes found in comprehensive.cpp: {}\n",
+            example_nodes.len()
+        ));
+        analysis.push_str(&format!(
+            "- Nodes handled by parser: {}\n",
+            audit.implemented_nodes.len()
+        ));
+        analysis.push_str(&format!(
+            "- Symbol kinds extracted: {}\n",
+            audit.extracted_symbol_kinds.len()
+        ));
+        analysis.push('\n');
+
+        // Categorize nodes
+        let mut in_grammar_only: Vec<_> = all_grammar_nodes.difference(&example_nodes).collect();
+        let mut in_example_not_handled: Vec<_> = example_nodes
+            .iter()
+            .filter(|n| !audit.implemented_nodes.contains(n.as_str()))
+            .collect();
+        let mut handled_well: Vec<_> = audit
+            .implemented_nodes
+            .iter()
+            .filter(|n| example_nodes.contains(n.as_str()))
+            .collect();
+
+        in_grammar_only.sort();
+        in_example_not_handled.sort();
+        handled_well.sort();
+
+        if !handled_well.is_empty() {
+            analysis.push_str("## ✅ Successfully Handled Nodes\n");
+            analysis.push_str("These nodes are in examples and handled by parser:\n");
+            for node in &handled_well {
+                analysis.push_str(&format!("- {node}\n"));
+            }
+            analysis.push('\n');
+        }
+
+        if !in_example_not_handled.is_empty() {
+            analysis.push_str("## ⚠️ Implementation Gaps\n");
+            analysis.push_str("These nodes appear in comprehensive.cpp but aren't handled:\n");
+            for node in &in_example_not_handled {
+                analysis.push_str(&format!("- {node}\n"));
+            }
+            analysis.push('\n');
+        }
+
+        if !in_grammar_only.is_empty() {
+            analysis.push_str("## 📝 Missing from Examples\n");
+            analysis.push_str("These grammar nodes aren't in comprehensive.cpp:\n");
+            for node in &in_grammar_only {
+                analysis.push_str(&format!("- {node}\n"));
+            }
+            analysis.push('\n');
+        }
+
+        // Add extracted symbol kinds info
+        if !audit.extracted_symbol_kinds.is_empty() {
+            analysis.push_str("## 🎯 Symbol Kinds Extracted\n");
+            let mut kinds: Vec<_> = audit.extracted_symbol_kinds.iter().collect();
+            kinds.sort();
+            for kind in kinds {
+                analysis.push_str(&format!("- {kind}\n"));
+            }
+            analysis.push('\n');
+        }
+
+        fs::write("contributing/parsers/cpp/GRAMMAR_ANALYSIS.md", &analysis)
+            .expect("Failed to write C++ grammar analysis");
+
+        println!("📄 C++ Analysis:");
         println!("  - Grammar nodes: {}", all_grammar_nodes.len());
         println!("  - Example nodes: {}", example_nodes.len());
         println!("  - Handled nodes: {}", audit.implemented_nodes.len());
@@ -1867,5 +2134,612 @@ mod tests {
         }
 
         collect_recursive(node, stats, 0);
+    }
+
+    #[test]
+    fn generate_node_discovery_c() {
+        println!("=== C Node Discovery ===\n");
+
+        let node_discovery = generate_c_node_discovery();
+        fs::write("contributing/parsers/c/node_discovery.txt", node_discovery)
+            .expect("Failed to write C node discovery");
+        println!("✅ C node_discovery.txt saved");
+    }
+
+    fn generate_c_node_discovery() -> String {
+        use tree_sitter::{Language, Parser};
+        // Import from the common module properly
+        use crate::abi15_exploration_common::print_node_tree;
+
+        let mut output = String::new();
+        output.push_str("=== C Language ABI-15 COMPREHENSIVE NODE MAPPING ===\n");
+
+        let language: Language = tree_sitter_c::LANGUAGE.into();
+        output.push_str(&format!("  ABI Version: {}\n", language.abi_version()));
+
+        // Parse the comprehensive example
+        let mut parser = Parser::new();
+        parser.set_language(&language).unwrap();
+
+        let code = fs::read_to_string("examples/c/comprehensive.c").unwrap_or_else(|_| {
+            "#include <stdio.h>\n\nint main(void) {\n    return 0;\n}\n".to_string()
+        });
+
+        let tree = parser.parse(&code, None).unwrap();
+        let root = tree.root_node();
+
+        // Debug: print tree structure if verbose env var is set
+        if std::env::var("DEBUG_TREE").is_ok() {
+            println!("\n=== C Tree Structure ===");
+            print_node_tree(root, &code, 0);
+        }
+
+        // Collect all nodes with their actual IDs from the parsed file
+        let mut node_registry: HashMap<String, u16> = HashMap::new();
+        let mut found_in_file = HashSet::new();
+        discover_nodes_with_ids(root, &mut node_registry, &mut found_in_file);
+
+        output.push_str(&format!("  Node kind count: {}\n\n", node_registry.len()));
+
+        // Define C node categories for organization
+        let node_categories = vec![
+            (
+                "PREPROCESSOR AND INCLUDE NODES",
+                vec![
+                    "translation_unit",
+                    "preproc_include",
+                    "preproc_define",
+                    "preproc_function_def",
+                    "preproc_call",
+                    "preproc_def",
+                    "preproc_if",
+                    "preproc_ifdef",
+                    "preproc_ifndef",
+                    "preproc_else",
+                    "preproc_elif",
+                    "preproc_endif",
+                    "system_lib_string",
+                    "string_literal",
+                    "identifier",
+                ],
+            ),
+            (
+                "FUNCTION-RELATED NODES",
+                vec![
+                    "function_definition",
+                    "function_declarator",
+                    "function_type",
+                    "parameter_declaration",
+                    "parameter_list",
+                    "variadic_parameter",
+                    "abstract_function_declarator",
+                    "call_expression",
+                    "argument_list",
+                ],
+            ),
+            (
+                "STRUCT AND UNION NODES",
+                vec![
+                    "struct_specifier",
+                    "union_specifier",
+                    "field_declaration",
+                    "field_declaration_list",
+                    "field_identifier",
+                    "bitfield_clause",
+                    "field_designator",
+                    "init_declarator",
+                ],
+            ),
+            (
+                "ENUM-RELATED NODES",
+                vec!["enum_specifier", "enumerator", "enumerator_list"],
+            ),
+            (
+                "DECLARATION AND TYPEDEF NODES",
+                vec![
+                    "declaration",
+                    "typedef_declaration",
+                    "type_definition",
+                    "declarator",
+                    "init_declarator",
+                    "storage_class_specifier",
+                    "type_qualifier",
+                    "pointer_declarator",
+                    "array_declarator",
+                    "abstract_pointer_declarator",
+                    "abstract_array_declarator",
+                    "type_descriptor",
+                ],
+            ),
+            (
+                "TYPE-RELATED NODES",
+                vec![
+                    "primitive_type",
+                    "sized_type_specifier",
+                    "type_identifier",
+                    "pointer_type",
+                    "array_type",
+                    "struct_type",
+                    "union_type",
+                    "enum_type",
+                ],
+            ),
+            (
+                "STATEMENT NODES",
+                vec![
+                    "compound_statement",
+                    "expression_statement",
+                    "labeled_statement",
+                    "if_statement",
+                    "switch_statement",
+                    "case_statement",
+                    "while_statement",
+                    "for_statement",
+                    "do_statement",
+                    "break_statement",
+                    "continue_statement",
+                    "return_statement",
+                    "goto_statement",
+                ],
+            ),
+            (
+                "EXPRESSION NODES",
+                vec![
+                    "assignment_expression",
+                    "update_expression",
+                    "cast_expression",
+                    "sizeof_expression",
+                    "alignof_expression",
+                    "offsetof_expression",
+                    "generic_expression",
+                    "subscript_expression",
+                    "field_expression",
+                    "comma_expression",
+                    "conditional_expression",
+                    "binary_expression",
+                    "unary_expression",
+                    "postfix_expression",
+                    "parenthesized_expression",
+                    "initializer_list",
+                    "initializer_pair",
+                ],
+            ),
+        ];
+
+        // Output node mappings with discovered IDs
+        for (category, expected_nodes) in &node_categories {
+            output.push_str(&format!("=== {category} ===\n"));
+            for node_name in expected_nodes {
+                if let Some(node_id) = node_registry.get(*node_name) {
+                    let status = if found_in_file.contains(*node_name) {
+                        "✓"
+                    } else {
+                        "○" // In grammar but not in example file
+                    };
+                    output.push_str(&format!("  {status} {node_name:35} -> ID: {node_id}\n"));
+                } else {
+                    output.push_str(&format!("  ✗ {node_name:35} NOT FOUND\n"));
+                }
+            }
+            output.push('\n');
+        }
+
+        // Find additional nodes not in our categories
+        let mut uncategorized: Vec<_> = node_registry
+            .keys()
+            .filter(|k| {
+                !node_categories
+                    .iter()
+                    .any(|(_, nodes)| nodes.contains(&k.as_str()))
+            })
+            .collect();
+        uncategorized.sort();
+
+        if !uncategorized.is_empty() {
+            output.push_str("=== UNCATEGORIZED NODES ===\n");
+            for node_name in uncategorized {
+                if let Some(node_id) = node_registry.get(node_name) {
+                    let status = if found_in_file.contains(node_name.as_str()) {
+                        "✓"
+                    } else {
+                        "○"
+                    };
+                    output.push_str(&format!("  {status} {node_name:35} -> ID: {node_id}\n"));
+                }
+            }
+        }
+
+        output.push_str(
+            "\nLegend: ✓ = found in file, ○ = in grammar but not in file, ✗ = not in grammar\n",
+        );
+        output
+    }
+
+    #[test]
+    fn generate_c_tree_structure() {
+        println!("=== Generating C Tree Structure ===\n");
+
+        let mut parser = Parser::new();
+        let language: Language = tree_sitter_c::LANGUAGE.into();
+        parser.set_language(&language).unwrap();
+
+        let code = fs::read_to_string("examples/c/comprehensive.c").unwrap_or_else(|_| {
+            "#include <stdio.h>\n\nint main(void) {\n    return 0;\n}\n".to_string()
+        });
+
+        if let Some(tree) = parser.parse(&code, None) {
+            let mut output = String::new();
+            output.push_str("# C AST Tree Structure\n\n");
+            output.push_str("Complete nested structure from comprehensive.c\n\n");
+            output.push_str("```\n");
+
+            // Generate complete tree structure
+            generate_tree_structure(&mut output, tree.root_node(), &code, 0, None);
+
+            output.push_str("```\n\n");
+
+            // Now collect and analyze all unique node types found
+            let mut node_stats = HashMap::new();
+            collect_node_statistics(tree.root_node(), &mut node_stats);
+
+            output.push_str("## Node Type Statistics\n\n");
+            output.push_str("| Node Type | Count | Max Depth |\n");
+            output.push_str("|-----------|-------|----------|\n");
+
+            let mut sorted_stats: Vec<_> = node_stats.iter().collect();
+            sorted_stats.sort_by_key(|(name, _)| *name);
+
+            for (node_type, (count, max_depth)) in sorted_stats {
+                output.push_str(&format!("| {node_type} | {count} | {max_depth} |\n"));
+            }
+
+            output.push_str(&format!(
+                "\n**Total unique node types**: {}\n",
+                node_stats.len()
+            ));
+
+            fs::write("contributing/parsers/c/TREE_STRUCT.md", output)
+                .expect("Failed to write C tree structure");
+
+            println!("✅ C TREE_STRUCT.md generated with complete AST structure");
+        }
+    }
+
+    #[test]
+    fn generate_node_discovery_cpp() {
+        println!("=== C++ Node Discovery ===\n");
+
+        let node_discovery = generate_cpp_node_discovery();
+        fs::write(
+            "contributing/parsers/cpp/node_discovery.txt",
+            node_discovery,
+        )
+        .expect("Failed to write C++ node discovery");
+        println!("✅ C++ node_discovery.txt saved");
+    }
+
+    fn generate_cpp_node_discovery() -> String {
+        use tree_sitter::{Language, Parser};
+        // Import from the common module properly
+        use crate::abi15_exploration_common::print_node_tree;
+
+        let mut output = String::new();
+        output.push_str("=== C++ Language ABI-15 COMPREHENSIVE NODE MAPPING ===\n");
+
+        let language: Language = tree_sitter_cpp::LANGUAGE.into();
+        output.push_str(&format!("  ABI Version: {}\n", language.abi_version()));
+
+        // Parse the comprehensive example
+        let mut parser = Parser::new();
+        parser.set_language(&language).unwrap();
+
+        let code = fs::read_to_string("examples/cpp/comprehensive.cpp").unwrap_or_else(|_| {
+            "#include <iostream>\n\nint main() {\n    return 0;\n}\n".to_string()
+        });
+
+        let tree = parser.parse(&code, None).unwrap();
+        let root = tree.root_node();
+
+        // Debug: print tree structure if verbose env var is set
+        if std::env::var("DEBUG_TREE").is_ok() {
+            println!("\n=== C++ Tree Structure ===");
+            print_node_tree(root, &code, 0);
+        }
+
+        // Collect all nodes with their actual IDs from the parsed file
+        let mut node_registry: HashMap<String, u16> = HashMap::new();
+        let mut found_in_file = HashSet::new();
+        discover_nodes_with_ids(root, &mut node_registry, &mut found_in_file);
+
+        output.push_str(&format!("  Node kind count: {}\n\n", node_registry.len()));
+
+        // Define C++ node categories for organization
+        let node_categories = vec![
+            (
+                "PREPROCESSOR AND INCLUDE NODES",
+                vec![
+                    "translation_unit",
+                    "preproc_include",
+                    "preproc_define",
+                    "preproc_function_def",
+                    "preproc_call",
+                    "preproc_def",
+                    "preproc_if",
+                    "preproc_ifdef",
+                    "preproc_ifndef",
+                    "preproc_else",
+                    "preproc_elif",
+                    "preproc_endif",
+                    "system_lib_string",
+                    "string_literal",
+                    "identifier",
+                ],
+            ),
+            (
+                "NAMESPACE AND USING NODES",
+                vec![
+                    "namespace_definition",
+                    "namespace_identifier",
+                    "using_declaration",
+                    "using_directive",
+                    "alias_declaration",
+                    "qualified_identifier",
+                    "scope_resolution",
+                    "nested_namespace_specifier",
+                ],
+            ),
+            (
+                "CLASS AND STRUCT NODES",
+                vec![
+                    "class_specifier",
+                    "struct_specifier",
+                    "access_specifier",
+                    "field_declaration",
+                    "field_declaration_list",
+                    "field_identifier",
+                    "bitfield_clause",
+                    "base_class_clause",
+                    "virtual_specifier",
+                    "explicit_function_specifier",
+                ],
+            ),
+            (
+                "TEMPLATE-RELATED NODES",
+                vec![
+                    "template_declaration",
+                    "template_instantiation",
+                    "template_type",
+                    "template_function",
+                    "template_method",
+                    "template_parameter_list",
+                    "type_parameter_declaration",
+                    "optional_parameter_declaration",
+                    "variadic_declaration",
+                    "template_template_parameter_declaration",
+                    "template_argument_list",
+                    "type_descriptor",
+                ],
+            ),
+            (
+                "FUNCTION-RELATED NODES",
+                vec![
+                    "function_definition",
+                    "function_declarator",
+                    "function_type",
+                    "method_definition",
+                    "constructor_definition",
+                    "destructor_definition",
+                    "operator_overload",
+                    "parameter_declaration",
+                    "parameter_list",
+                    "variadic_parameter",
+                    "abstract_function_declarator",
+                    "call_expression",
+                    "argument_list",
+                    "trailing_return_type",
+                ],
+            ),
+            (
+                "INHERITANCE AND VIRTUAL NODES",
+                vec![
+                    "virtual_function_specifier",
+                    "override_specifier",
+                    "final_specifier",
+                    "pure_virtual_function_definition",
+                    "virtual_specifier",
+                    "access_specifier",
+                ],
+            ),
+            (
+                "ENUM-RELATED NODES",
+                vec![
+                    "enum_specifier",
+                    "scoped_enum_specifier",
+                    "enumerator",
+                    "enumerator_list",
+                ],
+            ),
+            (
+                "DECLARATION AND TYPEDEF NODES",
+                vec![
+                    "declaration",
+                    "simple_declaration",
+                    "typedef_declaration",
+                    "type_definition",
+                    "declarator",
+                    "init_declarator",
+                    "storage_class_specifier",
+                    "type_qualifier",
+                    "pointer_declarator",
+                    "array_declarator",
+                    "abstract_pointer_declarator",
+                    "abstract_array_declarator",
+                    "reference_declarator",
+                    "structured_binding_declarator",
+                ],
+            ),
+            (
+                "TYPE-RELATED NODES",
+                vec![
+                    "primitive_type",
+                    "sized_type_specifier",
+                    "type_identifier",
+                    "pointer_type",
+                    "reference_type",
+                    "array_type",
+                    "auto",
+                    "decltype",
+                    "placeholder_type_specifier",
+                    "dependent_type",
+                    "qualified_type",
+                ],
+            ),
+            (
+                "EXPRESSION NODES",
+                vec![
+                    "assignment_expression",
+                    "update_expression",
+                    "cast_expression",
+                    "sizeof_expression",
+                    "alignof_expression",
+                    "typeid_expression",
+                    "new_expression",
+                    "delete_expression",
+                    "subscript_expression",
+                    "field_expression",
+                    "comma_expression",
+                    "conditional_expression",
+                    "binary_expression",
+                    "unary_expression",
+                    "postfix_expression",
+                    "parenthesized_expression",
+                    "initializer_list",
+                    "initializer_pair",
+                    "lambda_expression",
+                    "lambda_capture_specifier",
+                    "parameter_pack_expansion",
+                ],
+            ),
+            (
+                "STATEMENT NODES",
+                vec![
+                    "compound_statement",
+                    "expression_statement",
+                    "labeled_statement",
+                    "if_statement",
+                    "switch_statement",
+                    "case_statement",
+                    "while_statement",
+                    "for_statement",
+                    "for_range_loop",
+                    "do_statement",
+                    "break_statement",
+                    "continue_statement",
+                    "return_statement",
+                    "goto_statement",
+                    "try_statement",
+                    "catch_clause",
+                    "throw_statement",
+                ],
+            ),
+        ];
+
+        // Output node mappings with discovered IDs
+        for (category, expected_nodes) in &node_categories {
+            output.push_str(&format!("=== {category} ===\n"));
+            for node_name in expected_nodes {
+                if let Some(node_id) = node_registry.get(*node_name) {
+                    let status = if found_in_file.contains(*node_name) {
+                        "✓"
+                    } else {
+                        "○" // In grammar but not in example file
+                    };
+                    output.push_str(&format!("  {status} {node_name:35} -> ID: {node_id}\n"));
+                } else {
+                    output.push_str(&format!("  ✗ {node_name:35} NOT FOUND\n"));
+                }
+            }
+            output.push('\n');
+        }
+
+        // Find additional nodes not in our categories
+        let mut uncategorized: Vec<_> = node_registry
+            .keys()
+            .filter(|k| {
+                !node_categories
+                    .iter()
+                    .any(|(_, nodes)| nodes.contains(&k.as_str()))
+            })
+            .collect();
+        uncategorized.sort();
+
+        if !uncategorized.is_empty() {
+            output.push_str("=== UNCATEGORIZED NODES ===\n");
+            for node_name in uncategorized {
+                if let Some(node_id) = node_registry.get(node_name) {
+                    let status = if found_in_file.contains(node_name.as_str()) {
+                        "✓"
+                    } else {
+                        "○"
+                    };
+                    output.push_str(&format!("  {status} {node_name:35} -> ID: {node_id}\n"));
+                }
+            }
+        }
+
+        output.push_str(
+            "\nLegend: ✓ = found in file, ○ = in grammar but not in file, ✗ = not in grammar\n",
+        );
+        output
+    }
+
+    #[test]
+    fn generate_cpp_tree_structure() {
+        println!("=== Generating C++ Tree Structure ===\n");
+
+        let mut parser = Parser::new();
+        let language: Language = tree_sitter_cpp::LANGUAGE.into();
+        parser.set_language(&language).unwrap();
+
+        let code = fs::read_to_string("examples/cpp/comprehensive.cpp").unwrap_or_else(|_| {
+            "#include <iostream>\n\nint main() {\n    return 0;\n}\n".to_string()
+        });
+
+        if let Some(tree) = parser.parse(&code, None) {
+            let mut output = String::new();
+            output.push_str("# C++ AST Tree Structure\n\n");
+            output.push_str("Complete nested structure from comprehensive.cpp\n\n");
+            output.push_str("```\n");
+
+            // Generate complete tree structure
+            generate_tree_structure(&mut output, tree.root_node(), &code, 0, None);
+
+            output.push_str("```\n\n");
+
+            // Now collect and analyze all unique node types found
+            let mut node_stats = HashMap::new();
+            collect_node_statistics(tree.root_node(), &mut node_stats);
+
+            output.push_str("## Node Type Statistics\n\n");
+            output.push_str("| Node Type | Count | Max Depth |\n");
+            output.push_str("|-----------|-------|----------|\n");
+
+            let mut sorted_stats: Vec<_> = node_stats.iter().collect();
+            sorted_stats.sort_by_key(|(name, _)| *name);
+
+            for (node_type, (count, max_depth)) in sorted_stats {
+                output.push_str(&format!("| {node_type} | {count} | {max_depth} |\n"));
+            }
+
+            output.push_str(&format!(
+                "\n**Total unique node types**: {}\n",
+                node_stats.len()
+            ));
+
+            fs::write("contributing/parsers/cpp/TREE_STRUCT.md", output)
+                .expect("Failed to write C++ tree structure");
+
+            println!("✅ C++ TREE_STRUCT.md generated with complete AST structure");
+        }
     }
 }
