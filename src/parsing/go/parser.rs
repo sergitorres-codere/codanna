@@ -6,7 +6,10 @@
 //! When migrating or updating the parser, ensure compatibility with ABI-15 features.
 
 use crate::parsing::Import;
-use crate::parsing::{LanguageParser, MethodCall, ParserContext, ScopeType};
+use crate::parsing::{
+    HandledNode, LanguageParser, MethodCall, NodeTracker, NodeTrackingState, ParserContext,
+    ScopeType,
+};
 use crate::types::SymbolCounter;
 use crate::{FileId, Range, Symbol, SymbolKind, Visibility};
 use std::any::Any;
@@ -19,6 +22,7 @@ pub struct GoParser {
     parser: Parser,
     context: ParserContext,
     resolution_context: Option<GoResolutionContext>,
+    node_tracker: NodeTrackingState,
 }
 
 impl GoParser {
@@ -105,6 +109,7 @@ impl GoParser {
             parser,
             context: ParserContext::new(),
             resolution_context: None,
+            node_tracker: NodeTrackingState::new(),
         })
     }
 
@@ -126,6 +131,7 @@ impl GoParser {
     ) {
         match node.kind() {
             "function_declaration" => {
+                self.register_handled_node("function_declaration", node.kind_id());
                 // Extract function name for parent tracking
                 let func_name = node
                     .child_by_field_name("name")
@@ -183,6 +189,7 @@ impl GoParser {
                 self.context.set_current_class(saved_class);
             }
             "method_declaration" => {
+                self.register_handled_node("method_declaration", node.kind_id());
                 // Extract method name for parent tracking
                 let method_name = node
                     .child_by_field_name("name")
@@ -252,15 +259,19 @@ impl GoParser {
                 self.context.set_current_class(saved_class);
             }
             "type_declaration" => {
+                self.register_handled_node("type_declaration", node.kind_id());
                 self.process_type_declaration(node, code, file_id, counter, symbols, module_path);
             }
             "var_declaration" => {
+                self.register_handled_node("var_declaration", node.kind_id());
                 self.process_var_declaration(node, code, file_id, counter, symbols, module_path);
             }
             "const_declaration" => {
+                self.register_handled_node("const_declaration", node.kind_id());
                 self.process_const_declaration(node, code, file_id, counter, symbols, module_path);
             }
             "if_statement" => {
+                self.register_handled_node("if_statement", node.kind_id());
                 // Enter block scope for if statement
                 self.context.enter_scope(ScopeType::Block);
 
@@ -279,6 +290,7 @@ impl GoParser {
                 self.context.exit_scope();
             }
             "for_statement" => {
+                self.register_handled_node("for_statement", node.kind_id());
                 // Enter block scope for for loop
                 self.context.enter_scope(ScopeType::Block);
 
@@ -308,6 +320,7 @@ impl GoParser {
                 self.context.exit_scope();
             }
             "switch_statement" | "type_switch_statement" => {
+                self.register_handled_node(node.kind(), node.kind_id());
                 // Enter block scope for switch statement
                 self.context.enter_scope(ScopeType::Block);
 
@@ -326,6 +339,7 @@ impl GoParser {
                 self.context.exit_scope();
             }
             "expression_case" | "default_case" | "type_case" => {
+                self.register_handled_node(node.kind(), node.kind_id());
                 // Enter block scope for switch case
                 self.context.enter_scope(ScopeType::Block);
 
@@ -344,6 +358,7 @@ impl GoParser {
                 self.context.exit_scope();
             }
             "block" => {
+                self.register_handled_node("block", node.kind_id());
                 // Enter block scope for bare blocks
                 self.context.enter_scope(ScopeType::Block);
 
@@ -362,6 +377,7 @@ impl GoParser {
                 self.context.exit_scope();
             }
             "short_var_declaration" => {
+                self.register_handled_node("short_var_declaration", node.kind_id());
                 // Process short variable declarations (:=) in current scope
                 self.process_short_var_declaration(
                     node,
@@ -436,6 +452,7 @@ impl GoParser {
         // type_declaration contains type_spec nodes
         for child in node.children(&mut node.walk()) {
             if child.kind() == "type_spec" {
+                self.register_handled_node("type_spec", child.kind_id());
                 self.process_type_spec(child, code, file_id, counter, symbols, module_path);
             }
         }
@@ -467,6 +484,7 @@ impl GoParser {
 
         match type_node.kind() {
             "struct_type" => {
+                self.register_handled_node("struct_type", type_node.kind_id());
                 // Handle struct type
                 let signature = self.extract_struct_signature(node, code);
                 let doc_comment = self.extract_doc_comment(&node, code);
@@ -523,6 +541,7 @@ impl GoParser {
                 );
             }
             "interface_type" => {
+                self.register_handled_node("interface_type", type_node.kind_id());
                 // Handle interface type
                 let signature = self.extract_interface_signature(node, code);
                 let doc_comment = self.extract_doc_comment(&node, code);
@@ -642,6 +661,7 @@ impl GoParser {
             if child.kind() == "field_declaration_list" {
                 for field_child in child.children(&mut child.walk()) {
                     if field_child.kind() == "field_declaration" {
+                        self.register_handled_node("field_declaration", field_child.kind_id());
                         self.process_struct_field(
                             field_child,
                             code,
@@ -834,6 +854,7 @@ impl GoParser {
         // var_declaration contains var_spec nodes
         for child in node.children(&mut node.walk()) {
             if child.kind() == "var_spec" {
+                self.register_handled_node("var_spec", child.kind_id());
                 self.process_var_spec(child, code, file_id, counter, symbols, module_path);
             }
         }
@@ -906,6 +927,7 @@ impl GoParser {
         // const_declaration contains const_spec nodes
         for child in node.children(&mut node.walk()) {
             if child.kind() == "const_spec" {
+                self.register_handled_node("const_spec", child.kind_id());
                 self.process_const_spec(child, code, file_id, counter, symbols, module_path);
             }
         }
@@ -1046,6 +1068,7 @@ impl GoParser {
 
         for child in receiver_node.children(&mut receiver_node.walk()) {
             if child.kind() == "parameter_declaration" {
+                self.register_handled_node("parameter_declaration", child.kind_id());
                 // Extract receiver name and type
                 let mut receiver_name = None;
                 let mut receiver_type = None;
@@ -1110,6 +1133,7 @@ impl GoParser {
 
         for child in params_node.children(&mut params_node.walk()) {
             if child.kind() == "parameter_declaration" {
+                self.register_handled_node("parameter_declaration", child.kind_id());
                 // Extract parameter name and type
                 let mut param_names = Vec::new();
                 let mut param_type = None;
@@ -2088,6 +2112,16 @@ impl LanguageParser for GoParser {
 
     fn language(&self) -> crate::parsing::Language {
         crate::parsing::Language::Go
+    }
+}
+
+impl NodeTracker for GoParser {
+    fn get_handled_nodes(&self) -> &std::collections::HashSet<HandledNode> {
+        self.node_tracker.get_handled_nodes()
+    }
+
+    fn register_handled_node(&mut self, node_kind: &str, node_id: u16) {
+        self.node_tracker.register_handled_node(node_kind, node_id)
     }
 }
 

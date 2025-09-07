@@ -3,31 +3,11 @@
 ## Statistics
 - Total nodes in grammar JSON: 129
 - Nodes found in comprehensive.py: 121
-- Nodes handled by parser: 23
+- Nodes handled by parser: 120
 - Symbol kinds extracted: 5
 
 ## ✅ Successfully Handled Nodes
 These nodes are in examples and handled by parser:
-- assignment
-- class_definition
-- decorated_definition
-- decorator
-- dictionary_comprehension
-- dotted_name
-- function_definition
-- generator_expression
-- import_from_statement
-- import_statement
-- lambda
-- list_comprehension
-- parameters
-- set_comprehension
-- type
-- typed_default_parameter
-- typed_parameter
-
-## ⚠️ Implementation Gaps
-These nodes appear in comprehensive.py but aren't handled:
 - %
 - (
 - )
@@ -54,6 +34,7 @@ These nodes appear in comprehensive.py but aren't handled:
 - as
 - as_pattern
 - as_pattern_target
+- assignment
 - async
 - attribute
 - await
@@ -64,21 +45,25 @@ These nodes appear in comprehensive.py but aren't handled:
 - case_clause
 - case_pattern
 - class
+- class_definition
 - class_pattern
 - comment
 - comparison_operator
+- decorated_definition
+- decorator
 - def
 - dict_pattern
 - dictionary
+- dictionary_comprehension
 - dictionary_splat
 - dictionary_splat_pattern
+- dotted_name
 - ellipsis
 - else
 - else_clause
 - except
 - except_clause
 - expression_list
-- expression_statement
 - finally
 - finally_clause
 - float
@@ -86,19 +71,25 @@ These nodes appear in comprehensive.py but aren't handled:
 - for_in_clause
 - for_statement
 - from
+- function_definition
+- generator_expression
 - generic_type
 - identifier
 - if
 - if_clause
 - if_statement
 - import
+- import_from_statement
+- import_statement
 - in
 - integer
 - interpolation
 - is
 - keyword_argument
+- lambda
 - lambda_parameters
 - list
+- list_comprehension
 - list_pattern
 - list_splat
 - list_splat_pattern
@@ -110,6 +101,7 @@ These nodes appear in comprehensive.py but aren't handled:
 - not
 - not in
 - pair
+- parameters
 - parenthesized_expression
 - pass
 - pass_statement
@@ -118,6 +110,7 @@ These nodes appear in comprehensive.py but aren't handled:
 - raise_statement
 - return
 - return_statement
+- set_comprehension
 - splat_pattern
 - string
 - string_content
@@ -127,11 +120,18 @@ These nodes appear in comprehensive.py but aren't handled:
 - true
 - try
 - try_statement
+- type
 - type_conversion
 - type_parameter
+- typed_default_parameter
+- typed_parameter
 - yield
 - {
 - }
+
+## ⚠️ Implementation Gaps
+These nodes appear in comprehensive.py but aren't handled:
+- expression_statement
 
 ## 📝 Missing from Examples
 These grammar nodes aren't in comprehensive.py:

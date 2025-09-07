@@ -2,8 +2,8 @@
 
 ## Summary
 - Nodes in file: 143
-- Nodes handled by parser: 16
-- Symbol kinds extracted: 7
+- Nodes handled by parser: 13
+- Symbol kinds extracted: 10
 
 ## Coverage Table
 
@@ -21,10 +21,10 @@
 | macro_definition | 161 | ✅ implemented |
 | macro_rules | - | ❌ not found |
 | field_declaration | 182 | ✅ implemented |
-| enum_variant | 180 | ⚠️ gap |
+| enum_variant | 180 | ✅ implemented |
 | function_signature_item | 189 | ✅ implemented |
-| associated_type | 195 | ✅ implemented |
-| use_declaration | 204 | ✅ implemented |
+| associated_type | 195 | ⚠️ gap |
+| use_declaration | 204 | ⚠️ gap |
 | use_as_clause | - | ❌ not found |
 | use_wildcard | 209 | ⚠️ gap |
 | parameter | 213 | ⚠️ gap |
@@ -44,7 +44,8 @@
 ### Priority 1: Implementation Gaps
 These nodes exist in your code but aren't being captured:
 
-- `enum_variant`: Add parsing logic in parser.rs
+- `associated_type`: Add parsing logic in parser.rs
+- `use_declaration`: Add parsing logic in parser.rs
 - `use_wildcard`: Add parsing logic in parser.rs
 - `parameter`: Add parsing logic in parser.rs
 - `type_parameter`: Add parsing logic in parser.rs

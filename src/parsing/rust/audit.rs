@@ -4,6 +4,7 @@
 //! This helps identify gaps in our symbol extraction.
 
 use super::RustParser;
+use crate::parsing::NodeTracker;
 use crate::types::FileId;
 use std::collections::{HashMap, HashSet};
 use thiserror::Error;
@@ -67,50 +68,18 @@ impl RustParserAudit {
             extracted_symbol_kinds.insert(format!("{:?}", symbol.kind));
         }
 
-        // Track which nodes our parser handles by analyzing the source
-        let implemented_nodes = Self::find_implemented_nodes();
+        // Get dynamically tracked nodes from the parser (zero maintenance!)
+        let implemented_nodes: HashSet<String> = rust_parser
+            .get_handled_nodes()
+            .iter()
+            .map(|handled_node| handled_node.name.clone())
+            .collect();
 
         Ok(Self {
             grammar_nodes,
             implemented_nodes,
             extracted_symbol_kinds,
         })
-    }
-
-    /// Find which nodes are handled in parser implementation
-    /// This is a simple approach - in production we might instrument the parser
-    fn find_implemented_nodes() -> HashSet<String> {
-        // For now, we'll hardcode based on our knowledge
-        // In a real implementation, we could:
-        // 1. Parse the parser.rs file itself
-        // 2. Or add instrumentation to track visited nodes
-        // 3. Or use compile-time reflection
-
-        let mut nodes = HashSet::new();
-
-        // Main symbol-producing nodes
-        nodes.insert("function_item".to_string());
-        nodes.insert("impl_item".to_string());
-        nodes.insert("trait_item".to_string());
-        nodes.insert("struct_item".to_string());
-        nodes.insert("enum_item".to_string());
-        nodes.insert("mod_item".to_string());
-        nodes.insert("const_item".to_string());
-        nodes.insert("static_item".to_string());
-        nodes.insert("type_alias".to_string());
-        nodes.insert("macro_definition".to_string());
-        nodes.insert("macro_rules".to_string());
-
-        // Method and field related
-        nodes.insert("field_declaration".to_string());
-        nodes.insert("function_signature_item".to_string());
-        nodes.insert("associated_type".to_string());
-
-        // Use and visibility
-        nodes.insert("use_declaration".to_string());
-        nodes.insert("visibility_modifier".to_string());
-
-        nodes
     }
 
     /// Generate coverage report

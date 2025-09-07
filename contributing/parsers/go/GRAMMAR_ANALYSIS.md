@@ -3,24 +3,27 @@
 ## Statistics
 - Total nodes in grammar JSON: 112
 - Nodes found in comprehensive.go: 115
-- Nodes handled by parser: 13
+- Nodes handled by parser: 16
 - Symbol kinds extracted: 9
 
 ## ✅ Successfully Handled Nodes
 These nodes are in examples and handled by parser:
 - block
 - const_declaration
+- const_spec
+- field_declaration
 - for_statement
 - function_declaration
 - if_statement
-- import_declaration
-- import_spec
 - interface_type
 - method_declaration
+- parameter_declaration
 - short_var_declaration
 - struct_type
 - type_declaration
+- type_spec
 - var_declaration
+- var_spec
 
 ## ⚠️ Implementation Gaps
 These nodes appear in comprehensive.go but aren't handled:
@@ -54,14 +57,12 @@ These nodes appear in comprehensive.go but aren't handled:
 - comment
 - composite_literal
 - const
-- const_spec
 - defer
 - defer_statement
 - else
 - escape_sequence
 - expression_list
 - expression_statement
-- field_declaration
 - field_declaration_list
 - field_identifier
 - for
@@ -75,6 +76,8 @@ These nodes appear in comprehensive.go but aren't handled:
 - identifier
 - if
 - import
+- import_declaration
+- import_spec
 - import_spec_list
 - inc_statement
 - index_expression
@@ -92,7 +95,6 @@ These nodes appear in comprehensive.go but aren't handled:
 - package
 - package_clause
 - package_identifier
-- parameter_declaration
 - parameter_list
 - parenthesized_expression
 - pointer_type
@@ -118,10 +120,8 @@ These nodes appear in comprehensive.go but aren't handled:
 - type_identifier
 - type_parameter_declaration
 - type_parameter_list
-- type_spec
 - unary_expression
 - var
-- var_spec
 - var_spec_list
 - {
 - }

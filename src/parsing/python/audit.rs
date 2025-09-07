@@ -4,6 +4,7 @@
 //! This helps identify gaps in our symbol extraction.
 
 use super::PythonParser;
+use crate::parsing::NodeTracker;
 use crate::types::FileId;
 use std::collections::{HashMap, HashSet};
 use thiserror::Error;
@@ -67,8 +68,12 @@ impl PythonParserAudit {
             extracted_symbol_kinds.insert(format!("{:?}", symbol.kind));
         }
 
-        // Track which nodes our parser handles by analyzing the source
-        let implemented_nodes = Self::find_implemented_nodes();
+        // Get dynamically tracked nodes from the parser (zero maintenance!)
+        let implemented_nodes: HashSet<String> = python_parser
+            .get_handled_nodes()
+            .iter()
+            .map(|handled_node| handled_node.name.clone())
+            .collect();
 
         Ok(Self {
             grammar_nodes,
@@ -77,66 +82,17 @@ impl PythonParserAudit {
         })
     }
 
-    /// Find which nodes are handled in parser implementation
-    /// This is a simple approach - in production we might instrument the parser
-    fn find_implemented_nodes() -> HashSet<String> {
-        // For now, we'll hardcode based on our knowledge
-        // In a real implementation, we could:
-        // 1. Parse the parser.rs file itself
-        // 2. Or add instrumentation to track visited nodes
-        // 3. Or use compile-time reflection
-
-        let mut nodes = HashSet::new();
-
-        // Main symbol-producing nodes
-        nodes.insert("class_definition".to_string());
-        nodes.insert("function_definition".to_string());
-        nodes.insert("decorated_definition".to_string());
-        nodes.insert("assignment".to_string());
-        nodes.insert("augmented_assignment".to_string());
-        nodes.insert("typed_parameter".to_string());
-        nodes.insert("typed_default_parameter".to_string());
-        nodes.insert("parameters".to_string());
-
-        // Import nodes
-        nodes.insert("import_statement".to_string());
-        nodes.insert("import_from_statement".to_string());
-        nodes.insert("aliased_import".to_string());
-        nodes.insert("dotted_name".to_string());
-
-        // Lambda and comprehensions
-        nodes.insert("lambda".to_string());
-        nodes.insert("list_comprehension".to_string());
-        nodes.insert("dictionary_comprehension".to_string());
-        nodes.insert("set_comprehension".to_string());
-        nodes.insert("generator_expression".to_string());
-
-        // Async
-        nodes.insert("async_function_definition".to_string());
-        nodes.insert("async_for_statement".to_string());
-        nodes.insert("async_with_statement".to_string());
-
-        // Decorators
-        nodes.insert("decorator".to_string());
-
-        // Type annotations
-        nodes.insert("type_alias_statement".to_string());
-        nodes.insert("type".to_string());
-
-        nodes
-    }
-
     /// Generate coverage report
     pub fn generate_report(&self) -> String {
         let mut report = String::new();
 
-        report.push_str("# Python Parser Coverage Report\n\n");
+        report.push_str("# Python Parser Symbol Extraction Coverage Report\n\n");
 
         // Summary
         report.push_str("## Summary\n");
         report.push_str(&format!("- Nodes in file: {}\n", self.grammar_nodes.len()));
         report.push_str(&format!(
-            "- Nodes handled by parser: {}\n",
+            "- Nodes with symbol extraction: {}\n",
             self.implemented_nodes.len()
         ));
         report.push_str(&format!(
@@ -144,8 +100,12 @@ impl PythonParserAudit {
             self.extracted_symbol_kinds.len()
         ));
 
-        // Coverage table
+        report.push_str("\n> **Note**: This report tracks nodes that produce indexed symbols for code intelligence.\n");
+        report.push_str("> For complete grammar coverage, see GRAMMAR_ANALYSIS.md\n");
+
+        // Coverage table for key symbol extraction nodes
         report.push_str("\n## Coverage Table\n\n");
+        report.push_str("*Showing key nodes relevant for symbol extraction. Status determined by dynamic tracking.*\n\n");
         report.push_str("| Node Type | ID | Status |\n");
         report.push_str("|-----------|-----|--------|\n");
 

@@ -32,7 +32,9 @@
 
 use crate::parsing::Import;
 use crate::parsing::method_call::MethodCall;
-use crate::parsing::{Language, LanguageParser, ParserContext, ScopeType};
+use crate::parsing::{
+    HandledNode, Language, LanguageParser, NodeTracker, NodeTrackingState, ParserContext, ScopeType,
+};
 use crate::types::SymbolCounter;
 use crate::{FileId, Range, Symbol, SymbolKind};
 use tree_sitter::{Node, Parser};
@@ -60,6 +62,7 @@ pub struct RustParser {
     parser: Parser,
     debug: bool,
     context: ParserContext,
+    node_tracker: NodeTrackingState,
 }
 
 impl std::fmt::Debug for RustParser {
@@ -85,6 +88,7 @@ impl RustParser {
             parser,
             debug,
             context: ParserContext::new(),
+            node_tracker: NodeTrackingState::new(),
         })
     }
 
@@ -308,6 +312,7 @@ impl RustParser {
 
         match node.kind() {
             "function_item" => {
+                self.register_handled_node("function_item", node.kind_id());
                 // Extract function name for parent tracking
                 let func_name = node
                     .child_by_field_name("name")
@@ -372,6 +377,7 @@ impl RustParser {
                 return; // Don't process children again
             }
             "struct_item" => {
+                self.register_handled_node("struct_item", node.kind_id());
                 // Extract struct name for parent tracking
                 let struct_name = node
                     .child_by_field_name("name")
@@ -408,6 +414,26 @@ impl RustParser {
                 // Set current class for parent tracking
                 self.context.set_current_class(struct_name);
 
+                // Process struct fields
+                if let Some(field_list) = node.child_by_field_name("body") {
+                    for child in field_list.children(&mut field_list.walk()) {
+                        if child.kind() == "field_declaration" {
+                            self.register_handled_node("field_declaration", child.kind_id());
+                            if let Some(name_node) = child.child_by_field_name("name") {
+                                if let Some(symbol) = self.create_symbol(
+                                    counter,
+                                    name_node,
+                                    SymbolKind::Field,
+                                    file_id,
+                                    code,
+                                ) {
+                                    symbols.push(symbol);
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Process children for potential nested items
                 for child in node.children(&mut node.walk()) {
                     if child.kind() != "identifier" && child.kind() != "field_declaration_list" {
@@ -423,6 +449,7 @@ impl RustParser {
                 self.context.set_current_class(saved_class);
             }
             "enum_item" => {
+                self.register_handled_node("enum_item", node.kind_id());
                 if let Some(name_node) = node.child_by_field_name("name") {
                     let symbol =
                         self.create_symbol(counter, name_node, SymbolKind::Enum, file_id, code);
@@ -442,8 +469,29 @@ impl RustParser {
                         symbols.push(sym);
                     }
                 }
+
+                // Process enum variants
+                if let Some(body) = node.child_by_field_name("body") {
+                    for child in body.children(&mut body.walk()) {
+                        if child.kind() == "enum_variant" {
+                            self.register_handled_node("enum_variant", child.kind_id());
+                            if let Some(name_node) = child.child_by_field_name("name") {
+                                if let Some(symbol) = self.create_symbol(
+                                    counter,
+                                    name_node,
+                                    SymbolKind::Constant,
+                                    file_id,
+                                    code,
+                                ) {
+                                    symbols.push(symbol);
+                                }
+                            }
+                        }
+                    }
+                }
             }
             "type_item" => {
+                self.register_handled_node("type_item", node.kind_id());
                 if let Some(name_node) = node.child_by_field_name("name") {
                     let symbol = self.create_symbol(
                         counter,
@@ -462,6 +510,7 @@ impl RustParser {
                 }
             }
             "const_item" => {
+                self.register_handled_node("const_item", node.kind_id());
                 if let Some(name_node) = node.child_by_field_name("name") {
                     let symbol =
                         self.create_symbol(counter, name_node, SymbolKind::Constant, file_id, code);
@@ -475,6 +524,7 @@ impl RustParser {
                 }
             }
             "static_item" => {
+                self.register_handled_node("static_item", node.kind_id());
                 if let Some(name_node) = node.child_by_field_name("name") {
                     let symbol =
                         self.create_symbol(counter, name_node, SymbolKind::Constant, file_id, code);
@@ -488,6 +538,7 @@ impl RustParser {
                 }
             }
             "trait_item" => {
+                self.register_handled_node("trait_item", node.kind_id());
                 if let Some(name_node) = node.child_by_field_name("name") {
                     // For traits, we need the full node range, not just the name
                     let symbol =
@@ -516,6 +567,8 @@ impl RustParser {
                             if child.kind() == "function_signature_item"
                                 || child.kind() == "function_item"
                             {
+                                // Register the nested node types for audit tracking
+                                self.register_handled_node(child.kind(), child.kind_id());
                                 if let Some(method_name_node) = child.child_by_field_name("name") {
                                     if let Some(mut method_symbol) = self.create_symbol(
                                         counter,
@@ -539,6 +592,7 @@ impl RustParser {
                 return;
             }
             "impl_item" => {
+                self.register_handled_node("impl_item", node.kind_id());
                 // Extract the type being implemented for parent tracking
                 let impl_type_name = node
                     .child_by_field_name("type")
@@ -569,6 +623,36 @@ impl RustParser {
                 self.context.set_current_class(saved_class);
 
                 return; // Don't process children again
+            }
+            "mod_item" => {
+                self.register_handled_node("mod_item", node.kind_id());
+                if let Some(name_node) = node.child_by_field_name("name") {
+                    let symbol =
+                        self.create_symbol(counter, name_node, SymbolKind::Module, file_id, code);
+
+                    if let Some(sym) = symbol {
+                        symbols.push(sym);
+                    }
+                }
+
+                // Process children for nested items within the module
+                for child in node.children(&mut node.walk()) {
+                    if child.kind() != "identifier" {
+                        self.extract_symbols_from_node(child, code, file_id, symbols, counter);
+                    }
+                }
+                return; // Skip default traversal since we handled children
+            }
+            "macro_definition" => {
+                self.register_handled_node("macro_definition", node.kind_id());
+                if let Some(name_node) = node.child_by_field_name("name") {
+                    let symbol =
+                        self.create_symbol(counter, name_node, SymbolKind::Macro, file_id, code);
+
+                    if let Some(sym) = symbol {
+                        symbols.push(sym);
+                    }
+                }
             }
             _ => {}
         }
@@ -1675,6 +1759,16 @@ impl LanguageParser for RustParser {
     }
 }
 
+impl NodeTracker for RustParser {
+    fn get_handled_nodes(&self) -> &std::collections::HashSet<HandledNode> {
+        self.node_tracker.get_handled_nodes()
+    }
+
+    fn register_handled_node(&mut self, node_kind: &str, node_id: u16) {
+        self.node_tracker.register_handled_node(node_kind, node_id)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1707,7 +1801,7 @@ mod tests {
         let mut counter = SymbolCounter::new();
         let symbols = parser.parse(code, file_id, &mut counter);
 
-        assert_eq!(symbols.len(), 1);
+        assert_eq!(symbols.len(), 3);
         assert_eq!(symbols[0].name.as_ref(), "Point");
         assert_eq!(symbols[0].kind, SymbolKind::Struct);
     }
@@ -1789,8 +1883,8 @@ mod tests {
         let mut counter = SymbolCounter::new();
         let symbols = parser.parse(code, file_id, &mut counter);
 
-        // The parser correctly extracts 5 symbols including trait methods
-        assert_eq!(symbols.len(), 5);
+        // The parser correctly extracts 6 symbols including trait methods and struct field
+        assert_eq!(symbols.len(), 6);
 
         let names: Vec<&str> = symbols.iter().map(|s| s.name.as_ref()).collect();
         assert!(names.contains(&"helper"));

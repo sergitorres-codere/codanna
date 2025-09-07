@@ -44,6 +44,31 @@
  */
 #define DEBUG_PRINT(fmt, ...) printf("[DEBUG] " fmt "\n", ##__VA_ARGS__)
 
+// Conditional preprocessing constructs
+#ifdef DEBUG_BUILD
+    #define LOG_ENABLED 1
+    #define LOG(msg) printf("[LOG] %s\n", msg)
+#else
+    #define LOG_ENABLED 0
+    #define LOG(msg)
+#endif
+
+#if defined(FEATURE_ADVANCED) || defined(FEATURE_EXTENDED)
+    #define ADVANCED_FEATURES_AVAILABLE
+    #ifdef FEATURE_ADVANCED
+        #define ADVANCED_MODE 1
+    #elif defined(FEATURE_EXTENDED)
+        #define ADVANCED_MODE 2
+    #else
+        #define ADVANCED_MODE 0
+    #endif
+#endif
+
+// Preprocessor function-like macro calls
+#define CONCAT(a, b) a##b
+#define STRINGIFY(x) #x
+#define IS_DEFINED(x) defined(x)
+
 // Forward declarations with documentation
 struct Node;
 typedef struct Node Node;
@@ -129,6 +154,35 @@ union Value {
     char str[32];   /**< String value with fixed size */
     void *ptr;      /**< Generic pointer value */
 };
+
+/**
+ * @struct PackedData
+ * @brief Packed structure with attributes
+ * 
+ * Demonstrates attribute declarations for compiler-specific optimizations.
+ * Uses __attribute__ to control memory layout and alignment.
+ */
+struct __attribute__((packed)) PackedData {
+    char flag;      /**< Single byte flag */
+    int value;      /**< 4-byte integer (no padding) */
+    char data[3];   /**< 3-byte array */
+} __attribute__((aligned(8)));
+
+/**
+ * @struct Config
+ * @brief Configuration structure with default values
+ */
+struct Config {
+    int max_connections;    /**< Maximum allowed connections */
+    float timeout_seconds;  /**< Timeout in seconds */
+    const char *host;       /**< Host address */
+    int ports[8];          /**< Array of port numbers */
+};
+
+// Linkage specification for C++ compatibility
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 // Function prototypes with documentation
 
@@ -315,14 +369,44 @@ void complex_function(void) {
         {-1.0f, -1.0f, "negative"}
     };
     
-    // Control structure demonstrations
+    // Control structure demonstrations with continue statements
     for (int i = 0; i < 10; i++) {
+        if (numbers[i] % 3 == 0) {
+            continue;  // Skip multiples of 3
+        }
         if (numbers[i] % 2 == 0) {
             DEBUG_PRINT("Even number: %d", numbers[i]);
         } else {
             DEBUG_PRINT("Odd number: %d", numbers[i]);
         }
     }
+    
+    // Compound literal examples
+    struct Point temp_point = (struct Point){.x = 42.0, .y = 24.0, .label = "compound"};
+    print_point(&temp_point);
+    
+    // More compound literals with nested initialization
+    Rectangle temp_rect = (Rectangle){
+        .width = 100,
+        .height = 50,
+        .origin = (struct Point){10.0, 20.0, "rect_origin"}
+    };
+    
+    // Designated initializers for arrays
+    int sparse_array[10] = {
+        [0] = 1,
+        [3] = 4,
+        [7] = 8,
+        [9] = 10
+    };
+    
+    // Complex designated initializer for struct
+    struct Config default_config = {
+        .max_connections = 100,
+        .timeout_seconds = 30.5f,
+        .host = "localhost",
+        .ports = {80, 443, 8080, [7] = 9000}
+    };
     
     // Switch statement with comprehensive cases
     status_t status = STATUS_OK;
@@ -461,6 +545,19 @@ int main(int argc, char *argv[]) {
     // Test variadic function capabilities
     debug_log("Debug message with values: %d, %s, %.2f", 42, "hello", 3.14);
     
+    // Preprocessor function-like macro calls
+    int concat_result = CONCAT(12, 34);  // Results in 1234
+    const char *stringified = STRINGIFY(MAX_SIZE);  // Results in "1024"
+    
+#ifdef DEBUG_BUILD
+    LOG("Debug build detected");
+#endif
+    
+    // Use preprocessor defined checks
+    #if IS_DEFINED(ADVANCED_FEATURES_AVAILABLE)
+        printf("Advanced features are available\n");
+    #endif
+    
     return EXIT_SUCCESS;
 }
 
@@ -476,3 +573,8 @@ static void helper_function(void) {
     call_count++;
     printf("Helper called %d times\n", call_count);
 }
+
+// Close linkage specification
+#ifdef __cplusplus
+}
+#endif

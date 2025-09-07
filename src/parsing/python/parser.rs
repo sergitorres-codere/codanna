@@ -12,10 +12,14 @@
 //! verify compatibility with node type names used in this implementation.
 
 use crate::parsing::Import;
-use crate::parsing::{Language, LanguageParser, MethodCall, ParserContext, ScopeType};
+use crate::parsing::{
+    HandledNode, Language, LanguageParser, MethodCall, NodeTracker, NodeTrackingState,
+    ParserContext, ScopeType,
+};
 use crate::types::SymbolCounter;
 use crate::{FileId, Range, Symbol, SymbolKind};
 use std::any::Any;
+use std::collections::HashSet;
 use thiserror::Error;
 use tree_sitter::{Node, Parser};
 
@@ -46,6 +50,7 @@ pub enum PythonParseError {
 /// Python language parser
 pub struct PythonParser {
     parser: Parser,
+    node_tracker: NodeTrackingState,
 }
 
 impl std::fmt::Debug for PythonParser {
@@ -95,12 +100,15 @@ impl PythonParser {
                 reason: format!("tree-sitter error: {e}"),
             })?;
 
-        Ok(Self { parser })
+        Ok(Self {
+            parser,
+            node_tracker: NodeTrackingState::new(),
+        })
     }
 
     /// Extract symbols from AST node recursively
     fn extract_symbols_from_node(
-        &self,
+        &mut self,
         node: Node,
         code: &str,
         file_id: FileId,
@@ -110,6 +118,7 @@ impl PythonParser {
     ) {
         match node.kind() {
             "function_definition" => {
+                self.register_handled_node(node.kind(), node.kind_id());
                 // Extract function name for parent tracking
                 let func_name = self.extract_function_name(node, code);
 
@@ -140,6 +149,7 @@ impl PythonParser {
                 context.set_current_class(saved_class);
             }
             "class_definition" => {
+                self.register_handled_node(node.kind(), node.kind_id());
                 // Extract class name for parent tracking
                 let class_name = self.extract_class_name(node, code);
 
@@ -174,31 +184,23 @@ impl PythonParser {
                 self.process_children(node, code, file_id, symbols, counter, context);
             }
             "decorated_definition" => {
+                self.register_handled_node(node.kind(), node.kind_id());
                 // Handle decorated functions and classes (@property, @staticmethod, etc.)
-                // The actual function/class is typically the last child
-                let mut target_node = None;
-                for child in node.children(&mut node.walk()) {
-                    if child.kind() == "function_definition" || child.kind() == "class_definition" {
-                        target_node = Some(child);
-                        break;
-                    }
-                }
-
-                if let Some(target) = target_node {
-                    self.extract_symbols_from_node(
-                        target, code, file_id, symbols, counter, context,
-                    );
-                }
-                // Note: Removed fallback to process_children to avoid duplication
+                // Process ALL children to ensure decorators are tracked
+                self.process_children(node, code, file_id, symbols, counter, context);
             }
             "assignment" => {
+                self.register_handled_node(node.kind(), node.kind_id());
                 // Direct assignment at any scope level
                 if let Some(symbol) = self.process_assignment(node, code, file_id, counter, context)
                 {
                     symbols.push(symbol);
                 }
+                // Also process children to track lambda, comprehensions, etc. on the right side
+                self.process_children(node, code, file_id, symbols, counter, context);
             }
             "type_alias_statement" => {
+                self.register_handled_node(node.kind(), node.kind_id());
                 // Handle type aliases: UserId = int
                 if let Some(symbol) = self.process_type_alias(node, code, file_id, counter, context)
                 {
@@ -206,11 +208,42 @@ impl PythonParser {
                 }
             }
             "import_statement" | "import_from_statement" => {
+                self.register_handled_node(node.kind(), node.kind_id());
                 // For now, just process children to find any nested symbols
                 // TODO: Consider creating import symbols for better cross-file resolution
                 self.process_children(node, code, file_id, symbols, counter, context);
             }
+            "lambda" => {
+                self.register_handled_node(node.kind(), node.kind_id());
+                // Lambda expressions - process children for nested symbols
+                self.process_children(node, code, file_id, symbols, counter, context);
+            }
+            "list_comprehension"
+            | "dictionary_comprehension"
+            | "set_comprehension"
+            | "generator_expression" => {
+                self.register_handled_node(node.kind(), node.kind_id());
+                // Comprehensions - process children for nested symbols
+                self.process_children(node, code, file_id, symbols, counter, context);
+            }
+            "decorator" => {
+                self.register_handled_node(node.kind(), node.kind_id());
+                // Decorators - process children
+                self.process_children(node, code, file_id, symbols, counter, context);
+            }
+            "for_statement" => {
+                self.register_handled_node(node.kind(), node.kind_id());
+                // For loops - process children for nested symbols
+                self.process_children(node, code, file_id, symbols, counter, context);
+            }
+            "type" => {
+                self.register_handled_node(node.kind(), node.kind_id());
+                // Type annotations - process children
+                self.process_children(node, code, file_id, symbols, counter, context);
+            }
             _ => {
+                // Track any other nodes we encounter
+                self.register_handled_node(node.kind(), node.kind_id());
                 // Recursively process children
                 self.process_children(node, code, file_id, symbols, counter, context);
             }
@@ -219,7 +252,7 @@ impl PythonParser {
 
     /// Process a function definition node
     fn process_function(
-        &self,
+        &mut self,
         node: Node,
         code: &str,
         file_id: FileId,
@@ -301,7 +334,7 @@ impl PythonParser {
 
     /// Process child nodes recursively
     fn process_children(
-        &self,
+        &mut self,
         node: Node,
         code: &str,
         file_id: FileId,
@@ -442,9 +475,10 @@ impl PythonParser {
         false
     }
 
-    /// Build function signature with type annotations
-    fn build_function_signature(&self, node: Node, code: &str) -> Option<String> {
+    /// Build function signature with type annotations  
+    fn build_function_signature(&mut self, node: Node, code: &str) -> Option<String> {
         let params_node = node.child_by_field_name("parameters")?;
+        self.register_handled_node(params_node.kind(), params_node.kind_id());
         let params_str = self.build_parameters_string(params_node, code)?;
 
         // Check if this is an async function
@@ -467,7 +501,7 @@ impl PythonParser {
     }
 
     /// Build parameters string with type annotations
-    fn build_parameters_string(&self, params_node: Node, code: &str) -> Option<String> {
+    fn build_parameters_string(&mut self, params_node: Node, code: &str) -> Option<String> {
         let mut params = Vec::new();
 
         for child in params_node.children(&mut params_node.walk()) {
@@ -478,18 +512,21 @@ impl PythonParser {
                     params.push(param_name.to_string());
                 }
                 "typed_parameter" => {
+                    self.register_handled_node(child.kind(), child.kind_id());
                     // Parameter with type annotation: name: type
                     if let Some(param_str) = self.extract_typed_parameter(child, code) {
                         params.push(param_str);
                     }
                 }
                 "typed_default_parameter" => {
+                    self.register_handled_node(child.kind(), child.kind_id());
                     // Parameter with type annotation and default value: name: type = value
                     if let Some(param_str) = self.extract_typed_default_parameter(child, code) {
                         params.push(param_str);
                     }
                 }
                 "default_parameter" => {
+                    self.register_handled_node(child.kind(), child.kind_id());
                     // Parameter with default value: name = value
                     if let Some(param_str) = self.extract_default_parameter(child, code) {
                         params.push(param_str);
@@ -645,7 +682,7 @@ impl PythonParser {
 
     /// Find function calls in AST node recursively
     fn find_calls_in_node<'a>(
-        &self,
+        &mut self,
         node: Node,
         code: &'a str,
         calls: &mut Vec<(&'a str, &'a str, Range)>,
@@ -653,10 +690,24 @@ impl PythonParser {
     ) {
         match node.kind() {
             "function_definition" => {
+                self.register_handled_node(node.kind(), node.kind_id());
                 self.process_function_node_for_calls(node, code, calls, current_function);
             }
             "call" => {
+                self.register_handled_node(node.kind(), node.kind_id());
                 self.process_call_node(node, code, calls, current_function);
+            }
+            "lambda" => {
+                self.register_handled_node(node.kind(), node.kind_id());
+                self.process_children_for_calls(node, code, calls, current_function);
+            }
+            "list_comprehension" | "dictionary_comprehension" | "set_comprehension" => {
+                self.register_handled_node(node.kind(), node.kind_id());
+                self.process_children_for_calls(node, code, calls, current_function);
+            }
+            "decorator" => {
+                self.register_handled_node(node.kind(), node.kind_id());
+                self.process_children_for_calls(node, code, calls, current_function);
             }
             _ => {
                 self.process_children_for_calls(node, code, calls, current_function);
@@ -666,7 +717,7 @@ impl PythonParser {
 
     /// Process function definition node for call detection
     fn process_function_node_for_calls<'a>(
-        &self,
+        &mut self,
         node: Node,
         code: &'a str,
         calls: &mut Vec<(&'a str, &'a str, Range)>,
@@ -684,7 +735,7 @@ impl PythonParser {
 
     /// Process call node for call detection
     fn process_call_node<'a>(
-        &self,
+        &mut self,
         node: Node,
         code: &'a str,
         calls: &mut Vec<(&'a str, &'a str, Range)>,
@@ -763,7 +814,7 @@ impl PythonParser {
 
     /// Process child nodes for function calls
     fn process_children_for_calls<'a>(
-        &self,
+        &mut self,
         node: Node,
         code: &'a str,
         calls: &mut Vec<(&'a str, &'a str, Range)>,
@@ -1167,12 +1218,14 @@ impl PythonParser {
     }
 
     fn find_defines_in_node<'a>(
+        parser: &mut PythonParser,
         node: Node,
         code: &'a str,
         defines: &mut Vec<(&'a str, &'a str, Range)>,
     ) {
         match node.kind() {
             "class_definition" => {
+                parser.register_handled_node(node.kind(), node.kind_id());
                 // Extract class name
                 if let Some(class_name_node) = node.child_by_field_name("name") {
                     let class_name = &code[class_name_node.byte_range()];
@@ -1196,10 +1249,31 @@ impl PythonParser {
                     }
                 }
             }
+            "lambda" => {
+                parser.register_handled_node(node.kind(), node.kind_id());
+                // Process children for lambda
+                for child in node.children(&mut node.walk()) {
+                    Self::find_defines_in_node(parser, child, code, defines);
+                }
+            }
+            "list_comprehension" | "dictionary_comprehension" | "set_comprehension" => {
+                parser.register_handled_node(node.kind(), node.kind_id());
+                // Process children for comprehensions
+                for child in node.children(&mut node.walk()) {
+                    Self::find_defines_in_node(parser, child, code, defines);
+                }
+            }
+            "decorator" => {
+                parser.register_handled_node(node.kind(), node.kind_id());
+                // Process children for decorators
+                for child in node.children(&mut node.walk()) {
+                    Self::find_defines_in_node(parser, child, code, defines);
+                }
+            }
             _ => {
                 // Recursively process children
                 for child in node.children(&mut node.walk()) {
-                    Self::find_defines_in_node(child, code, defines);
+                    Self::find_defines_in_node(parser, child, code, defines);
                 }
             }
         }
@@ -1287,7 +1361,7 @@ impl LanguageParser for PythonParser {
         let root_node = tree.root_node();
         let mut defines = Vec::new();
 
-        Self::find_defines_in_node(root_node, code, &mut defines);
+        Self::find_defines_in_node(self, root_node, code, &mut defines);
         defines
     }
 
@@ -1315,6 +1389,16 @@ impl LanguageParser for PythonParser {
 
         self.find_variable_types_in_node(root_node, code, &mut variable_types);
         variable_types
+    }
+}
+
+impl NodeTracker for PythonParser {
+    fn get_handled_nodes(&self) -> &HashSet<HandledNode> {
+        self.node_tracker.get_handled_nodes()
+    }
+
+    fn register_handled_node(&mut self, node_kind: &str, node_id: u16) {
+        self.node_tracker.register_handled_node(node_kind, node_id)
     }
 }
 

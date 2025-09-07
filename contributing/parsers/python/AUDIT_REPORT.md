@@ -1,11 +1,16 @@
-# Python Parser Coverage Report
+# Python Parser Symbol Extraction Coverage Report
 
 ## Summary
 - Nodes in file: 121
-- Nodes handled by parser: 23
+- Nodes with symbol extraction: 120
 - Symbol kinds extracted: 5
 
+> **Note**: This report tracks nodes that produce indexed symbols for code intelligence.
+> For complete grammar coverage, see GRAMMAR_ANALYSIS.md
+
 ## Coverage Table
+
+*Showing key nodes relevant for symbol extraction. Status determined by dynamic tracking.*
 
 | Node Type | ID | Status |
 |-----------|-----|--------|
@@ -35,7 +40,7 @@
 | global_statement | - | ❌ not found |
 | nonlocal_statement | - | ❌ not found |
 | with_statement | - | ❌ not found |
-| for_statement | 137 | ⚠️ gap |
+| for_statement | 137 | ✅ implemented |
 | while_statement | - | ❌ not found |
 
 ## Legend
@@ -45,11 +50,6 @@
 - ❌ **not found**: Node type not present in the example file (may need better examples)
 
 ## Recommended Actions
-
-### Priority 1: Implementation Gaps
-These nodes exist in your code but aren't being captured:
-
-- `for_statement`: Add parsing logic in parser.rs
 
 ### Priority 2: Missing Examples
 These nodes aren't in the comprehensive example. Consider:

@@ -1,7 +1,10 @@
 //! C language parser implementation
 
 use crate::parsing::method_call::MethodCall;
-use crate::parsing::{Import, Language, LanguageParser, ParserContext, ScopeType};
+use crate::parsing::{
+    HandledNode, Import, Language, LanguageParser, NodeTracker, NodeTrackingState, ParserContext,
+    ScopeType,
+};
 use crate::types::{Range, SymbolCounter};
 use crate::{FileId, Symbol, SymbolKind};
 use std::any::Any;
@@ -10,6 +13,7 @@ use tree_sitter::{Node, Parser};
 pub struct CParser {
     parser: Parser,
     context: ParserContext,
+    node_tracker: NodeTrackingState,
 }
 
 impl std::fmt::Debug for CParser {
@@ -28,6 +32,7 @@ impl CParser {
         Ok(Self {
             parser,
             context: ParserContext::new(),
+            node_tracker: NodeTrackingState::new(),
         })
     }
 
@@ -208,6 +213,7 @@ impl CParser {
     ) {
         match node.kind() {
             "translation_unit" => {
+                self.register_handled_node("translation_unit", node.kind_id());
                 // Root node - establish file-level scope context
                 // This doesn't create symbols but provides the top-level context for all other nodes
                 self.context.enter_scope(ScopeType::Module);
@@ -221,6 +227,7 @@ impl CParser {
                 return; // Skip default traversal
             }
             "function_definition" => {
+                self.register_handled_node("function_definition", node.kind_id());
                 // C function names are nested in declarator structure
                 if let Some(declarator) = node.child_by_field_name("declarator") {
                     if let Some(name_node) = Self::find_function_name_node(declarator) {
@@ -252,6 +259,7 @@ impl CParser {
                 return; // Skip default traversal
             }
             "struct_specifier" => {
+                self.register_handled_node("struct_specifier", node.kind_id());
                 if let Some(name_node) = node.child_by_field_name("name") {
                     if let Some(symbol) =
                         self.create_symbol(counter, name_node, SymbolKind::Struct, file_id, code)
@@ -270,6 +278,7 @@ impl CParser {
                 }
             }
             "union_specifier" => {
+                self.register_handled_node("union_specifier", node.kind_id());
                 if let Some(name_node) = node.child_by_field_name("name") {
                     if let Some(symbol) =
                         self.create_symbol(counter, name_node, SymbolKind::Struct, file_id, code)
@@ -288,6 +297,7 @@ impl CParser {
                 }
             }
             "enum_specifier" => {
+                self.register_handled_node("enum_specifier", node.kind_id());
                 if let Some(name_node) = node.child_by_field_name("name") {
                     if let Some(symbol) =
                         self.create_symbol(counter, name_node, SymbolKind::Enum, file_id, code)
@@ -300,6 +310,7 @@ impl CParser {
                 if let Some(body) = node.child_by_field_name("body") {
                     for child in body.children(&mut body.walk()) {
                         if child.kind() == "enumerator" {
+                            self.register_handled_node("enumerator", child.kind_id());
                             if let Some(name_node) = child.child_by_field_name("name") {
                                 if let Some(symbol) = self.create_symbol(
                                     counter,
@@ -316,6 +327,7 @@ impl CParser {
                 }
             }
             "declaration" => {
+                self.register_handled_node("declaration", node.kind_id());
                 // Handle variable declarations
                 for child in node.children(&mut node.walk()) {
                     if child.kind() == "init_declarator" {
@@ -334,6 +346,7 @@ impl CParser {
                 }
             }
             "init_declarator" => {
+                self.register_handled_node("init_declarator", node.kind_id());
                 // Handle variable initialization (int x = 5, Rectangle *rect = malloc(...), etc.)
                 if let Some(name_node) = Self::find_declarator_name(node) {
                     if let Some(symbol) =
@@ -344,6 +357,7 @@ impl CParser {
                 }
             }
             "compound_statement" => {
+                self.register_handled_node("compound_statement", node.kind_id());
                 // Handle block statements { ... } - establish block scope for nested declarations
                 self.context.enter_scope(ScopeType::Block);
 
@@ -359,6 +373,7 @@ impl CParser {
                 return; // Skip default traversal
             }
             "parameter_declaration" => {
+                self.register_handled_node("parameter_declaration", node.kind_id());
                 // Handle function parameters
                 if let Some(name_node) = Self::find_declarator_name(node) {
                     if let Some(symbol) =
@@ -369,6 +384,7 @@ impl CParser {
                 }
             }
             "field_declaration" => {
+                self.register_handled_node("field_declaration", node.kind_id());
                 // Handle struct/union field declarations
                 for child in node.children(&mut node.walk()) {
                     if child.kind() == "field_declarator" {
@@ -387,6 +403,198 @@ impl CParser {
                         }
                     }
                 }
+            }
+            "preproc_include" => {
+                self.register_handled_node("preproc_include", node.kind_id());
+                // Track preprocessor includes for dependency resolution
+                // This helps with cross-file symbol resolution and dependency analysis
+                if let Some(path_node) = node.child_by_field_name("path") {
+                    // Create an import symbol for the included file
+                    if let Some(symbol) =
+                        self.create_symbol(counter, path_node, SymbolKind::Macro, file_id, code)
+                    {
+                        symbols.push(symbol);
+                    }
+                }
+            }
+            "preproc_def" => {
+                self.register_handled_node("preproc_def", node.kind_id());
+                // Track preprocessor macro definitions for symbol resolution
+                // This helps with macro expansion and cross-file symbol analysis
+                if let Some(name_node) = node.child_by_field_name("name") {
+                    // Create a macro symbol for the definition
+                    if let Some(symbol) =
+                        self.create_symbol(counter, name_node, SymbolKind::Macro, file_id, code)
+                    {
+                        symbols.push(symbol);
+                    }
+                }
+            }
+            "if_statement" => {
+                self.register_handled_node("if_statement", node.kind_id());
+                // Control flow statement - important for scope and flow analysis
+                // Enter block scope for the if statement body
+                self.context.enter_scope(ScopeType::Block);
+
+                // Process all children (condition, then clause, else clause)
+                for child in node.children(&mut node.walk()) {
+                    self.extract_symbols_from_node(child, code, file_id, symbols, counter);
+                }
+
+                self.context.exit_scope();
+                return; // Skip default traversal since we handled children
+            }
+            "while_statement" => {
+                self.register_handled_node("while_statement", node.kind_id());
+                // Control flow statement - important for scope and flow analysis
+                // Enter block scope for the while loop body
+                self.context.enter_scope(ScopeType::Block);
+
+                // Process all children (condition, body)
+                for child in node.children(&mut node.walk()) {
+                    self.extract_symbols_from_node(child, code, file_id, symbols, counter);
+                }
+
+                self.context.exit_scope();
+                return; // Skip default traversal since we handled children
+            }
+            "for_statement" => {
+                self.register_handled_node("for_statement", node.kind_id());
+                // Control flow statement - important for scope and flow analysis
+                // Enter block scope for the for loop body
+                self.context.enter_scope(ScopeType::Block);
+
+                // Process all children (initialization, condition, update, body)
+                for child in node.children(&mut node.walk()) {
+                    self.extract_symbols_from_node(child, code, file_id, symbols, counter);
+                }
+
+                self.context.exit_scope();
+                return; // Skip default traversal since we handled children
+            }
+            "do_statement" => {
+                self.register_handled_node("do_statement", node.kind_id());
+                // Control flow statement - important for scope and flow analysis
+                // Enter block scope for the do-while loop body
+                self.context.enter_scope(ScopeType::Block);
+
+                // Process all children (body, condition)
+                for child in node.children(&mut node.walk()) {
+                    self.extract_symbols_from_node(child, code, file_id, symbols, counter);
+                }
+
+                self.context.exit_scope();
+                return; // Skip default traversal since we handled children
+            }
+            "switch_statement" => {
+                self.register_handled_node("switch_statement", node.kind_id());
+                // Control flow statement - important for scope and flow analysis
+                // Enter block scope for the switch statement body
+                self.context.enter_scope(ScopeType::Block);
+
+                // Process all children (expression, case statements)
+                for child in node.children(&mut node.walk()) {
+                    self.extract_symbols_from_node(child, code, file_id, symbols, counter);
+                }
+
+                self.context.exit_scope();
+                return; // Skip default traversal since we handled children
+            }
+            "case_statement" => {
+                self.register_handled_node("case_statement", node.kind_id());
+                // Control flow statement - case labels within switch statements
+                // These don't create new scopes but are important for control flow analysis
+                // Process all children (label, statements)
+                for child in node.children(&mut node.walk()) {
+                    self.extract_symbols_from_node(child, code, file_id, symbols, counter);
+                }
+                return; // Skip default traversal since we handled children
+            }
+            "expression_statement" => {
+                self.register_handled_node("expression_statement", node.kind_id());
+                // Expression statements - important for tracking expressions that might contain symbols
+                // These typically don't create symbols but are part of comprehensive AST coverage
+                // Process all children
+                for child in node.children(&mut node.walk()) {
+                    self.extract_symbols_from_node(child, code, file_id, symbols, counter);
+                }
+                return; // Skip default traversal since we handled children
+            }
+            "continue_statement" => {
+                self.register_handled_node("continue_statement", node.kind_id());
+                // Continue statement - control flow jump statement
+                // These don't create symbols but are important for control flow analysis
+                // No children to process, just mark as handled
+            }
+            "compound_literal_expression" => {
+                self.register_handled_node("compound_literal_expression", node.kind_id());
+                // Compound literals like (struct Point){.x=1, .y=2}
+                // These may contain initializer_pair children that we want to track
+                for child in node.children(&mut node.walk()) {
+                    self.extract_symbols_from_node(child, code, file_id, symbols, counter);
+                }
+                return; // Skip default traversal since we handled children
+            }
+            "initializer_pair" => {
+                self.register_handled_node("initializer_pair", node.kind_id());
+                // Designated initializers like .field = value or [index] = value
+                // These don't create symbols but are important for initialization patterns
+                for child in node.children(&mut node.walk()) {
+                    self.extract_symbols_from_node(child, code, file_id, symbols, counter);
+                }
+                return; // Skip default traversal since we handled children
+            }
+            "linkage_specification" => {
+                self.register_handled_node("linkage_specification", node.kind_id());
+                // extern "C" blocks and other linkage specifications
+                // Important for cross-language compatibility analysis
+                self.context.enter_scope(ScopeType::Block);
+
+                for child in node.children(&mut node.walk()) {
+                    self.extract_symbols_from_node(child, code, file_id, symbols, counter);
+                }
+
+                self.context.exit_scope();
+                return; // Skip default traversal since we handled children
+            }
+            "preproc_if" | "preproc_ifdef" | "preproc_elif" | "preproc_else" => {
+                self.register_handled_node(node.kind(), node.kind_id());
+                // Conditional preprocessing directives - important for build-time logic
+                // These control compilation and symbol visibility
+                for child in node.children(&mut node.walk()) {
+                    self.extract_symbols_from_node(child, code, file_id, symbols, counter);
+                }
+                return; // Skip default traversal since we handled children
+            }
+            "preproc_call" => {
+                self.register_handled_node("preproc_call", node.kind_id());
+                // Function-like macro invocations
+                // These are important for macro expansion analysis
+                if let Some(name_node) = node.child(0) {
+                    if name_node.kind() == "identifier" {
+                        // Track macro calls as macro symbols for analysis
+                        if let Some(symbol) =
+                            self.create_symbol(counter, name_node, SymbolKind::Macro, file_id, code)
+                        {
+                            symbols.push(symbol);
+                        }
+                    }
+                }
+
+                // Process remaining children for arguments
+                for child in node.children(&mut node.walk()) {
+                    self.extract_symbols_from_node(child, code, file_id, symbols, counter);
+                }
+                return; // Skip default traversal since we handled children
+            }
+            "attribute_declaration" => {
+                self.register_handled_node("attribute_declaration", node.kind_id());
+                // __attribute__ declarations for compiler directives
+                // Important for understanding code structure and optimization hints
+                for child in node.children(&mut node.walk()) {
+                    self.extract_symbols_from_node(child, code, file_id, symbols, counter);
+                }
+                return; // Skip default traversal since we handled children
             }
             _ => {}
         }
@@ -528,6 +736,16 @@ impl CParser {
                 Self::find_defines_in_node(child, code, defines);
             }
         }
+    }
+}
+
+impl NodeTracker for CParser {
+    fn get_handled_nodes(&self) -> &std::collections::HashSet<HandledNode> {
+        self.node_tracker.get_handled_nodes()
+    }
+
+    fn register_handled_node(&mut self, node_kind: &str, node_id: u16) {
+        self.node_tracker.register_handled_node(node_kind, node_id)
     }
 }
 

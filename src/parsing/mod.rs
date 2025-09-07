@@ -25,7 +25,7 @@ pub use import::Import;
 pub use language::Language;
 pub use language_behavior::{LanguageBehavior, LanguageMetadata};
 pub use method_call::MethodCall;
-pub use parser::LanguageParser;
+pub use parser::{HandledNode, LanguageParser, NodeTracker, NodeTrackingState};
 pub use php::{PhpBehavior, PhpParser};
 pub use python::{PythonBehavior, PythonParser};
 pub use registry::{LanguageDefinition, LanguageId, LanguageRegistry, RegistryError, get_registry};

@@ -7,6 +7,7 @@ use crate::parsing::method_call::MethodCall;
 use crate::types::SymbolCounter;
 use crate::{FileId, Range, Symbol};
 use std::any::Any;
+use std::collections::HashSet;
 use tree_sitter::Node;
 
 /// Common interface for all language parsers
@@ -111,4 +112,59 @@ pub trait LanguageParser: Send + Sync {
 pub trait ParserFactory: Send + Sync {
     /// Create a new parser instance
     fn create(&self) -> Result<Box<dyn LanguageParser>, String>;
+}
+
+/// Information about a handled AST node
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct HandledNode {
+    pub name: String,
+    pub id: u16,
+}
+
+/// Extension trait for tracking which AST node types a parser handles
+///
+/// This enables dynamic audit reporting by automatically tracking which
+/// node types receive explicit handling during parsing. Eliminates the
+/// need for manually maintaining static lists of implemented nodes.
+pub trait NodeTracker {
+    /// Get the set of node types this parser has encountered and handled
+    fn get_handled_nodes(&self) -> &HashSet<HandledNode>;
+
+    /// Register that we've handled a specific node type with its tree-sitter ID
+    fn register_handled_node(&mut self, node_kind: &str, node_id: u16);
+}
+
+/// Default implementation of NodeTracker using a HashSet
+///
+/// Parsers can include this struct and delegate to it for zero-cost node tracking.
+#[derive(Debug, Default)]
+pub struct NodeTrackingState {
+    handled_nodes: HashSet<HandledNode>,
+}
+
+impl NodeTrackingState {
+    /// Create a new empty tracking state
+    pub fn new() -> Self {
+        Self {
+            handled_nodes: HashSet::new(),
+        }
+    }
+}
+
+impl NodeTracker for NodeTrackingState {
+    fn get_handled_nodes(&self) -> &HashSet<HandledNode> {
+        &self.handled_nodes
+    }
+
+    #[inline]
+    fn register_handled_node(&mut self, node_kind: &str, node_id: u16) {
+        // Create node info - only allocates if we haven't seen this exact node before
+        let node_info = HandledNode {
+            name: node_kind.to_string(),
+            id: node_id,
+        };
+
+        // HashSet::insert is efficient - only stores if not already present
+        self.handled_nodes.insert(node_info);
+    }
 }

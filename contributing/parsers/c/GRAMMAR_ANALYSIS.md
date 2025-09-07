@@ -2,29 +2,54 @@
 
 ## Statistics
 - Total nodes in grammar JSON: 132
-- Nodes found in comprehensive.c: 120
-- Nodes handled by parser: 11
-- Symbol kinds extracted: 5
+- Nodes found in comprehensive.c: 145
+- Nodes handled by parser: 29
+- Symbol kinds extracted: 6
 
 ## ✅ Successfully Handled Nodes
 These nodes are in examples and handled by parser:
+- case_statement
+- compound_literal_expression
 - compound_statement
+- continue_statement
 - declaration
+- do_statement
 - enum_specifier
 - enumerator
+- expression_statement
 - field_declaration
+- for_statement
 - function_definition
+- if_statement
 - init_declarator
+- initializer_pair
+- linkage_specification
 - parameter_declaration
+- preproc_call
+- preproc_def
+- preproc_elif
+- preproc_else
+- preproc_if
+- preproc_ifdef
+- preproc_include
 - struct_specifier
+- switch_statement
 - translation_unit
 - union_specifier
+- while_statement
 
 ## ⚠️ Implementation Gaps
 These nodes appear in comprehensive.c but aren't handled:
+- 
+
 - !
 - "
 - #define
+- #elif
+- #else
+- #endif
+- #if
+- #ifdef
 - #include
 - %
 - &
@@ -51,41 +76,42 @@ These nodes appear in comprehensive.c but aren't handled:
 - NULL
 - [
 - ]
+- __attribute__
 - abstract_pointer_declarator
 - argument_list
 - array_declarator
 - assignment_expression
+- attribute_specifier
 - binary_expression
 - break
 - break_statement
 - call_expression
 - case
-- case_statement
 - cast_expression
 - comment
 - conditional_expression
 - const
+- continue
+- declaration_list
 - default
+- defined
 - do
-- do_statement
 - else
 - else_clause
 - enum
 - enumerator_list
 - escape_sequence
-- expression_statement
 - extern
 - field_declaration_list
+- field_designator
 - field_expression
 - field_identifier
 - for
-- for_statement
 - function_declarator
 - goto
 - goto_statement
 - identifier
 - if
-- if_statement
 - initializer_list
 - inline
 - labeled_statement
@@ -97,9 +123,9 @@ These nodes appear in comprehensive.c but aren't handled:
 - pointer_declarator
 - pointer_expression
 - preproc_arg
-- preproc_def
+- preproc_defined
+- preproc_directive
 - preproc_function_def
-- preproc_include
 - preproc_params
 - primitive_type
 - return
@@ -112,9 +138,9 @@ These nodes appear in comprehensive.c but aren't handled:
 - string_content
 - string_literal
 - struct
+- subscript_designator
 - subscript_expression
 - switch
-- switch_statement
 - system_lib_string
 - type_definition
 - type_descriptor
@@ -127,9 +153,9 @@ These nodes appear in comprehensive.c but aren't handled:
 - variadic_parameter
 - volatile
 - while
-- while_statement
 - {
 - |=
+- ||
 - }
 
 ## 📝 Missing from Examples
@@ -145,21 +171,16 @@ These grammar nodes aren't in comprehensive.c:
 - alignof_expression
 - attribute
 - attribute_declaration
-- attribute_specifier
 - attributed_declarator
 - attributed_statement
 - bitfield_clause
 - char_literal
 - character
 - comma_expression
-- compound_literal_expression
 - concatenated_string
-- continue_statement
-- declaration_list
 - expression
 - extension_expression
 - false
-- field_designator
 - generic_expression
 - gnu_asm_clobber_list
 - gnu_asm_expression
@@ -169,8 +190,6 @@ These grammar nodes aren't in comprehensive.c:
 - gnu_asm_output_operand
 - gnu_asm_output_operand_list
 - gnu_asm_qualifier
-- initializer_pair
-- linkage_specification
 - macro_type_specifier
 - ms_based_modifier
 - ms_call_modifier
@@ -181,21 +200,13 @@ These grammar nodes aren't in comprehensive.c:
 - ms_unaligned_ptr_modifier
 - ms_unsigned_ptr_modifier
 - offsetof_expression
-- preproc_call
-- preproc_defined
-- preproc_directive
-- preproc_elif
 - preproc_elifdef
-- preproc_else
-- preproc_if
-- preproc_ifdef
 - seh_except_clause
 - seh_finally_clause
 - seh_leave_statement
 - seh_try_statement
 - sized_type_specifier
 - statement
-- subscript_designator
 - subscript_range_designator
 - true
 - type_specifier
@@ -203,6 +214,7 @@ These grammar nodes aren't in comprehensive.c:
 ## 🎯 Symbol Kinds Extracted
 - Constant
 - Function
+- Macro
 - Parameter
 - Struct
 - Variable

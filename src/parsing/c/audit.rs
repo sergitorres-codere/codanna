@@ -4,6 +4,7 @@
 //! This helps identify gaps in our symbol extraction.
 
 use super::CParser;
+use crate::parsing::NodeTracker;
 use crate::types::FileId;
 use std::collections::{HashMap, HashSet};
 use thiserror::Error;
@@ -66,8 +67,12 @@ impl CParserAudit {
             extracted_symbol_kinds.insert(format!("{:?}", symbol.kind));
         }
 
-        // Track which nodes our parser handles by analyzing the implementation
-        let implemented_nodes = Self::find_implemented_nodes();
+        // Get dynamically tracked nodes from the parser (zero maintenance!)
+        let implemented_nodes: HashSet<String> = c_parser
+            .get_handled_nodes()
+            .iter()
+            .map(|handled_node| handled_node.name.clone())
+            .collect();
 
         Ok(CParserAudit {
             grammar_nodes,
@@ -85,29 +90,6 @@ impl CParserAudit {
         let total = self.grammar_nodes.len();
         let implemented = self.implemented_nodes.len();
         (implemented as f64 / total as f64) * 100.0
-    }
-
-    /// Find which nodes are handled in parser implementation
-    /// This tracks the nodes we implemented in our extract_symbols_from_node method
-    fn find_implemented_nodes() -> HashSet<String> {
-        let mut nodes = HashSet::new();
-
-        // Priority 1 symbol-producing nodes we implemented
-        nodes.insert("function_definition".to_string());
-        nodes.insert("struct_specifier".to_string());
-        nodes.insert("union_specifier".to_string());
-        nodes.insert("enum_specifier".to_string());
-        nodes.insert("declaration".to_string());
-        nodes.insert("parameter_declaration".to_string());
-        nodes.insert("field_declaration".to_string());
-        nodes.insert("enumerator".to_string());
-
-        // Priority 2 nodes we implemented
-        nodes.insert("init_declarator".to_string());
-        nodes.insert("translation_unit".to_string());
-        nodes.insert("compound_statement".to_string());
-
-        nodes
     }
 
     /// Generate coverage report

@@ -3,14 +3,14 @@
 ## Statistics
 - Total nodes in grammar JSON: 169
 - Nodes found in comprehensive.rs: 143
-- Nodes handled by parser: 16
-- Symbol kinds extracted: 7
+- Nodes handled by parser: 13
+- Symbol kinds extracted: 10
 
 ## ✅ Successfully Handled Nodes
 These nodes are in examples and handled by parser:
-- associated_type
 - const_item
 - enum_item
+- enum_variant
 - field_declaration
 - function_item
 - function_signature_item
@@ -20,8 +20,7 @@ These nodes are in examples and handled by parser:
 - static_item
 - struct_item
 - trait_item
-- use_declaration
-- visibility_modifier
+- type_item
 
 ## ⚠️ Implementation Gaps
 These nodes appear in comprehensive.rs but aren't handled:
@@ -53,6 +52,7 @@ These nodes appear in comprehensive.rs but aren't handled:
 - array_type
 - as
 - assignment_expression
+- associated_type
 - async
 - attribute
 - attribute_item
@@ -69,7 +69,6 @@ These nodes appear in comprehensive.rs but aren't handled:
 - dyn
 - dynamic_type
 - enum
-- enum_variant
 - enum_variant_list
 - expression_statement
 - extern
@@ -137,7 +136,6 @@ These nodes appear in comprehensive.rs but aren't handled:
 - type_binding
 - type_cast_expression
 - type_identifier
-- type_item
 - type_parameter
 - type_parameters
 - unary_expression
@@ -147,7 +145,9 @@ These nodes appear in comprehensive.rs but aren't handled:
 - unit_type
 - unsafe
 - use
+- use_declaration
 - use_wildcard
+- visibility_modifier
 - where
 - where_clause
 - where_predicate
@@ -236,8 +236,11 @@ These grammar nodes aren't in comprehensive.rs:
 ## 🎯 Symbol Kinds Extracted
 - Constant
 - Enum
+- Field
 - Function
+- Macro
 - Method
+- Module
 - Struct
 - Trait
 - TypeAlias

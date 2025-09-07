@@ -4,6 +4,7 @@
 //! This helps identify gaps in our symbol extraction.
 
 use super::GoParser;
+use crate::parsing::NodeTracker;
 use crate::types::FileId;
 use std::collections::{HashMap, HashSet};
 use thiserror::Error;
@@ -67,8 +68,12 @@ impl GoParserAudit {
             extracted_symbol_kinds.insert(format!("{:?}", symbol.kind));
         }
 
-        // Track which nodes our parser handles by analyzing the source
-        let implemented_nodes = Self::find_implemented_nodes();
+        // Get dynamically tracked nodes from the parser (zero maintenance!)
+        let implemented_nodes: HashSet<String> = go_parser
+            .get_handled_nodes()
+            .iter()
+            .map(|handled_node| handled_node.name.clone())
+            .collect();
 
         Ok(Self {
             grammar_nodes,
@@ -77,48 +82,17 @@ impl GoParserAudit {
         })
     }
 
-    /// Find which nodes are handled in parser implementation
-    /// This is a simple approach - in production we might instrument the parser
-    fn find_implemented_nodes() -> HashSet<String> {
-        // For now, we'll hardcode based on our knowledge
-        // In a real implementation, we could:
-        // 1. Parse the parser.rs file itself
-        // 2. Or add instrumentation to track visited nodes
-        // 3. Or use compile-time reflection
-
-        let mut nodes = HashSet::new();
-
-        // Main symbol-producing nodes
-        nodes.insert("function_declaration".to_string());
-        nodes.insert("method_declaration".to_string());
-        nodes.insert("type_declaration".to_string());
-        nodes.insert("var_declaration".to_string());
-        nodes.insert("const_declaration".to_string());
-        nodes.insert("struct_type".to_string());
-        nodes.insert("interface_type".to_string());
-        nodes.insert("import_declaration".to_string());
-        nodes.insert("import_spec".to_string());
-        nodes.insert("short_var_declaration".to_string());
-
-        // Scope nodes
-        nodes.insert("if_statement".to_string());
-        nodes.insert("for_statement".to_string());
-        nodes.insert("block".to_string());
-
-        nodes
-    }
-
     /// Generate coverage report
     pub fn generate_report(&self) -> String {
         let mut report = String::new();
 
-        report.push_str("# Go Parser Coverage Report\n\n");
+        report.push_str("# Go Parser Symbol Extraction Coverage Report\n\n");
 
         // Summary
         report.push_str("## Summary\n");
         report.push_str(&format!("- Nodes in file: {}\n", self.grammar_nodes.len()));
         report.push_str(&format!(
-            "- Nodes handled by parser: {}\n",
+            "- Nodes with symbol extraction: {}\n",
             self.implemented_nodes.len()
         ));
         report.push_str(&format!(
@@ -126,12 +100,16 @@ impl GoParserAudit {
             self.extracted_symbol_kinds.len()
         ));
 
-        // Coverage table
+        report.push_str("\n> **Note**: This report tracks nodes that produce indexed symbols for code intelligence.\n");
+        report.push_str("> For complete grammar coverage, see GRAMMAR_ANALYSIS.md\n");
+
+        // Coverage table for key symbol extraction nodes
         report.push_str("\n## Coverage Table\n\n");
+        report.push_str("*Showing key nodes relevant for symbol extraction. Status determined by dynamic tracking.*\n\n");
         report.push_str("| Node Type | ID | Status |\n");
         report.push_str("|-----------|-----|--------|\n");
 
-        // Key nodes we care about for symbol extraction
+        // Key nodes relevant for symbol extraction (not punctuation/operators)
         let key_nodes = vec![
             "package_clause",
             "import_declaration",
@@ -151,6 +129,10 @@ impl GoParserAudit {
             "parameter_declaration",
             "short_var_declaration",
             "func_literal",
+            "method_elem",
+            "field_identifier",
+            "type_identifier",
+            "package_identifier",
         ];
 
         let mut gaps = Vec::new();
