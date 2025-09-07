@@ -330,31 +330,32 @@ impl LanguageBehavior for RustBehavior {
         }
 
         // Case 2: Handle super:: imports
-        if import_path.starts_with("super::") && importing_module.is_some() {
-            let importing_mod = importing_module.unwrap();
-            let relative_path = &import_path[7..]; // Remove "super::" prefix
+        if import_path.starts_with("super::") {
+            if let Some(importing_mod) = importing_module {
+                let relative_path = import_path.strip_prefix("super::").unwrap(); // Safe: we checked starts_with
 
-            // super:: means go up one level from the importing module
-            // Example: In crate::parsing::rust, super::LanguageBehavior -> crate::parsing::LanguageBehavior
-            if let Some(parent) = importing_mod.rsplit_once("::") {
-                let candidate = format!("{}::{}", parent.0, relative_path);
-                if candidate == symbol_module_path {
-                    return true;
-                }
+                // super:: means go up one level from the importing module
+                // Example: In crate::parsing::rust, super::LanguageBehavior -> crate::parsing::LanguageBehavior
+                if let Some(parent) = importing_mod.rsplit_once("::") {
+                    let candidate = format!("{}::{}", parent.0, relative_path);
+                    if candidate == symbol_module_path {
+                        return true;
+                    }
 
-                // Re-export heuristic for super:: imports:
-                // If the symbol lives deeper under the parent module but has the same tail name,
-                // consider it a match (common re-export pattern)
-                if symbol_module_path.ends_with(&format!("::{relative_path}"))
-                    && (symbol_module_path.starts_with(&format!("{}::", parent.0))
-                        || symbol_module_path == parent.0)
-                {
-                    debug_global!(
-                        "DEBUG: Rust re-export heuristic matched (super): import='{}', symbol='{}'",
-                        import_path,
-                        symbol_module_path
-                    );
-                    return true;
+                    // Re-export heuristic for super:: imports:
+                    // If the symbol lives deeper under the parent module but has the same tail name,
+                    // consider it a match (common re-export pattern)
+                    if symbol_module_path.ends_with(&format!("::{relative_path}"))
+                        && (symbol_module_path.starts_with(&format!("{}::", parent.0))
+                            || symbol_module_path == parent.0)
+                    {
+                        debug_global!(
+                            "DEBUG: Rust re-export heuristic matched (super): import='{}', symbol='{}'",
+                            import_path,
+                            symbol_module_path
+                        );
+                        return true;
+                    }
                 }
             }
         }
