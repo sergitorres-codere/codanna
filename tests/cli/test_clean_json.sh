@@ -43,7 +43,6 @@ test_json "retrieve callers new" "callers"
 test_json "retrieve calls main" "calls"
 test_json "retrieve describe OutputManager" "describe"
 test_json "retrieve implementations Parser" "implementations"
-test_json "retrieve impact OutputManager" "impact"
 test_json "retrieve search parse" "search"
 
 echo

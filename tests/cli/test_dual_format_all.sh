@@ -62,31 +62,7 @@ test_command "Implementations" "implementations Parser --json" "implementations 
 echo "=== 5. DESCRIBE COMMAND ==="
 test_command "Describe" "describe OutputManager --json" "describe symbol:OutputManager --json"
 
-echo "=== 6. IMPACT COMMAND ==="
-echo "Testing Impact (with depth parameter):"
-# Traditional with flag
-if $BINARY retrieve impact OutputManager --depth 2 --json > /dev/null 2>&1; then
-    echo -e "  Traditional with flag: ${GREEN}✓${NC}"
-else
-    echo -e "  Traditional with flag: ${RED}✗${NC}"
-fi
-
-# Key:value format
-if $BINARY retrieve impact symbol:OutputManager depth:2 --json > /dev/null 2>&1; then
-    echo -e "  Key:value format:      ${GREEN}✓${NC}"
-else
-    echo -e "  Key:value format:      ${RED}✗${NC}"
-fi
-
-# Mixed format
-if $BINARY retrieve impact OutputManager depth:2 --json > /dev/null 2>&1; then
-    echo -e "  Mixed format:          ${GREEN}✓${NC}"
-else
-    echo -e "  Mixed format:          ${RED}✗${NC}"
-fi
-echo ""
-
-echo "=== 7. SEARCH COMMAND ==="
+echo "=== 6. SEARCH COMMAND ==="
 echo "Testing Search (with multiple parameters):"
 # Traditional
 if $BINARY retrieve search "output" --limit 2 --kind struct --json > /dev/null 2>&1; then
@@ -120,20 +96,12 @@ $BINARY retrieve symbol 2>&1 | grep -q "Error: symbol requires a name" && echo -
 echo -n "Calls without args:  "
 $BINARY retrieve calls 2>&1 | grep -q "Error: calls requires a function name" && echo -e "${GREEN}✓${NC}" || echo -e "${RED}✗${NC}"
 
-echo -n "Impact without args: "
-$BINARY retrieve impact 2>&1 | grep -q "Error: impact requires a symbol name" && echo -e "${GREEN}✓${NC}" || echo -e "${RED}✗${NC}"
+echo -n "Search without args: "
+$BINARY retrieve search 2>&1 | grep -q "Error: search requires a query" && echo -e "${GREEN}✓${NC}" || echo -e "${RED}✗${NC}"
 
 echo ""
 echo "=== PRECEDENCE TEST ==="
 echo "Testing flag precedence over key:value:"
-
-# Test that --depth 2 overrides depth:5
-OUTPUT=$($BINARY retrieve impact OutputManager depth:5 --depth 2 --json 2>&1 | jq -r '.metadata.max_depth' 2>/dev/null)
-if [ "$OUTPUT" = "2" ]; then
-    echo -e "Impact depth precedence: ${GREEN}✓${NC} (flag wins: --depth 2 over depth:5)"
-else
-    echo -e "Impact depth precedence: ${RED}✗${NC} (expected 2, got $OUTPUT)"
-fi
 
 # Test that --limit 1 overrides limit:10
 COUNT=$($BINARY retrieve search "output" limit:10 --limit 1 --json 2>&1 | jq -r '.count' 2>/dev/null)

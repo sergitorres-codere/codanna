@@ -26,8 +26,8 @@ Give your code assistant the ability to see through your codebase—understandin
 Your AI assistant knows your code:
 
 -	"Where's this function called?" → instant call graph
--	"Show me error handling patterns" → semantic search through implementations
--	"Find functions parsing config files" → natural language discovery
+-	"Show me all authentication functions" → finds functions with auth-related doc comments
+-	"Find config file parsers" → matches functions that parse configuration
 -	"What breaks if I change this interface?" → full-project impact analysis
 
 ## Why Bother
@@ -36,9 +36,9 @@ Your AI assistant knows your code:
 
 Codanna cuts the noise:
 
--	No grep-and-hope loops.
--	No explaining the same thing twice.
--	No blind code generation.
+-	Less grep-and-hope loops.
+-	Less explaining the same thing twice.
+-	Less blind code generation.
 
 **Instead**: tight context, smarter engineering, flow that doesn't stall.
 
@@ -48,7 +48,7 @@ Codanna cuts the noise:
 
 ```bash
 # Install
-cargo install codanna
+cargo install codanna --all-features
 
 # setup
 codanna init
@@ -229,11 +229,6 @@ Codanna includes custom slash commands for Claude that provide intelligent workf
 
 These commands use Codanna's MCP tools under the hood but provide guided workflows with comprehensive analysis and automatic report generation.
 
-## Unix-Native. Pipe it, baby!
-
-Codanna speaks CLI like you do, positional when it's simple, key:value when it's not.
-All MCP tools support `--json`, so piping isn't noise, it's music.
-
 ## Configuration
 
 Lives in `.codanna/settings.toml`:
@@ -259,6 +254,31 @@ Codanna respects `.gitignore` and adds its own `.codannaignore`:
 target/         # Skip build artifacts
 node_modules/   # Skip dependencies
 *_test.rs       # Optionally skip tests
+```
+
+### Unix-Native. Pipe it, baby!
+
+Codanna speaks CLI like you do, positional when it's simple, key:value when it's not.
+All MCP tools support `--json`, so piping isn't noise, it's music.
+
+```bash
+# MCP semantic search with language filter
+codanna mcp semantic_search_with_context query:"error handling" limit:2 lang:rust --json | jq -r '.data[] | "\(.symbol.name) (\(.symbol.scope_context)) (score: \(.score)) - \(.context.file_path) - \(.symbol.doc_comment)"'
+# Output: error (ClassMember) (score: 0.6421908) - src/io/format.rs:148 - Create a generic error response.
+#         add_error (ClassMember) (score: 0.6356536) - src/indexing/progress.rs:46 - Add an error (limited to first 100 errors)
+```
+
+```bash
+# Show symbol types, names and locations
+codanna retrieve search "config" --json | jq -r '.items[] | "\(.symbol.kind) \(.symbol.name) @ \(.file_path)"'
+# Output: Function test_partial_config @ src/config.rs:911
+#         Method config_key @ src/parsing/language.rs:114
+
+# Get unique file paths for search results
+codanna retrieve search "parser" --json | jq -r '.items[].file_path' | sort -u
+
+# Extract function signatures with scope context
+codanna retrieve search "create_parser" --json | jq -r '.items[] | "\(.symbol.name) (\(.symbol.scope_context)) - \(.file_path)\n  \(.symbol.signature)"'
 ```
 
 ### Documentation Comments for Better Search
@@ -437,13 +457,13 @@ sudo dnf install pkgconfig openssl-devel
 
 ## Current Limitations
 
-- Supports Rust, Python, TypeScript, Go and PHP (more language support coming)
+- Supports Rust, Python, TypeScript, Go, PHP, C, and C++ (more language support coming)
 - Semantic search requires English documentation/comments
 - Windows support is experimental
 
 ## Roadmap
 
-### Current Release: v0.5.8
+### Current Release: v0.5.9
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed release notes and feature history.
 

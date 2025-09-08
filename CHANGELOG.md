@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.9] - 2025-09-07
+
+### Enhanced
+- **codanna-navigator agent**: Improved code research reports with quantified findings, investigation paths, and actionable insights
+
+### Added
+- C/C++ language support with tree-sitter parsing
+- Dynamic NodeTracker system for zero-maintenance parser auditing across all languages
+- TypeScript tsconfig.json path resolution infrastructure with persistence (.codanna/index/resolvers/)
+- Project-agnostic resolution foundation (ProjectResolutionProvider trait, not yet integrated)
+- Python parser extensions: assignment, decorated_definition, type_alias extraction
+- Parser API documentation for consistent resolution patterns across languages
+
+### Fixed
+- Semantic search: SymbolId persistence between embeddings and symbol index (addresses #23)
+- CI: clippy --all-targets --all-features compliance across all parsers
+
+### Changed
+- Test infrastructure: enable subfolder organization, removed 20k LOC obsolete tests, added ABI-15 audit (supports #20)
+- Memory optimization: symbol-cache candidate lookup with relationship deduplication
+
+### Breaking Changes
+- Existing codebases need reindexing with --force or clean new index
+
 ## [0.5.8] - 2025-09-01
 
 ### Security

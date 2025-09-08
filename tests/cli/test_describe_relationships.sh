@@ -18,9 +18,9 @@ fi
 echo
 
 # Test 2: Function should show callers and calls
-echo "Test 2: Function (main) should show callers/calls..."
-CALLERS=$($CODANNA retrieve describe main --json | jq '.item.relationships.called_by | length')
-CALLS=$($CODANNA retrieve describe main --json | jq '.item.relationships.calls | length')
+echo "Test 2: Function (index_file) should show callers/calls..."
+CALLERS=$($CODANNA retrieve describe index_file --json | jq '.item.relationships.called_by | length')
+CALLS=$($CODANNA retrieve describe index_file --json | jq '.item.relationships.calls | length')
 echo "  Callers: $CALLERS"
 echo "  Calls: $CALLS"
 if [ "$CALLS" != "null" ] && [ "$CALLS" != "0" ]; then
@@ -40,12 +40,14 @@ echo
 
 # Test 4: Trait should show implementations
 echo "Test 4: Trait should show implementations..."
-# First find a trait
-TRAIT=$($CODANNA retrieve search "trait" --limit 10 --json | jq -r '.items | map(select(.symbol.kind == "Trait")) | .[0].symbol.name')
+# Search for a known trait (LanguageBehavior)
+TRAIT=$($CODANNA retrieve search "LanguageBehavior" --limit 5 --json | jq -r '.items | map(select(.symbol.kind == "Trait")) | .[0].symbol.name')
 if [ -n "$TRAIT" ] && [ "$TRAIT" != "null" ]; then
     echo "  Testing trait: $TRAIT"
     IMPLS=$($CODANNA retrieve describe "$TRAIT" --json | jq '.item.relationships.implemented_by | length')
     echo "  Implementations: $IMPLS"
+else
+    echo "  No trait found in search results"
 fi
 echo
 
