@@ -3,11 +3,6 @@
 
 // Re-export the integration test modules
 // Each test file in integration/ needs to be included here
-#[path = "integration/test_c_resolution.rs"]
-mod test_c_resolution;
-
-#[path = "integration/test_cpp_resolution.rs"]
-mod test_cpp_resolution;
 
 #[path = "integration/test_mcp_schema.rs"]
 mod test_mcp_schema;

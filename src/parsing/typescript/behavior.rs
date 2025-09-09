@@ -3,10 +3,13 @@
 use crate::parsing::LanguageBehavior;
 use crate::parsing::behavior_state::{BehaviorState, StatefulBehavior};
 use crate::parsing::resolution::{InheritanceResolver, ResolutionScope};
+use crate::project_resolver::persist::{ResolutionPersistence, ResolutionRules};
 use crate::storage::DocumentIndex;
 use crate::types::FileId;
 use crate::{SymbolId, Visibility};
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 use tree_sitter::Language;
 
 use super::resolution::{TypeScriptInheritanceResolver, TypeScriptResolutionContext};
@@ -23,6 +26,54 @@ impl TypeScriptBehavior {
         Self {
             state: BehaviorState::new(),
         }
+    }
+
+    /// Load project resolution rules for a file from the persisted index
+    ///
+    /// Uses a thread-local cache to avoid repeated disk reads.
+    /// Cache is invalidated after 1 second to pick up changes.
+    fn load_project_rules_for_file(&self, file_id: FileId) -> Option<ResolutionRules> {
+        thread_local! {
+            static RULES_CACHE: RefCell<Option<(Instant, crate::project_resolver::persist::ResolutionIndex)>> = const { RefCell::new(None) };
+        }
+
+        RULES_CACHE.with(|cache| {
+            let mut cache = cache.borrow_mut();
+
+            // Check if cache is fresh (< 1 second old)
+            let needs_reload = if let Some((timestamp, _)) = *cache {
+                timestamp.elapsed() >= Duration::from_secs(1)
+            } else {
+                true
+            };
+
+            // Load fresh from disk if needed
+            if needs_reload {
+                let persistence = ResolutionPersistence::new(Path::new(".codanna"));
+                if let Ok(index) = persistence.load("typescript") {
+                    *cache = Some((Instant::now(), index));
+                } else {
+                    // No index file exists yet - that's OK
+                    return None;
+                }
+            }
+
+            // Get rules for the file
+            if let Some((_, ref index)) = *cache {
+                // Get the file path for this FileId from our behavior state
+                if let Some(file_path) = self.state.get_file_path(file_id) {
+                    // Find the config that applies to this file
+                    if let Some(config_path) = index.get_config_for_file(&file_path) {
+                        return index.rules.get(config_path).cloned();
+                    }
+                }
+
+                // Fallback: return any rules we have (for tests without proper file registration)
+                index.rules.values().next().cloned()
+            } else {
+                None
+            }
+        })
     }
 }
 
@@ -487,12 +538,24 @@ impl LanguageBehavior for TypeScriptBehavior {
         }
     }
 
-    // TypeScript-specific: Handle ES module imports
+    // TypeScript-specific: Handle ES module imports with project resolution enhancement
     fn resolve_import(
         &self,
         import: &crate::parsing::Import,
         document_index: &DocumentIndex,
     ) -> Option<SymbolId> {
+        // Step 1: Try to enhance the import path using project rules (tsconfig paths)
+        let enhanced_path = if let Some(rules) = self.load_project_rules_for_file(import.file_id) {
+            // Create an enhancer to transform the path
+            let enhancer = super::resolution::TypeScriptProjectEnhancer::new(rules);
+            use crate::parsing::resolution::ProjectResolutionEnhancer;
+            enhancer
+                .enhance_import_path(&import.path, import.file_id)
+                .unwrap_or_else(|| import.path.clone())
+        } else {
+            import.path.clone()
+        };
+
         // Prefer resolving by the imported local name when available (named/default imports)
         let importing_module = self
             .get_module_path_for_file(import.file_id)
@@ -545,7 +608,7 @@ impl LanguageBehavior for TypeScriptBehavior {
             }
         }
 
-        let target_module = normalize_ts_import(&import.path, &importing_module);
+        let target_module = normalize_ts_import(&enhanced_path, &importing_module);
 
         if let Some(local_name) = &import.alias {
             if let Ok(cands) = document_index.find_symbols_by_name(local_name, None) {

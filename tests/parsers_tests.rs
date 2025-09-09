@@ -1,0 +1,14 @@
+// Gateway file to expose parser tests from the parsers/ subdirectory
+// This file allows Rust's test runner to discover tests in subdirectories
+
+// Re-export the parser test modules
+// Each test file in parsers/ needs to be included here
+
+#[path = "parsers/typescript/test_resolution_pipeline.rs"]
+mod test_typescript_resolution_pipeline;
+
+#[path = "parsers/c/test_resolution.rs"]
+mod test_c_resolution;
+
+#[path = "parsers/cpp/test_resolution.rs"]
+mod test_cpp_resolution;

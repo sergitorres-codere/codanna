@@ -23,7 +23,9 @@
 //! - Full namespace resolution implementation
 //! - Type/value space population from parser
 
+use crate::parsing::resolution::ProjectResolutionEnhancer;
 use crate::parsing::{InheritanceResolver, ResolutionScope, ScopeLevel, ScopeType};
+use crate::project_resolver::persist::ResolutionRules;
 use crate::{FileId, SymbolId};
 use std::collections::HashMap;
 
@@ -647,6 +649,75 @@ impl TypeScriptInheritanceResolver {
         }
 
         interfaces
+    }
+}
+
+/// TypeScript project resolution enhancer
+///
+/// Applies tsconfig.json path mappings to transform import paths
+pub struct TypeScriptProjectEnhancer {
+    /// Compiled path alias resolver (built from the resolution rules)
+    resolver: Option<crate::parsing::typescript::tsconfig::PathAliasResolver>,
+}
+
+impl TypeScriptProjectEnhancer {
+    /// Create a new enhancer from resolution rules
+    pub fn new(rules: ResolutionRules) -> Self {
+        // Build the PathAliasResolver from rules
+        let resolver = if !rules.paths.is_empty() || rules.base_url.is_some() {
+            // Create a minimal TsConfig to use from_tsconfig
+            let config = crate::parsing::typescript::tsconfig::TsConfig {
+                extends: None,
+                compilerOptions: crate::parsing::typescript::tsconfig::CompilerOptions {
+                    baseUrl: rules.base_url.clone(),
+                    paths: rules.paths.clone(),
+                },
+            };
+
+            // Use from_tsconfig to create the resolver
+            crate::parsing::typescript::tsconfig::PathAliasResolver::from_tsconfig(&config).ok()
+        } else {
+            None
+        };
+
+        Self { resolver }
+    }
+}
+
+impl ProjectResolutionEnhancer for TypeScriptProjectEnhancer {
+    fn enhance_import_path(&self, import_path: &str, _from_file: FileId) -> Option<String> {
+        // Skip relative imports - they don't need enhancement
+        if import_path.starts_with("./") || import_path.starts_with("../") {
+            return None;
+        }
+
+        // Use the resolver to transform the path
+        if let Some(ref resolver) = self.resolver {
+            // Get candidates and return the first one
+            let candidates = resolver.resolve_import(import_path);
+            candidates.into_iter().next()
+        } else {
+            None
+        }
+    }
+
+    fn get_import_candidates(&self, import_path: &str, _from_file: FileId) -> Vec<String> {
+        // Skip relative imports
+        if import_path.starts_with("./") || import_path.starts_with("../") {
+            return vec![import_path.to_string()];
+        }
+
+        // Use the resolver to get all candidates
+        if let Some(ref resolver) = self.resolver {
+            let candidates = resolver.resolve_import(import_path);
+            if !candidates.is_empty() {
+                candidates
+            } else {
+                vec![import_path.to_string()]
+            }
+        } else {
+            vec![import_path.to_string()]
+        }
     }
 }
 

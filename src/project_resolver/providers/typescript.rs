@@ -7,8 +7,6 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::config::Settings;
-use crate::indexing::SimpleIndexer;
-use crate::parsing::typescript::tsconfig::read_tsconfig;
 use crate::project_resolver::{
     ResolutionResult, Sha256Hash,
     memo::ResolutionMemo,
@@ -150,8 +148,12 @@ impl ProjectResolutionProvider for TypeScriptProvider {
 
                 // Check if rebuild needed
                 if index.needs_rebuild(config_path, &sha) {
-                    // Parse tsconfig to extract resolution rules
-                    let tsconfig = read_tsconfig(config_path)?;
+                    // Parse tsconfig and resolve extends chain to get effective config
+                    let mut visited = std::collections::HashSet::new();
+                    let tsconfig = crate::parsing::typescript::tsconfig::resolve_extends_chain(
+                        config_path,
+                        &mut visited,
+                    )?;
 
                     // Update index with new SHA
                     index.update_sha(config_path, &sha);
@@ -182,7 +184,7 @@ impl ProjectResolutionProvider for TypeScriptProvider {
         Ok(())
     }
 
-    fn select_affected_files(&self, _indexer: &SimpleIndexer, settings: &Settings) -> Vec<PathBuf> {
+    fn select_affected_files(&self, settings: &Settings) -> Vec<PathBuf> {
         // Sprint 1: Basic file selection based on config presence
         // Future: Implement longest-prefix matching logic
 
@@ -358,13 +360,12 @@ mod tests {
     #[test]
     fn select_affected_files_returns_reasonable_defaults() {
         let provider = TypeScriptProvider::new();
-        let indexer = SimpleIndexer::default();
         let settings = create_test_settings_with_ts_config(vec![
             PathBuf::from("tsconfig.json"),
             PathBuf::from("packages/web/tsconfig.json"),
         ]);
 
-        let affected = provider.select_affected_files(&indexer, &settings);
+        let affected = provider.select_affected_files(&settings);
 
         assert!(!affected.is_empty(), "Should return some affected files");
         assert!(

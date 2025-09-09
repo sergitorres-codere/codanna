@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use super::{ResolutionResult, Sha256Hash};
-use crate::{config::Settings, indexing::SimpleIndexer};
+use crate::config::Settings;
 
 /// Core trait implemented by language-specific project configuration providers.
 ///
@@ -29,5 +29,5 @@ pub trait ProjectResolutionProvider: Send + Sync {
     fn rebuild_cache(&self, settings: &Settings) -> ResolutionResult<()>;
 
     /// Select files affected by configuration changes
-    fn select_affected_files(&self, indexer: &SimpleIndexer, settings: &Settings) -> Vec<PathBuf>;
+    fn select_affected_files(&self, settings: &Settings) -> Vec<PathBuf>;
 }
