@@ -3,7 +3,7 @@
 ## Statistics
 - Total nodes in grammar JSON: 183
 - Nodes found in comprehensive.ts: 193
-- Nodes handled by parser: 122
+- Nodes handled by parser: 123
 - Symbol kinds extracted: 9
 
 ## ✅ Successfully Handled Nodes
@@ -124,6 +124,7 @@ These nodes are in examples and handled by parser:
 - typeof
 - unary_expression
 - update_expression
+- void
 - while
 - while_statement
 - yield
@@ -202,7 +203,6 @@ These nodes appear in comprehensive.ts but aren't handled:
 - union_type
 - unknown
 - variable_declarator
-- void
 - |
 
 ## 📝 Missing from Examples

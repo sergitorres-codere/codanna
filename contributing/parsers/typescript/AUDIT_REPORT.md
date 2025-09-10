@@ -2,7 +2,7 @@
 
 ## Summary
 - Nodes in file: 193
-- Nodes handled by parser: 122
+- Nodes handled by parser: 123
 - Symbol kinds extracted: 9
 
 ## Coverage Table

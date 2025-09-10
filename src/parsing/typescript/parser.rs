@@ -510,13 +510,6 @@ impl TypeScriptParser {
                 if let Some(name_node) = child.child_by_field_name("name") {
                     if name_node.kind() == "identifier" {
                         let name = &code[name_node.byte_range()];
-                        let kind = if code[node.byte_range()].starts_with("const") {
-                            SymbolKind::Constant
-                        } else {
-                            SymbolKind::Variable
-                        };
-
-                        let visibility = self.determine_visibility(node, code);
 
                         // Check if this is an arrow function assignment
                         let is_arrow_function =
@@ -525,6 +518,20 @@ impl TypeScriptParser {
                             } else {
                                 false
                             };
+
+                        // Determine the kind based on whether it's a function or regular variable
+                        let kind = if is_arrow_function {
+                            SymbolKind::Function
+                        } else if code[node.byte_range()].starts_with("const") {
+                            SymbolKind::Constant
+                        } else {
+                            SymbolKind::Variable
+                        };
+
+                        let visibility = self.determine_visibility(node, code);
+
+                        // Extract JSDoc comment for const declarations
+                        let doc_comment = self.extract_doc_comment(&node, code);
 
                         let mut symbol = self.create_symbol(
                             counter.next_id(),
@@ -538,7 +545,7 @@ impl TypeScriptParser {
                                 child.end_position().column as u16,
                             ),
                             None,
-                            None,
+                            doc_comment,
                             module_path,
                             visibility,
                         );
@@ -649,6 +656,7 @@ impl TypeScriptParser {
         let name = &code[name_node.byte_range()];
 
         let visibility = self.determine_method_visibility(node, code);
+        let doc_comment = self.extract_doc_comment(&node, code);
 
         Some(self.create_symbol(
             counter.next_id(),
@@ -662,7 +670,7 @@ impl TypeScriptParser {
                 node.end_position().column as u16,
             ),
             None,
-            None,
+            doc_comment,
             module_path,
             visibility,
         ))
@@ -1230,7 +1238,41 @@ impl TypeScriptParser {
             if let Some(name_node) = node.child_by_field_name("name") {
                 Some(&code[name_node.byte_range()])
             } else {
-                // Arrow functions might not have a name, check parent
+                // Arrow functions might not have a name, check parent for variable declaration
+                // Handle case: const ComponentName = () => { ... }
+                if node.kind() == "arrow_function" {
+                    if let Some(parent) = node.parent() {
+                        if parent.kind() == "variable_declarator" {
+                            // Get the name from the variable declarator
+                            if let Some(name_node) = parent.child_by_field_name("name") {
+                                Some(&code[name_node.byte_range()])
+                            } else {
+                                current_function
+                            }
+                        } else {
+                            current_function
+                        }
+                    } else {
+                        current_function
+                    }
+                } else {
+                    current_function
+                }
+            }
+        } else if node.kind() == "variable_declarator" {
+            // Check if this variable contains an arrow function or function expression
+            if let Some(init) = node.child_by_field_name("value") {
+                if init.kind() == "arrow_function" || init.kind() == "function_expression" {
+                    // Get the variable name to use as function context
+                    if let Some(name_node) = node.child_by_field_name("name") {
+                        Some(&code[name_node.byte_range()])
+                    } else {
+                        current_function
+                    }
+                } else {
+                    current_function
+                }
+            } else {
                 current_function
             }
         } else {
@@ -1239,20 +1281,17 @@ impl TypeScriptParser {
 
         // Check if this is a call expression
         if node.kind() == "call_expression" {
-            // Skip if it's a method call (handled by find_method_calls)
             if let Some(function_node) = node.child_by_field_name("function") {
-                if function_node.kind() != "member_expression" {
-                    // It's a regular function call
-                    if let Some(fn_name) = Self::extract_function_name(&function_node, code) {
-                        if let Some(context) = function_context {
-                            let range = Range {
-                                start_line: (node.start_position().row + 1) as u32,
-                                start_column: node.start_position().column as u16,
-                                end_line: (node.end_position().row + 1) as u32,
-                                end_column: node.end_position().column as u16,
-                            };
-                            calls.push((context, fn_name, range));
-                        }
+                // Extract function name for all types of calls (including member expressions like console.log)
+                if let Some(fn_name) = Self::extract_function_name(&function_node, code) {
+                    if let Some(context) = function_context {
+                        let range = Range {
+                            start_line: (node.start_position().row + 1) as u32,
+                            start_column: node.start_position().column as u16,
+                            end_line: (node.end_position().row + 1) as u32,
+                            end_column: node.end_position().column as u16,
+                        };
+                        calls.push((context, fn_name, range));
                     }
                 }
             }
@@ -1804,6 +1843,10 @@ impl TypeScriptParser {
     fn extract_function_name<'a>(node: &tree_sitter::Node, code: &'a str) -> Option<&'a str> {
         match node.kind() {
             "identifier" => Some(&code[node.byte_range()]),
+            "member_expression" => {
+                // For member expressions like console.log, return the full dotted name
+                Some(&code[node.byte_range()])
+            }
             "await_expression" => {
                 // Handle await foo()
                 if let Some(expr) = node.child_by_field_name("expression") {
