@@ -40,12 +40,12 @@ use crate::{IndexPersistence, Settings, SimpleIndexer, Symbol};
 
 /// Format a Unix timestamp as relative time (e.g., "2 hours ago")
 pub fn format_relative_time(timestamp: u64) -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
+    use chrono::{DateTime, Utc};
 
-    let diff = now.saturating_sub(timestamp);
+    let now = Utc::now();
+    let then = DateTime::from_timestamp(timestamp as i64, 0).unwrap_or_else(Utc::now);
+
+    let diff = (now.timestamp() - then.timestamp()) as u64;
 
     if diff < 60 {
         "just now".to_string()
@@ -59,12 +59,8 @@ pub fn format_relative_time(timestamp: u64) -> String {
         let days = diff / 86400;
         format!("{} day{} ago", days, if days == 1 { "" } else { "s" })
     } else {
-        // For older dates, show the actual date
-        // This is a simple approximation
-        let date = std::time::UNIX_EPOCH + std::time::Duration::from_secs(timestamp);
-        format!("{date:?}")
-            .replace("SystemTime { tv_sec: ", "")
-            .replace(", tv_nsec: 0 }", "")
+        // For older dates, show the actual formatted date
+        then.format("%Y-%m-%d").to_string()
     }
 }
 

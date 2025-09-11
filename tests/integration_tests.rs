@@ -9,3 +9,6 @@ mod test_mcp_schema;
 
 #[path = "integration/embedding_model_comparison.rs"]
 mod embedding_model_comparison;
+
+#[path = "integration/test_resolution_persistence.rs"]
+mod test_resolution_persistence;

@@ -112,7 +112,9 @@ impl TypeScriptParser {
     ) {
         match node.kind() {
             "function_declaration" => {
-                self.register_handled_node(node.kind(), node.kind_id());
+                // Register ALL child nodes for audit (including type_parameters, parameters, etc.)
+                self.register_node_recursively(node);
+
                 // Extract function name for parent tracking
                 let func_name = node
                     .child_by_field_name("name")
@@ -133,18 +135,20 @@ impl TypeScriptParser {
                 // Set current function for parent tracking BEFORE processing children
                 self.context.set_current_function(func_name.clone());
 
-                // Process children for nested functions/classes
-                for child in node.children(&mut node.walk()) {
-                    if child.kind() != "identifier" && child.kind() != "formal_parameters" {
-                        self.extract_symbols_from_node(
-                            child,
-                            code,
-                            file_id,
-                            counter,
-                            symbols,
-                            module_path,
-                        );
-                    }
+                // Process function body for nested symbols
+                if let Some(body) = node.child_by_field_name("body") {
+                    // Register the body node for audit tracking
+                    self.register_handled_node(body.kind(), body.kind_id());
+                    // Process the body using the standard extraction
+                    // This ensures all nodes are properly registered
+                    self.extract_symbols_from_node(
+                        body,
+                        code,
+                        file_id,
+                        counter,
+                        symbols,
+                        module_path,
+                    );
                 }
 
                 // Exit scope first (this clears the current context)
@@ -155,7 +159,8 @@ impl TypeScriptParser {
                 self.context.set_current_class(saved_class);
             }
             "class_declaration" | "abstract_class_declaration" => {
-                self.register_handled_node(node.kind(), node.kind_id());
+                // Register ALL child nodes for audit
+                self.register_node_recursively(node);
                 // Extract class name for parent tracking
                 let class_name = node
                     .children(&mut node.walk())
@@ -187,7 +192,8 @@ impl TypeScriptParser {
                 }
             }
             "interface_declaration" => {
-                self.register_handled_node(node.kind(), node.kind_id());
+                // Register ALL child nodes for audit
+                self.register_node_recursively(node);
                 if let Some(symbol) =
                     self.process_interface(node, code, file_id, counter, module_path)
                 {
@@ -195,7 +201,8 @@ impl TypeScriptParser {
                 }
             }
             "type_alias_declaration" => {
-                self.register_handled_node(node.kind(), node.kind_id());
+                // Register ALL child nodes for audit
+                self.register_node_recursively(node);
                 if let Some(symbol) =
                     self.process_type_alias(node, code, file_id, counter, module_path)
                 {
@@ -203,7 +210,8 @@ impl TypeScriptParser {
                 }
             }
             "enum_declaration" => {
-                self.register_handled_node(node.kind(), node.kind_id());
+                // Register ALL child nodes for audit
+                self.register_node_recursively(node);
                 if let Some(symbol) = self.process_enum(node, code, file_id, counter, module_path) {
                     symbols.push(symbol);
                 }
@@ -358,16 +366,17 @@ impl TypeScriptParser {
                             // Set current function to the method name
                             self.context.set_current_function(method_name.clone());
 
-                            for body_child in body.children(&mut body.walk()) {
-                                self.extract_symbols_from_node(
-                                    body_child,
-                                    code,
-                                    file_id,
-                                    counter,
-                                    symbols,
-                                    module_path,
-                                );
-                            }
+                            // Register the body node for audit tracking
+                            self.register_handled_node(body.kind(), body.kind_id());
+                            // Process the body using standard extraction
+                            self.extract_symbols_from_node(
+                                body,
+                                code,
+                                file_id,
+                                counter,
+                                symbols,
+                                module_path,
+                            );
 
                             // Exit scope first (this clears the current context)
                             self.context.exit_scope();
@@ -589,6 +598,42 @@ impl TypeScriptParser {
                         }
 
                         symbols.push(symbol);
+
+                        // CRITICAL FIX: Process arrow function body for nested symbols
+                        if is_arrow_function {
+                            if let Some(value_node) = child.child_by_field_name("value") {
+                                if value_node.kind() == "arrow_function" {
+                                    if let Some(body) = value_node.child_by_field_name("body") {
+                                        // Save current context
+                                        let saved_function =
+                                            self.context.current_function().map(|s| s.to_string());
+                                        let saved_class =
+                                            self.context.current_class().map(|s| s.to_string());
+
+                                        // Enter function scope for the arrow function
+                                        self.context.enter_scope(ScopeType::function());
+                                        self.context.set_current_function(Some(name.to_string()));
+
+                                        // Register the body node for audit tracking
+                                        self.register_handled_node(body.kind(), body.kind_id());
+                                        // Process the body using standard extraction
+                                        self.extract_symbols_from_node(
+                                            body,
+                                            code,
+                                            file_id,
+                                            counter,
+                                            symbols,
+                                            module_path,
+                                        );
+
+                                        // Exit scope and restore context
+                                        self.context.exit_scope();
+                                        self.context.set_current_function(saved_function);
+                                        self.context.set_current_class(saved_class);
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -1863,6 +1908,16 @@ impl TypeScriptParser {
                 }
             }
             _ => None,
+        }
+    }
+
+    /// Recursively register all nodes for audit tracking
+    /// This is separate from symbol extraction - it just ensures all nodes are counted
+    fn register_node_recursively(&mut self, node: Node) {
+        self.register_handled_node(node.kind(), node.kind_id());
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            self.register_node_recursively(child);
         }
     }
 }

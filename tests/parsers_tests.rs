@@ -7,6 +7,12 @@
 #[path = "parsers/typescript/test_resolution_pipeline.rs"]
 mod test_typescript_resolution_pipeline;
 
+#[path = "parsers/typescript/test_call_tracking.rs"]
+mod test_typescript_call_tracking;
+
+#[path = "parsers/typescript/test_nested_functions.rs"]
+mod test_typescript_nested_functions;
+
 #[path = "parsers/c/test_resolution.rs"]
 mod test_c_resolution;
 

@@ -4,9 +4,9 @@
 //! efficient incremental updates.
 
 use crate::FileId;
+use chrono::Utc;
 use sha2::{Digest, Sha256};
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Information about an indexed file
 #[derive(Debug, Clone)]
@@ -47,10 +47,8 @@ pub fn calculate_hash(content: &str) -> String {
 
 /// Get current UTC timestamp in seconds since UNIX_EPOCH
 pub fn get_utc_timestamp() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("System time before UNIX_EPOCH")
-        .as_secs()
+    // Use chrono for accurate cross-platform timestamp
+    Utc::now().timestamp() as u64
 }
 
 #[cfg(test)]

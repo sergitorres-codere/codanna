@@ -17,6 +17,8 @@ mod abi15_exploration_common;
 
 #[cfg(test)]
 mod tests {
+    // Import the timestamp utility from the main codebase
+    use codanna::io::format::format_utc_timestamp as get_formatted_timestamp;
     use codanna::parsing::{
         c::audit::CParserAudit, cpp::audit::CppParserAudit, go::audit::GoParserAudit,
         php::audit::PhpParserAudit, python::audit::PythonParserAudit, rust::audit::RustParserAudit,
@@ -73,6 +75,7 @@ mod tests {
         // 3. Generate comprehensive analysis comparing all three sources
         let mut analysis = String::new();
         analysis.push_str("# PHP Grammar Analysis\n\n");
+        analysis.push_str(&format!("*Generated: {}*\n\n", get_formatted_timestamp()));
         analysis.push_str("## Statistics\n");
         analysis.push_str(&format!(
             "- Total nodes in grammar JSON: {}\n",
@@ -149,6 +152,14 @@ mod tests {
         fs::write("contributing/parsers/php/GRAMMAR_ANALYSIS.md", &analysis)
             .expect("Failed to write PHP grammar analysis");
 
+        // Also generate node_discovery.txt
+        let node_discovery = generate_php_node_discovery();
+        fs::write(
+            "contributing/parsers/php/node_discovery.txt",
+            node_discovery,
+        )
+        .expect("Failed to write PHP node discovery");
+
         println!("📄 PHP Analysis:");
         println!("  - Grammar nodes: {}", all_grammar_nodes.len());
         println!("  - Example nodes: {}", example_nodes.len());
@@ -158,6 +169,7 @@ mod tests {
             "  - Coverage: {:.1}%",
             audit.implemented_nodes.len() as f32 / example_nodes.len() as f32 * 100.0
         );
+        println!("✅ PHP node_discovery.txt saved");
     }
 
     #[test]
@@ -206,6 +218,7 @@ mod tests {
         // 3. Generate comprehensive analysis comparing all three sources
         let mut analysis = String::new();
         analysis.push_str("# Go Grammar Analysis\n\n");
+        analysis.push_str(&format!("*Generated: {}*\n\n", get_formatted_timestamp()));
         analysis.push_str("## Statistics\n");
         analysis.push_str(&format!(
             "- Total nodes in grammar JSON: {}\n",
@@ -282,6 +295,11 @@ mod tests {
         fs::write("contributing/parsers/go/GRAMMAR_ANALYSIS.md", &analysis)
             .expect("Failed to write Go grammar analysis");
 
+        // Also generate node_discovery.txt
+        let node_discovery = generate_go_node_discovery();
+        fs::write("contributing/parsers/go/node_discovery.txt", node_discovery)
+            .expect("Failed to write Go node discovery");
+
         println!("📄 Go Analysis:");
         println!("  - Grammar nodes: {}", all_grammar_nodes.len());
         println!("  - Example nodes: {}", example_nodes.len());
@@ -291,6 +309,7 @@ mod tests {
             "  - Coverage: {:.1}%",
             audit.implemented_nodes.len() as f32 / example_nodes.len() as f32 * 100.0
         );
+        println!("✅ Go node_discovery.txt saved");
     }
 
     #[test]
@@ -340,6 +359,7 @@ mod tests {
         // 3. Generate comprehensive analysis comparing all three sources
         let mut analysis = String::new();
         analysis.push_str("# Python Grammar Analysis\n\n");
+        analysis.push_str(&format!("*Generated: {}*\n\n", get_formatted_timestamp()));
         analysis.push_str("## Statistics\n");
         analysis.push_str(&format!(
             "- Total nodes in grammar JSON: {}\n",
@@ -416,6 +436,14 @@ mod tests {
         fs::write("contributing/parsers/python/GRAMMAR_ANALYSIS.md", &analysis)
             .expect("Failed to write Python grammar analysis");
 
+        // Also generate node_discovery.txt
+        let node_discovery = generate_python_node_discovery();
+        fs::write(
+            "contributing/parsers/python/node_discovery.txt",
+            node_discovery,
+        )
+        .expect("Failed to write Python node discovery");
+
         println!("📄 Python Analysis:");
         println!("  - Grammar nodes: {}", all_grammar_nodes.len());
         println!("  - Example nodes: {}", example_nodes.len());
@@ -425,6 +453,7 @@ mod tests {
             "  - Coverage: {:.1}%",
             audit.implemented_nodes.len() as f32 / example_nodes.len() as f32 * 100.0
         );
+        println!("✅ Python node_discovery.txt saved");
     }
 
     #[test]
@@ -473,6 +502,7 @@ mod tests {
         // 3. Generate comprehensive analysis comparing all three sources
         let mut analysis = String::new();
         analysis.push_str("# Rust Grammar Analysis\n\n");
+        analysis.push_str(&format!("*Generated: {}*\n\n", get_formatted_timestamp()));
         analysis.push_str("## Statistics\n");
         analysis.push_str(&format!(
             "- Total nodes in grammar JSON: {}\n",
@@ -549,6 +579,14 @@ mod tests {
         fs::write("contributing/parsers/rust/GRAMMAR_ANALYSIS.md", &analysis)
             .expect("Failed to write Rust grammar analysis");
 
+        // Also generate node_discovery.txt
+        let node_discovery = generate_rust_node_discovery();
+        fs::write(
+            "contributing/parsers/rust/node_discovery.txt",
+            node_discovery,
+        )
+        .expect("Failed to write Rust node discovery");
+
         println!("📄 Rust Analysis:");
         println!("  - Grammar nodes: {}", all_grammar_nodes.len());
         println!("  - Example nodes: {}", example_nodes.len());
@@ -558,6 +596,7 @@ mod tests {
             "  - Coverage: {:.1}%",
             audit.implemented_nodes.len() as f32 / example_nodes.len() as f32 * 100.0
         );
+        println!("✅ Rust node_discovery.txt saved");
     }
 
     #[test]
@@ -608,6 +647,7 @@ mod tests {
         // 3. Generate comprehensive analysis comparing all three sources
         let mut analysis = String::new();
         analysis.push_str("# TypeScript Grammar Analysis\n\n");
+        analysis.push_str(&format!("*Generated: {}*\n\n", get_formatted_timestamp()));
         analysis.push_str("## Statistics\n");
         analysis.push_str(&format!(
             "- Total nodes in grammar JSON: {}\n",
@@ -687,6 +727,14 @@ mod tests {
         )
         .expect("Failed to write TypeScript grammar analysis");
 
+        // Also generate node_discovery.txt
+        let node_discovery = generate_typescript_node_discovery();
+        fs::write(
+            "contributing/parsers/typescript/node_discovery.txt",
+            node_discovery,
+        )
+        .expect("Failed to write TypeScript node discovery");
+
         println!("📄 TypeScript Analysis:");
         println!("  - Grammar nodes: {}", all_grammar_nodes.len());
         println!("  - Example nodes: {}", example_nodes.len());
@@ -696,6 +744,7 @@ mod tests {
             "  - Coverage: {:.1}%",
             audit.implemented_nodes.len() as f32 / example_nodes.len() as f32 * 100.0
         );
+        println!("✅ TypeScript node_discovery.txt saved");
     }
 
     #[test]
@@ -744,6 +793,7 @@ mod tests {
         // 3. Generate comprehensive analysis comparing all three sources
         let mut analysis = String::new();
         analysis.push_str("# C Grammar Analysis\n\n");
+        analysis.push_str(&format!("*Generated: {}*\n\n", get_formatted_timestamp()));
         analysis.push_str("## Statistics\n");
         analysis.push_str(&format!(
             "- Total nodes in grammar JSON: {}\n",
@@ -820,6 +870,11 @@ mod tests {
         fs::write("contributing/parsers/c/GRAMMAR_ANALYSIS.md", &analysis)
             .expect("Failed to write C grammar analysis");
 
+        // Also generate node_discovery.txt
+        let node_discovery = generate_c_node_discovery();
+        fs::write("contributing/parsers/c/node_discovery.txt", node_discovery)
+            .expect("Failed to write C node discovery");
+
         println!("📄 C Analysis:");
         println!("  - Grammar nodes: {}", all_grammar_nodes.len());
         println!("  - Example nodes: {}", example_nodes.len());
@@ -829,6 +884,7 @@ mod tests {
             "  - Coverage: {:.1}%",
             audit.implemented_nodes.len() as f32 / example_nodes.len() as f32 * 100.0
         );
+        println!("✅ C node_discovery.txt saved");
     }
 
     #[test]
@@ -877,6 +933,7 @@ mod tests {
         // 3. Generate comprehensive analysis comparing all three sources
         let mut analysis = String::new();
         analysis.push_str("# C++ Grammar Analysis\n\n");
+        analysis.push_str(&format!("*Generated: {}*\n\n", get_formatted_timestamp()));
         analysis.push_str("## Statistics\n");
         analysis.push_str(&format!(
             "- Total nodes in grammar JSON: {}\n",
@@ -953,6 +1010,14 @@ mod tests {
         fs::write("contributing/parsers/cpp/GRAMMAR_ANALYSIS.md", &analysis)
             .expect("Failed to write C++ grammar analysis");
 
+        // Also generate node_discovery.txt
+        let node_discovery = generate_cpp_node_discovery();
+        fs::write(
+            "contributing/parsers/cpp/node_discovery.txt",
+            node_discovery,
+        )
+        .expect("Failed to write C++ node discovery");
+
         println!("📄 C++ Analysis:");
         println!("  - Grammar nodes: {}", all_grammar_nodes.len());
         println!("  - Example nodes: {}", example_nodes.len());
@@ -962,6 +1027,7 @@ mod tests {
             "  - Coverage: {:.1}%",
             audit.implemented_nodes.len() as f32 / example_nodes.len() as f32 * 100.0
         );
+        println!("✅ C++ node_discovery.txt saved");
     }
 
     #[test]
@@ -1203,6 +1269,7 @@ mod tests {
 
         let mut output = String::new();
         output.push_str("=== Go Language ABI-15 COMPREHENSIVE NODE MAPPING ===\n");
+        output.push_str(&format!("  Generated: {}\n", get_formatted_timestamp()));
 
         let language: Language = tree_sitter_go::LANGUAGE.into();
         output.push_str(&format!("  ABI Version: {}\n", language.abi_version()));
@@ -1378,6 +1445,7 @@ mod tests {
 
         let mut output = String::new();
         output.push_str("=== Python Language ABI-15 COMPREHENSIVE NODE MAPPING ===\n");
+        output.push_str(&format!("  Generated: {}\n", get_formatted_timestamp()));
 
         let language: Language = tree_sitter_python::LANGUAGE.into();
         output.push_str(&format!("  ABI Version: {}\n", language.abi_version()));
@@ -1555,6 +1623,7 @@ mod tests {
 
         let mut output = String::new();
         output.push_str("=== Rust Language ABI-15 COMPREHENSIVE NODE MAPPING ===\n");
+        output.push_str(&format!("  Generated: {}\n", get_formatted_timestamp()));
 
         let language: Language = tree_sitter_rust::LANGUAGE.into();
         output.push_str(&format!("  ABI Version: {}\n", language.abi_version()));
@@ -1752,6 +1821,7 @@ mod tests {
 
         let mut output = String::new();
         output.push_str("=== TypeScript Language ABI-15 COMPREHENSIVE NODE MAPPING ===\n");
+        output.push_str(&format!("  Generated: {}\n", get_formatted_timestamp()));
 
         let language: Language = tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into();
         output.push_str(&format!("  ABI Version: {}\n", language.abi_version()));
@@ -2153,6 +2223,7 @@ mod tests {
 
         let mut output = String::new();
         output.push_str("=== C Language ABI-15 COMPREHENSIVE NODE MAPPING ===\n");
+        output.push_str(&format!("  Generated: {}\n", get_formatted_timestamp()));
 
         let language: Language = tree_sitter_c::LANGUAGE.into();
         output.push_str(&format!("  ABI Version: {}\n", language.abi_version()));
@@ -2425,6 +2496,7 @@ mod tests {
 
         let mut output = String::new();
         output.push_str("=== C++ Language ABI-15 COMPREHENSIVE NODE MAPPING ===\n");
+        output.push_str(&format!("  Generated: {}\n", get_formatted_timestamp()));
 
         let language: Language = tree_sitter_cpp::LANGUAGE.into();
         output.push_str(&format!("  ABI Version: {}\n", language.abi_version()));
