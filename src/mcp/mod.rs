@@ -1157,6 +1157,9 @@ impl ServerHandler for CodeIntelligenceServer {
             server_info: Implementation {
                 name: "codanna".to_string(),
                 version: env!("CARGO_PKG_VERSION").to_string(),
+                title: Some("Codanna Code Intelligence".to_string()),
+                website_url: Some("https://github.com/bartolli/codanna".to_string()),
+                icons: None,
             },
             instructions: Some(
                 "This server provides code intelligence tools for analyzing Rust codebases. \

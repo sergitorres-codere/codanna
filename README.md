@@ -333,6 +333,7 @@ All retrieve commands support `--json` flag for structured output (exit code 3 w
 | `codanna mcp-test` | Verify Claude can connect and list available tools | `codanna mcp-test` |
 | `codanna mcp <TOOL>` | Execute MCP tools without spawning server | `codanna mcp find_symbol main --json` |
 | `codanna benchmark` | Benchmark parser performance | `codanna benchmark rust --file my_code.rs` |
+| `codanna parse` | Parse file and output AST as JSON Lines | `codanna parse file.rs --all-nodes` |
 
 #### Common Flags
 
@@ -463,7 +464,7 @@ sudo dnf install pkgconfig openssl-devel
 
 ## Roadmap
 
-### Current Release: v0.5.9
+### Current Release: v0.5.10
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed release notes and feature history.
 

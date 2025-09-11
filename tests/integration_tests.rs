@@ -12,3 +12,6 @@ mod embedding_model_comparison;
 
 #[path = "integration/test_resolution_persistence.rs"]
 mod test_resolution_persistence;
+
+#[path = "integration/test_parse_command.rs"]
+mod test_parse_command;

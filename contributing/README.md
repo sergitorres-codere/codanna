@@ -9,7 +9,7 @@ Thank you for your interest in contributing to Codanna! This guide focuses on th
 - **[Development Setup](#development-setup)** - Local environment setup
 - **[Testing Workflow](#testing-your-changes)** - Pre-commit and CI/CD scripts
 
-## Current Status (v0.5.8)
+## Current Status
 
 See [CHANGELOG.md](../CHANGELOG.md) for detailed release notes and feature history.
 
@@ -79,6 +79,81 @@ codanna/
 │   └── mcp/            # MCP server and HTTP/HTTPS endpoints
 ├── contributing/        # Development tools and documentation
 └── tests/              # Language parser and integration tests
+```
+
+## Development Tools
+
+### Parse Command
+
+The `codanna parse` command is essential for parser development and debugging:
+
+```bash
+# Parse a file and output AST nodes in JSONL format
+codanna parse file.rs                      # Named nodes only (like tree-sitter)
+codanna parse file.rs --all-nodes          # Include all nodes (punctuation, keywords)
+codanna parse file.rs --max-depth 3        # Limit traversal depth
+codanna parse file.rs -o ast.jsonl         # Output to file
+
+# Analyze AST structure
+codanna parse file.rs | jq -r .node | sort -u     # List unique node types
+codanna parse file.rs | jq 'select(.depth == 1)'  # Show top-level nodes
+codanna parse file.rs | jq 'select(.node == "function_item")'  # Find specific nodes
+```
+
+**Key Features:**
+- **Default behavior matches tree-sitter CLI** - Shows only named nodes for direct comparison
+- **`--all-nodes` flag** - Shows complete AST including anonymous nodes (operators, punctuation)
+- **JSONL format** - One JSON object per line, perfect for streaming and Unix tools
+- **Hierarchy tracking** - Each node includes depth, parent ID, and unique ID
+- **Error codes** - Proper exit codes (3=NotFound, 4=ParseError, 8=UnsupportedLanguage)
+
+### Tree-sitter Integration Scripts
+
+Located in `contributing/tree-sitter/scripts/`:
+
+#### setup.sh
+Install tree-sitter grammars for testing:
+```bash
+./contributing/tree-sitter/scripts/setup.sh typescript  # Install specific grammar
+./contributing/tree-sitter/scripts/setup.sh            # Show installed grammars
+```
+
+#### compare-nodes.sh
+Compare codanna parser with tree-sitter (two modes):
+
+**Language mode** - Runs audit tests and generates reports:
+```bash
+./contributing/tree-sitter/scripts/compare-nodes.sh rust
+```
+This mode:
+- Runs `cargo test comprehensive_rust_analysis`
+- Generates audit reports in `contributing/parsers/rust/`:
+  - `AUDIT_REPORT.md` - Parser coverage analysis
+  - `GRAMMAR_ANALYSIS.md` - Node handling statistics
+- Compares comprehensive example files
+- Shows parser implementation gaps
+
+**File mode** - Compares any specific file:
+```bash
+./contributing/tree-sitter/scripts/compare-nodes.sh examples/rust/main.rs
+```
+This mode:
+- Uses `codanna parse` to analyze the file
+- Compares with tree-sitter output
+- Saves detailed comparison to `{filename}_comparison.log`
+- Shows matching statistics
+
+#### explore-ast.sh
+Quick AST exploration:
+```bash
+# Use codanna (default)
+./contributing/tree-sitter/scripts/explore-ast.sh file.rs
+
+# Use tree-sitter
+./contributing/tree-sitter/scripts/explore-ast.sh file.rs tree-sitter
+
+# Compare both
+./contributing/tree-sitter/scripts/explore-ast.sh file.rs both
 ```
 
 ## Testing Your Changes

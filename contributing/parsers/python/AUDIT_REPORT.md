@@ -1,6 +1,6 @@
 # Python Parser Symbol Extraction Coverage Report
 
-*Generated: 2025-09-11 15:39:19 UTC*
+*Generated: 2025-09-11 20:24:24 UTC*
 
 ## Summary
 - Nodes in file: 121
@@ -16,29 +16,29 @@
 
 | Node Type | ID | Status |
 |-----------|-----|--------|
-| class_definition | 155 | ✅ implemented |
-| function_definition | 146 | ✅ implemented |
-| decorated_definition | 159 | ✅ implemented |
-| assignment | 199 | ✅ implemented |
+| class_definition | 154 | ✅ implemented |
+| function_definition | 145 | ✅ implemented |
+| decorated_definition | 158 | ✅ implemented |
+| assignment | 198 | ✅ implemented |
 | augmented_assignment | - | ❌ not found |
 | annotated_assignment | - | ❌ not found |
-| typed_parameter | 208 | ✅ implemented |
-| typed_default_parameter | 183 | ✅ implemented |
-| parameters | 147 | ✅ implemented |
+| typed_parameter | 207 | ✅ implemented |
+| typed_default_parameter | 182 | ✅ implemented |
+| parameters | 146 | ✅ implemented |
 | import_statement | 111 | ✅ implemented |
 | import_from_statement | 115 | ✅ implemented |
 | aliased_import | - | ❌ not found |
 | lambda | 73 | ✅ implemented |
-| list_comprehension | 221 | ✅ implemented |
-| dictionary_comprehension | 222 | ✅ implemented |
-| set_comprehension | 223 | ✅ implemented |
-| generator_expression | 224 | ✅ implemented |
+| list_comprehension | 220 | ✅ implemented |
+| dictionary_comprehension | 221 | ✅ implemented |
+| set_comprehension | 222 | ✅ implemented |
+| generator_expression | 223 | ✅ implemented |
 | async_function_definition | - | ❌ not found |
 | async_for_statement | - | ❌ not found |
 | async_with_statement | - | ❌ not found |
-| decorator | 160 | ✅ implemented |
+| decorator | 159 | ✅ implemented |
 | type_alias_statement | - | ❌ not found |
-| type | 209 | ✅ implemented |
+| type | 208 | ✅ implemented |
 | global_statement | - | ❌ not found |
 | nonlocal_statement | - | ❌ not found |
 | with_statement | - | ❌ not found |
