@@ -11,6 +11,7 @@ use codanna::project_resolver::providers::typescript::TypeScriptProvider;
 use std::path::Path;
 
 #[test]
+#[ignore = "Requires local .codanna/settings.toml with TypeScript config_files and examples/typescript/ directory"]
 fn test_typescript_resolution_pipeline() {
     // Step 1: Load settings (which now has tsconfig paths configured)
     let settings = Settings::load().expect("Failed to load settings");
@@ -102,6 +103,7 @@ fn test_typescript_resolution_pipeline() {
 }
 
 #[test]
+#[ignore = "Requires local .codanna/settings.toml with TypeScript config_files and examples/typescript/ directory"]
 fn test_typescript_extends_chain() {
     // Test that the extends chain is properly resolved
     let settings = Settings::load().expect("Failed to load settings");
