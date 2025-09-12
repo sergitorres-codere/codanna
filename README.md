@@ -464,7 +464,7 @@ sudo dnf install pkgconfig openssl-devel
 
 ## Roadmap
 
-### Current Release: v0.5.11
+### Current Release: v0.5.12
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed release notes and feature history.
 
@@ -474,7 +474,6 @@ See [CHANGELOG.md](CHANGELOG.md) for detailed release notes and feature history.
 | JavaScript Support | Full JavaScript/ES6+ parser | ○ |
 | C# Support | C# with .NET ecosystem support | ○ |
 | Java Support | Java with class hierarchies | ○ |
-| C/C++ Support | C and C++ with headers and templates | ○ |
 | Direct Semantic Search | `retrieve semantic` command | ○ |
 | Batch Operations | Process multiple symbols in one call | ○ |
 | Configuration Profiles | Environment-specific settings | ○ |

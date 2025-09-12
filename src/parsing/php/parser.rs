@@ -140,7 +140,8 @@ impl PhpParser {
         let text_preview = if node.child_count() == 0 {
             let text = &code[node.byte_range()];
             if text.len() > 50 {
-                format!(" = '{}'...", &text[..50])
+                let truncated = crate::parsing::safe_truncate_str(text, 50);
+                format!(" = '{truncated}'...")
             } else {
                 format!(" = '{text}'")
             }
@@ -845,13 +846,8 @@ impl PhpParser {
             // Try to extract the value as a simple signature
             if let Some(right) = node.child_by_field_name("right") {
                 let value_preview = &code[right.byte_range()];
-                // Limit the signature to first 100 chars for readability
-                let truncated = if value_preview.len() > 100 {
-                    format!("{}...", &value_preview[..100])
-                } else {
-                    value_preview.to_string()
-                };
-                symbol.signature = Some(format!("${clean_name} = {truncated}").into());
+                // Store full signature for semantic quality
+                symbol.signature = Some(format!("${clean_name} = {value_preview}").into());
             }
 
             return Some(symbol);

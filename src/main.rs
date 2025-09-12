@@ -1845,7 +1845,13 @@ async fn main() {
                         }))
                         .await
                 }
-                "get_index_info" => server.get_index_info().await,
+                "get_index_info" => {
+                    use codanna::mcp::GetIndexInfoRequest;
+                    use rmcp::handler::server::wrapper::Parameters;
+                    server
+                        .get_index_info(Parameters(GetIndexInfoRequest {}))
+                        .await
+                }
                 "search_symbols" => {
                     let query = arguments
                         .as_ref()

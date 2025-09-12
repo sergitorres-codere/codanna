@@ -383,13 +383,8 @@ impl PythonParser {
             // Try to extract the value as a simple signature
             if let Some(right) = node.child_by_field_name("right") {
                 let value_preview = &code[right.byte_range()];
-                // Limit the signature to first 100 chars for readability
-                let truncated = if value_preview.len() > 100 {
-                    format!("{}...", &value_preview[..100])
-                } else {
-                    value_preview.to_string()
-                };
-                symbol.signature = Some(format!("{name} = {truncated}").into());
+                // Store full signature for semantic quality
+                symbol.signature = Some(format!("{name} = {value_preview}").into());
             }
 
             return Some(symbol);
@@ -2723,12 +2718,7 @@ class Outer:
         fn print_node_with_fields(node: tree_sitter::Node, code: &str, depth: usize) {
             let indent = "  ".repeat(depth);
             let text = &code[node.byte_range()];
-            let text_preview = if text.len() > 50 {
-                format!("{}...", &text[..50])
-            } else {
-                text.to_string()
-            }
-            .replace('\n', "\\n");
+            let text_preview = crate::parsing::truncate_for_display(text, 50).replace('\n', "\\n");
             println!(
                 "{}{} [{}] \"{}\"",
                 indent,

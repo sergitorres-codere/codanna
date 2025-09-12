@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.12] - 2025-09-12
+
+### Fixed
+- MCP server: Fixed tool discovery issue after rmcp 0.6.4 upgrade (fixes #31)
+  - Tools without parameters now generate proper `{"type": "object"}` schema
+- Parser safety: Fixed UTF-8 string truncation panic when encountering emojis or multi-byte characters (fixes #29)
+  - Added `safe_truncate_str` and `truncate_for_display` utilities that respect UTF-8 boundaries
+  - Applied fix to Python and PHP parsers where manual truncation was used
+  - Zero-cost implementation returning string slices without allocation
+
+### Improved
+- MCP server instructions: Updated workflow guidance to emphasize semantic search first approach for better code exploration
+
 ## [0.5.11] - 2025-09-11
 
 ### Added

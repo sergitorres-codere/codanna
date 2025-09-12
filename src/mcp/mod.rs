@@ -142,6 +142,9 @@ pub struct SemanticSearchWithContextRequest {
     pub lang: Option<String>,
 }
 
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
+pub struct GetIndexInfoRequest {}
+
 fn default_depth() -> u32 {
     3
 }
@@ -640,7 +643,10 @@ impl CodeIntelligenceServer {
     }
 
     #[tool(description = "Get information about the indexed codebase")]
-    pub async fn get_index_info(&self) -> Result<CallToolResult, McpError> {
+    pub async fn get_index_info(
+        &self,
+        Parameters(_params): Parameters<GetIndexInfoRequest>,
+    ) -> Result<CallToolResult, McpError> {
         let indexer = self.indexer.read().await;
         let symbol_count = indexer.symbol_count();
         let file_count = indexer.file_count();
@@ -1162,11 +1168,11 @@ impl ServerHandler for CodeIntelligenceServer {
                 icons: None,
             },
             instructions: Some(
-                "This server provides code intelligence tools for analyzing Rust codebases. \
-                Use 'search_symbols' for full-text search with fuzzy matching, 'find_symbol' to locate specific symbols, \
-                'get_calls' to see what a function calls, 'find_callers' to see what calls a function, \
-                and 'analyze_impact' to understand the impact of changes. \
-                Use 'get_index_info' to see what's in the index."
+                "This server provides code intelligence tools for analyzing this codebase. \
+                WORKFLOW: Start with 'semantic_search_with_context' or 'semantic_search_docs' to anchor on the right files and APIs - they provide the highest-quality context. \
+                Then use 'find_symbol' and 'search_symbols' to lock onto exact files and kinds. \
+                Treat 'get_calls', 'find_callers', and 'analyze_impact' as hints; confirm with code reading or tighter queries (unique names, kind filters). \
+                Use 'get_index_info' to understand what's indexed."
                 .to_string()
             ),
         }
