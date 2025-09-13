@@ -1,12 +1,12 @@
 # Python Grammar Analysis
 
-*Generated: 2025-09-12 16:49:13 UTC*
+*Generated: 2025-09-13 22:47:31 UTC*
 
 ## Statistics
 - Total nodes in grammar JSON: 129
 - Nodes found in comprehensive.py: 121
 - Nodes handled by parser: 120
-- Symbol kinds extracted: 5
+- Symbol kinds extracted: 6
 
 ## ✅ Successfully Handled Nodes
 These nodes are in examples and handled by parser:
@@ -197,5 +197,6 @@ These grammar nodes aren't in comprehensive.py:
 - Constant
 - Function
 - Method
+- Module
 - Variable
 

@@ -18,3 +18,6 @@ mod test_c_resolution;
 
 #[path = "parsers/cpp/test_resolution.rs"]
 mod test_cpp_resolution;
+
+#[path = "parsers/python/test_module_level_calls.rs"]
+mod test_python_module_level_calls;

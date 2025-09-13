@@ -37,9 +37,7 @@ contributing/tree-sitter/
 └── scripts/
     ├── setup.sh         # Install grammars on-demand
     └── explore-ast.sh   # Helper to parse files
-
-.codanna/scripts/
-└── compare-nodes.sh    # Compare tree-sitter with our parser
+    └── compare-nodes.sh    # Compare tree-sitter with our parser
 ```
 
 ## How It Works
@@ -81,7 +79,7 @@ Compares tree-sitter AST nodes with our parser implementation:
 
 ```bash
 # From project root
-.codanna/scripts/compare-nodes.sh typescript
+./scripts/compare-nodes.sh typescript
 ```
 
 This script:
@@ -105,7 +103,7 @@ tree-sitter parse examples/python/main.py | grep "class_definition"
 
 ```bash
 # Compare node recognition
-.codanna/scripts/compare-nodes.sh typescript
+./scripts/compare-nodes.sh typescript
 
 # Output shows:
 # - Nodes tree-sitter finds that we don't handle

@@ -79,6 +79,22 @@ impl PythonParser {
         // Create a parser context starting at module scope
         let mut context = ParserContext::new();
 
+        // Create a module-level symbol to represent the file's module scope.
+        // Name is set to "<module>" here to match Python conventions and tests;
+        // during indexing, PythonBehavior will rename it to the actual module path
+        // (e.g., package.module) for searchability.
+        let module_symbol_id = symbol_counter.next_id();
+        let module_range = self.node_to_range(root_node);
+        let mut module_symbol = Symbol::new(
+            module_symbol_id,
+            "<module>",
+            SymbolKind::Module,
+            file_id,
+            module_range,
+        );
+        module_symbol.scope_context = Some(crate::symbol::ScopeContext::Module);
+        symbols.push(module_symbol);
+
         self.extract_symbols_from_node(
             root_node,
             code,
@@ -736,11 +752,10 @@ impl PythonParser {
         calls: &mut Vec<(&'a str, &'a str, Range)>,
         current_function: &mut Option<&'a str>,
     ) {
-        if let Some(caller) = *current_function {
-            if let Some(callee) = self.extract_call_target(node, code) {
-                let range = self.node_to_range(node);
-                calls.push((caller, callee, range));
-            }
+        if let Some(callee) = self.extract_call_target(node, code) {
+            let range = self.node_to_range(node);
+            let caller = (*current_function).unwrap_or("<module>");
+            calls.push((caller, callee, range));
         }
 
         self.process_children_for_calls(node, code, calls, current_function);
@@ -798,10 +813,9 @@ impl PythonParser {
         method_calls: &mut Vec<MethodCall>,
         current_function: &mut Option<&'a str>,
     ) {
-        if let Some(caller) = *current_function {
-            if let Some(method_call) = self.extract_method_call(node, code, caller) {
-                method_calls.push(method_call);
-            }
+        let caller = (*current_function).unwrap_or("<module>");
+        if let Some(method_call) = self.extract_method_call(node, code, caller) {
+            method_calls.push(method_call);
         }
 
         self.process_children_for_method_calls(node, code, method_calls, current_function);
@@ -1423,8 +1437,8 @@ mod tests {
         println!("---");
         let symbols = parser.parse(code, FileId::new(1).unwrap(), &mut SymbolCounter::new());
 
-        assert_eq!(symbols.len(), 1);
-        let func = &symbols[0];
+        assert_eq!(symbols.len(), 2); // <module>, hello
+        let func = symbols.iter().find(|s| s.name.as_ref() == "hello").unwrap();
         assert_eq!(func.name.as_ref(), "hello");
         assert_eq!(func.kind, SymbolKind::Function);
 
@@ -1460,8 +1474,11 @@ mod tests {
         println!("---");
         let symbols = parser.parse(code, FileId::new(1).unwrap(), &mut SymbolCounter::new());
 
-        assert_eq!(symbols.len(), 1);
-        let class = &symbols[0];
+        assert_eq!(symbols.len(), 2); // <module>, Person
+        let class = symbols
+            .iter()
+            .find(|s| s.name.as_ref() == "Person")
+            .unwrap();
         assert_eq!(class.name.as_ref(), "Person");
         assert_eq!(class.kind, SymbolKind::Class);
 
@@ -1504,7 +1521,7 @@ class Calculator:
         println!("---");
         let symbols = parser.parse(code, FileId::new(1).unwrap(), &mut SymbolCounter::new());
 
-        assert_eq!(symbols.len(), 3); // Calculator, __init__, add
+        assert_eq!(symbols.len(), 4); // <module>, Calculator, __init__, add
         assert!(
             symbols
                 .iter()
@@ -1574,7 +1591,7 @@ def outer():
         let symbols = parser.parse(code, FileId::new(1).unwrap(), &mut SymbolCounter::new());
 
         // Both outer and inner should be functions (not methods) since they're not in a class
-        assert_eq!(symbols.len(), 2);
+        assert_eq!(symbols.len(), 3); // <module>, outer, inner
         assert!(
             symbols
                 .iter()
@@ -2091,7 +2108,10 @@ def process_items(items: List[str], count: int = 10) -> Dict[str, int]:
         // Function without type annotations
         let code1 = "def simple(x, y=10): pass";
         let symbols1 = parser.parse(code1, FileId::new(1).unwrap(), &mut SymbolCounter::new());
-        let func1 = &symbols1[0];
+        let func1 = symbols1
+            .iter()
+            .find(|s| s.name.as_ref() == "simple")
+            .unwrap();
         assert!(func1.signature.is_some());
         let sig1 = func1.signature.as_ref().unwrap();
         assert!(sig1.contains("x, y = 10"));
@@ -2103,7 +2123,10 @@ def process_items(items: List[str], count: int = 10) -> Dict[str, int]:
             FileId::new(1).unwrap(),
             &mut SymbolCounter::from_value(10),
         );
-        let func2 = &symbols2[0];
+        let func2 = symbols2
+            .iter()
+            .find(|s| s.name.as_ref() == "get_number")
+            .unwrap();
         assert!(func2.signature.is_some());
         let sig2 = func2.signature.as_ref().unwrap();
         assert!(sig2.contains("() -> int"));
@@ -2115,7 +2138,10 @@ def process_items(items: List[str], count: int = 10) -> Dict[str, int]:
             FileId::new(1).unwrap(),
             &mut SymbolCounter::from_value(20),
         );
-        let func3 = &symbols3[0];
+        let func3 = symbols3
+            .iter()
+            .find(|s| s.name.as_ref() == "mixed")
+            .unwrap();
         assert!(func3.signature.is_some());
         let sig3 = func3.signature.as_ref().unwrap();
         assert!(sig3.contains("name"));
@@ -2130,7 +2156,10 @@ def process_items(items: List[str], count: int = 10) -> Dict[str, int]:
             FileId::new(1).unwrap(),
             &mut SymbolCounter::from_value(30),
         );
-        let func4 = &symbols4[0];
+        let func4 = symbols4
+            .iter()
+            .find(|s| s.name.as_ref() == "complex_types")
+            .unwrap();
         assert!(func4.signature.is_some());
         let sig4 = func4.signature.as_ref().unwrap();
         assert!(sig4.contains("Dict[str, List[int]]"));
@@ -2412,8 +2441,8 @@ class APIClient:
             );
         }
 
-        // Should find class, both methods, and response variable (enhanced extraction)
-        assert_eq!(symbols.len(), 4);
+        // Should find module, class, both methods, and response variable (enhanced extraction)
+        assert_eq!(symbols.len(), 5);
 
         let fetch_method = symbols.iter().find(|s| s.name.as_ref() == "fetch").unwrap();
         let sync_method = symbols
@@ -2447,7 +2476,10 @@ class APIClient:
         // Async function with no parameters
         let code1 = "async def background_task(): pass";
         let symbols1 = parser.parse(code1, FileId::new(1).unwrap(), &mut SymbolCounter::new());
-        let func1 = &symbols1[0];
+        let func1 = symbols1
+            .iter()
+            .find(|s| s.name.as_ref() == "background_task")
+            .unwrap();
         assert!(func1.signature.as_ref().unwrap().contains("async"));
         assert!(func1.signature.as_ref().unwrap().contains("()"));
 
@@ -2462,7 +2494,10 @@ class APIClient:
             FileId::new(1).unwrap(),
             &mut SymbolCounter::from_value(10),
         );
-        let func2 = &symbols2[0];
+        let func2 = symbols2
+            .iter()
+            .find(|s| s.name.as_ref() == "process")
+            .unwrap();
         assert!(func2.signature.as_ref().unwrap().contains("async"));
         assert!(
             func2
@@ -2483,7 +2518,7 @@ def another_regular(): pass
             FileId::new(1).unwrap(),
             &mut SymbolCounter::from_value(20),
         );
-        assert_eq!(symbols3.len(), 3);
+        assert_eq!(symbols3.len(), 4); // <module> + 3 functions
 
         let regular1 = symbols3
             .iter()
@@ -2554,8 +2589,8 @@ async def process_batch(items: List[str]) -> Dict[str, Any]:
             );
         }
 
-        // Should find: class, async method, sync method, async function, and local variables (enhanced extraction)
-        assert_eq!(symbols.len(), 7);
+        // Should find: module, class, async method, sync method, async function, and local variables (enhanced extraction)
+        assert_eq!(symbols.len(), 8);
 
         let class_symbol = symbols
             .iter()

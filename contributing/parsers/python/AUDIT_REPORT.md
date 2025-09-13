@@ -1,11 +1,11 @@
 # Python Parser Symbol Extraction Coverage Report
 
-*Generated: 2025-09-12 16:49:13 UTC*
+*Generated: 2025-09-13 22:47:31 UTC*
 
 ## Summary
 - Nodes in file: 121
 - Nodes with symbol extraction: 120
-- Symbol kinds extracted: 5
+- Symbol kinds extracted: 6
 
 > **Note**: This report tracks nodes that produce indexed symbols for code intelligence.
 > For complete grammar coverage, see GRAMMAR_ANALYSIS.md

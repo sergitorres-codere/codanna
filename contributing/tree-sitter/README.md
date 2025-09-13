@@ -13,7 +13,7 @@ This directory provides tools for exploring AST structures using the official tr
    ```bash
    # Use tree-sitter directly (works from any directory)
    tree-sitter parse examples/typescript/comprehensive.ts
-   
+
    # Or use our helper script
    ./scripts/explore-ast.sh examples/typescript/comprehensive.ts
    ```
@@ -21,7 +21,7 @@ This directory provides tools for exploring AST structures using the official tr
 3. **Compare with our parser**:
    ```bash
    # From project root
-   .codanna/scripts/compare-nodes.sh typescript
+   ./scripts/compare-nodes.sh typescript
    ```
 
 ## Setup Script
@@ -69,7 +69,7 @@ Parse files with codanna and/or tree-sitter:
   - Compares comprehensive.* files with our parser
   - Triggers audit report generation
   - Shows differences between parsers
-  
+
 - **File mode**: `./scripts/compare-nodes.sh path/to/file.ts`
   - Compares AST nodes between codanna and tree-sitter
   - Saves detailed output to `{filename}_comparison.log`

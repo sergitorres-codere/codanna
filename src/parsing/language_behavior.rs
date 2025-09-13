@@ -144,6 +144,15 @@ pub trait LanguageBehavior: Send + Sync {
         self.get_language().abi_version()
     }
 
+    /// Normalize a caller name before resolution.
+    ///
+    /// Default: return the name unchanged. Languages with synthetic caller
+    /// markers (e.g., Python `"<module>"`) can map them to resolvable names
+    /// (like the actual module path) based on file context.
+    fn normalize_caller_name(&self, name: &str, _file_id: crate::FileId) -> String {
+        name.to_string()
+    }
+
     /// Configure a symbol with language-specific rules
     ///
     /// This is the main entry point for applying language-specific

@@ -1026,6 +1026,7 @@ impl SimpleIndexer {
             );
 
             // Store MethodCall for enhanced resolution during symbol resolution phase
+            // Note: we keep the original for matching, but relationships use mapped_caller
             self.store_method_call_for_resolution(method_call, file_id);
 
             // Create metadata to store receiver information
@@ -1345,8 +1346,14 @@ impl SimpleIndexer {
         match rel_kind {
             Calls | CalledBy => {
                 // Executable code can call other executable code
-                let callable = |k: &crate::SymbolKind| matches!(k, Function | Method | Macro);
-                callable(&from_kind) && callable(&to_kind)
+                // Extend to support module-level execution (e.g., Python module top-level)
+                // and class instantiation as a call target in dynamic languages.
+                let caller_can_call =
+                    |k: &crate::SymbolKind| matches!(k, Function | Method | Macro | Module);
+                let callee_can_be_called =
+                    |k: &crate::SymbolKind| matches!(k, Function | Method | Macro | Class);
+
+                caller_can_call(&from_kind) && callee_can_be_called(&to_kind)
             }
             Implements | ImplementedBy => {
                 // Types can implement interfaces/traits
@@ -2130,15 +2137,34 @@ impl SimpleIndexer {
     ) -> Option<SymbolId> {
         // Try to find corresponding MethodCall object for enhanced resolution
         if let Some(method_calls) = self.method_calls_by_file.get(&file_id) {
-            for method_call in method_calls {
-                if method_call.caller == caller_name && method_call.method_name == call_target {
-                    debug_print!(
-                        self,
-                        "Found MethodCall object for {}->{}! Using enhanced resolution",
-                        caller_name,
-                        call_target
-                    );
-                    return self.resolve_method_call(method_call, file_id, context);
+            // Normalize caller for language-specific matching (e.g., Python "<module>")
+            if let Ok(behavior) = self.get_behavior_for_file(file_id) {
+                let caller_normalized = behavior.normalize_caller_name(caller_name, file_id);
+                for method_call in method_calls {
+                    let mc_caller_norm =
+                        behavior.normalize_caller_name(&method_call.caller, file_id);
+                    if mc_caller_norm == caller_normalized && method_call.method_name == call_target
+                    {
+                        debug_print!(
+                            self,
+                            "Found MethodCall object for {}->{}! Using enhanced resolution",
+                            caller_name,
+                            call_target
+                        );
+                        return self.resolve_method_call(method_call, file_id, context);
+                    }
+                }
+            } else {
+                for method_call in method_calls {
+                    if method_call.caller == caller_name && method_call.method_name == call_target {
+                        debug_print!(
+                            self,
+                            "Found MethodCall object for {}->{}! Using enhanced resolution",
+                            caller_name,
+                            call_target
+                        );
+                        return self.resolve_method_call(method_call, file_id, context);
+                    }
                 }
             }
         }
@@ -2418,9 +2444,13 @@ impl SimpleIndexer {
                 );
 
                 // Find 'from' symbols - these should be in the current file
+                // Normalize caller name via language behavior (handles synthetic names like "<module>")
+                let behavior_for_file = self.get_behavior_for_file(file_id)?;
+                let from_query_name =
+                    behavior_for_file.normalize_caller_name(&rel.from_name, file_id);
                 let all_from_symbols = self
                     .document_index
-                    .find_symbols_by_name(&rel.from_name, None)
+                    .find_symbols_by_name(&from_query_name, None)
                     .map_err(|e| IndexError::TantivyError {
                         operation: "find_symbols_by_name".to_string(),
                         cause: e.to_string(),
@@ -2429,7 +2459,7 @@ impl SimpleIndexer {
                 debug_print!(
                     self,
                     "Looking for '{}' symbols, found {} total",
-                    rel.from_name,
+                    from_query_name,
                     all_from_symbols.len()
                 );
                 for s in &all_from_symbols {
@@ -2458,7 +2488,7 @@ impl SimpleIndexer {
                     debug_print!(
                         self,
                         "WARNING: No '{}' symbol found in file {:?} for Calls relationship to '{}'",
-                        rel.from_name,
+                        from_query_name,
                         file_id,
                         rel.to_name
                     );
@@ -4106,7 +4136,13 @@ def parse_yaml(input: str) -> dict:
 
         // Test 3: Search with Python filter
         let python_results = indexer
-            .search("parse", 10, None, None, Some("python"))
+            .search(
+                "parse",
+                10,
+                Some(crate::types::SymbolKind::Function),
+                None,
+                Some("python"),
+            )
             .unwrap();
         println!(
             "Test 3 - Search 'parse' Python filter: Found {} results",
