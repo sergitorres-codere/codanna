@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.13] - 2025-09-13
+
+### Fixed
+- Python parser: Module-level function calls and class instantiations now tracked (fixes #32)
+  - Module symbol created for each Python file to represent module scope
+  - Module-level calls tracked with `<module>` as caller, mapped to actual module path for queries
+  - `normalize_caller_name()` maps synthetic names to searchable module paths
+  - `configure_symbol()` renames module symbols for searchability
+  - Module type accepted as valid caller in relationship validation
+  - External symbol resolution handles unresolved import targets
+  - Method call resolution normalizes caller names for consistent matching
+
+### Added
+- Python parser: Module-level execution tracking for better code analysis
+- Tests: Module-level class instantiation detection verification
+
 ## [0.5.12] - 2025-09-12
 
 ### Fixed

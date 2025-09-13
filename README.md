@@ -114,7 +114,7 @@ codanna mcp semantic_search_docs query:"where do we resolve symbol references  0
 2. **Extract real stuff** -  functions, traits, type relationships, call graphs
 3. **Embed** - semantic vectors built from your doc comments
 4. **Index** - Tantivy + memory-mapped symbol cache for <10ms lookups
-5. **Serve** - MCP protocol for AI assistants, ~300ms response time (HTTP/HTTPS) and stdio built-in (0.16s) 
+5. **Serve** - MCP protocol for AI assistants, ~300ms response time (HTTP/HTTPS) and stdio built-in (0.16s)
 
 ## Claude
 
@@ -162,7 +162,7 @@ Configure in `.mcp.json`:
 
 ### Claude Sub Agent
 
-**codanna-navigator** sub agent at `.claude/agents/codanna-navigator.md`. 
+**codanna-navigator** sub agent at `.claude/agents/codanna-navigator.md`.
 
 > We include a **codanna-navigator** sub agent (`.claude/agents/codanna-navigator.md`) that knows how to use codanna effectively.
 
@@ -295,7 +295,7 @@ fn load_config(path: &Path) -> Result<Config, Error> {
 
 With good comments, semantic search can find this function when prompted for:
 - "configuration validation"
-- "handle missing config files" 
+- "handle missing config files"
 - "TOML parsing with error handling"
 
 This encourages better documentation → better AI understanding → more motivation to document.
@@ -369,7 +369,7 @@ Semantic search tools support language filtering to reduce noise in mixed-langua
 # Search only in Rust code
 codanna mcp semantic_search_docs query:"authentication" lang:rust limit:5
 
-# Search only in TypeScript code  
+# Search only in TypeScript code
 codanna mcp semantic_search_with_context query:"parse config" lang:typescript limit:3
 ```
 
@@ -464,7 +464,7 @@ sudo dnf install pkgconfig openssl-devel
 
 ## Roadmap
 
-### Current Release: v0.5.12
+### Current Release: v0.5.13
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed release notes and feature history.
 

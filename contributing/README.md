@@ -13,9 +13,9 @@ Thank you for your interest in contributing to Codanna! This guide focuses on th
 
 See [CHANGELOG.md](../CHANGELOG.md) for detailed release notes and feature history.
 
-✅ **Stable Architecture** - Language registry, resolution API, and signature extraction are production-ready
-✅ **5 Languages Supported** - Rust, TypeScript, Python, Go, PHP with comprehensive feature parity
-✅ **Ready for New Languages** - Mature, well-tested architecture for easy expansion
+**Stable Architecture** - Language registry, resolution API, and signature extraction are production-ready
+**5 Languages Supported** - Rust, TypeScript, Python, Go, PHP, C, C++ with comprehensive feature parity
+**Ready for New Languages** - Mature, well-tested architecture for easy expansion
 
 ## Development Setup
 
@@ -63,7 +63,7 @@ sudo dnf install pkgconfig openssl-devel
    ```bash
    # Make scripts executable
    chmod +x contributing/scripts/*.sh
-   
+
    # Run quick checks before committing
    ./contributing/scripts/quick-check.sh
    ```
@@ -254,7 +254,7 @@ See [Adding Language Support](./development/language-support.md) for the complet
 3. **Write good commit messages:**
    ```
    feat: Add Go language parser support
-   
+
    - Implement LanguageParser and LanguageBehavior traits
    - Add complete signature extraction for all symbol types
    - Support structs, interfaces, functions, and packages
