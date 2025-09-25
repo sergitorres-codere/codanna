@@ -399,7 +399,6 @@ Parser benchmarks on a 750-symbol test file:
 | **TypeScript** | 82,156 symbols/sec | 8.2x faster ✓ | Production |
 | **PHP** | 68,432 symbols/sec | 6.8x faster ✓ | Production |
 | **Go** | 74,655 symbols/second  | 7.5x faster ✓ | Production |
-| JavaScript | - | - | Planned |
 
 Key achievements:
 - **Zero-cost abstractions**: All parsers use borrowed string slices with no allocations in hot paths
@@ -464,24 +463,9 @@ sudo dnf install pkgconfig openssl-devel
 
 ## Roadmap
 
-### Current Release: v0.5.13
+### Current Release: v0.5.14
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed release notes and feature history.
-
-### Planned Features
-| Feature | Description | Status |
-|---------|-------------|--------|
-| JavaScript Support | Full JavaScript/ES6+ parser | ○ |
-| C# Support | C# with .NET ecosystem support | ○ |
-| Java Support | Java with class hierarchies | ○ |
-| Direct Semantic Search | `retrieve semantic` command | ○ |
-| Batch Operations | Process multiple symbols in one call | ○ |
-| Configuration Profiles | Environment-specific settings | ○ |
-| Machine-Readable Progress | JSON progress output | ○ |
-| Cross-Language References | Track references across languages | ○ |
-| Language Server Protocol | LSP integration for IDEs | ○ |
-
-**Legend:** ✓ Complete | → In Progress | ○ Planned
 
 ## Contributing
 

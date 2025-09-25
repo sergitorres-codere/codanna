@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.14] - 2025-09-25
+
+### Added
+- Global model cache system at `~/.codanna/models` for shared FastEmbed models across projects
+- Project registry tracking all indexed projects with unique IDs
+- `codanna init` command to initialize project structure and create model symlinks
+- Test isolation with separate directories (`~/.codanna-test`) for development
+
+### Changed
+- **BREAKING**: Existing `.fastembed_cache` directories must be deleted before running `init --force`
+- Model storage moved from per-project directories to global cache via symlinks
+- Settings validation now checks for proper initialization on startup
+
+
+### Migration Required
+To upgrade existing projects:
+```bash
+rm -rf .fastembed_cache
+codanna init --force
+```
+
 ## [0.5.13] - 2025-09-13
 
 ### Fixed
