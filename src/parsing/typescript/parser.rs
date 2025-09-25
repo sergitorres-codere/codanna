@@ -1380,12 +1380,14 @@ impl TypeScriptParser {
                 node.children(&mut w).find(|n| n.kind() == "identifier")
             }) {
                 let name = &code[name_node.byte_range()];
-                eprintln!(
-                    "DEBUG: Entering {} '{}' at line {}",
-                    node.kind(),
-                    name,
-                    node.start_position().row + 1
-                );
+                if crate::config::is_global_debug_enabled() {
+                    eprintln!(
+                        "DEBUG: Entering {} '{}' at line {}",
+                        node.kind(),
+                        name,
+                        node.start_position().row + 1
+                    );
+                }
                 Some(name)
             } else {
                 // Arrow functions might not have a name, check parent for variable declaration
@@ -1464,12 +1466,14 @@ impl TypeScriptParser {
             if let Some(function_node) = function_node {
                 // Extract function name for all types of calls (including member expressions like console.log)
                 if let Some(fn_name) = Self::extract_function_name(&function_node, code) {
-                    eprintln!(
-                        "DEBUG: Found call to {} at line {}, context = {:?}",
-                        fn_name,
-                        node.start_position().row + 1,
-                        function_context
-                    );
+                    if crate::config::is_global_debug_enabled() {
+                        eprintln!(
+                            "DEBUG: Found call to {} at line {}, context = {:?}",
+                            fn_name,
+                            node.start_position().row + 1,
+                            function_context
+                        );
+                    }
                     // If we don't have a function context yet, try to infer it from ancestors
                     let inferred_context = if function_context.is_none() {
                         let mut anc = node.parent();
@@ -1514,9 +1518,9 @@ impl TypeScriptParser {
                             end_column: node.end_position().column as u16,
                         };
                         calls.push((context, fn_name, range));
-                        eprintln!("DEBUG: Added call {context} -> {fn_name}");
+                        // Debug: Added call context -> fn_name
                     } else {
-                        eprintln!("DEBUG: Skipping call to {fn_name} - no function context");
+                        // Debug: Skipping call to fn_name - no function context
                     }
                 }
             }

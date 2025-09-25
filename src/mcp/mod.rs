@@ -223,7 +223,9 @@ impl CodeIntelligenceServer {
         }
     }
 
-    pub async fn from_persistence(settings: &Settings) -> Result<Self, Box<dyn std::error::Error>> {
+    pub async fn from_persistence(
+        settings: Arc<Settings>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let persistence = IndexPersistence::new(settings.index_path.clone());
 
         let indexer = if persistence.exists() {
@@ -231,19 +233,19 @@ impl CodeIntelligenceServer {
                 "Loading existing index from {}",
                 settings.index_path.display()
             );
-            match persistence.load() {
+            match persistence.load_with_settings(settings.clone(), false) {
                 Ok(loaded) => {
                     eprintln!("Loaded index with {} symbols", loaded.symbol_count());
                     loaded
                 }
                 Err(e) => {
                     eprintln!("Warning: Could not load index: {e}. Creating new index.");
-                    SimpleIndexer::new()
+                    SimpleIndexer::with_settings(settings.clone())
                 }
             }
         } else {
             eprintln!("No existing index found. Please run 'index' command first.");
-            SimpleIndexer::new()
+            SimpleIndexer::with_settings(settings.clone())
         };
 
         Ok(Self::new(indexer))
@@ -696,10 +698,36 @@ impl CodeIntelligenceServer {
     ) -> Result<CallToolResult, McpError> {
         let indexer = self.indexer.read().await;
 
+        // Use MCP debug flag for cleaner output
+        if indexer.settings().mcp.debug {
+            eprintln!("MCP DEBUG: semantic_search_docs called");
+            eprintln!(
+                "MCP DEBUG: Indexer symbol count: {}",
+                indexer.symbol_count()
+            );
+            eprintln!("MCP DEBUG: Has semantic: {}", indexer.has_semantic_search());
+        }
+
         if !indexer.has_semantic_search() {
-            return Ok(CallToolResult::error(vec![Content::text(
-                "Semantic search is not enabled. The index needs to be rebuilt with semantic search enabled.",
-            )]));
+            // Check if semantic files exist
+            let semantic_path = indexer.settings().index_path.join("semantic");
+            let metadata_exists = semantic_path.join("metadata.json").exists();
+            let vectors_exist = semantic_path.join("segment_0.vec").exists();
+            let symbol_count = indexer.symbol_count();
+
+            // Get current working directory for debugging
+            let cwd = std::env::current_dir()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|_| "unknown".to_string());
+
+            return Ok(CallToolResult::error(vec![Content::text(format!(
+                "Semantic search is not enabled. The index needs to be rebuilt with semantic search enabled.\n\nDEBUG INFO:\n- Index path: {}\n- Symbol count: {}\n- Semantic files exist: {}\n- Has semantic search: {}\n- Working dir: {}",
+                indexer.settings().index_path.display(),
+                symbol_count,
+                metadata_exists && vectors_exist,
+                indexer.has_semantic_search(),
+                cwd
+            ))]));
         }
 
         let results = match threshold {
@@ -787,9 +815,30 @@ impl CodeIntelligenceServer {
         let indexer = self.indexer.read().await;
 
         if !indexer.has_semantic_search() {
-            return Ok(CallToolResult::error(vec![Content::text(
-                "Semantic search is not enabled. The index needs to be rebuilt with semantic search enabled.",
-            )]));
+            if indexer.settings().mcp.debug {
+                eprintln!("DEBUG: Semantic search check failed in semantic_search_with_context");
+                eprintln!(
+                    "DEBUG: Indexer settings index_path: {}",
+                    indexer.settings().index_path.display()
+                );
+                eprintln!(
+                    "DEBUG: Indexer has_semantic_search: {}",
+                    indexer.has_semantic_search()
+                );
+            }
+            // Check if semantic files exist
+            let semantic_path = indexer.settings().index_path.join("semantic");
+            let metadata_exists = semantic_path.join("metadata.json").exists();
+            let vectors_exist = semantic_path.join("segment_0.vec").exists();
+
+            return Ok(CallToolResult::error(vec![Content::text(format!(
+                "Semantic search is not enabled. The index needs to be rebuilt with semantic search enabled.\n\nDEBUG INFO:\n- Index path: {}\n- Has semantic search: {}\n- Semantic path: {}\n- Metadata exists: {}\n- Vectors exist: {}",
+                indexer.settings().index_path.display(),
+                indexer.has_semantic_search(),
+                semantic_path.display(),
+                metadata_exists,
+                vectors_exist
+            ))]));
         }
 
         // First, perform semantic search

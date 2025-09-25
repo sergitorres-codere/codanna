@@ -255,6 +255,14 @@ enum Commands {
         /// Tool arguments as JSON
         #[arg(long)]
         args: Option<String>,
+
+        /// Delay (seconds) before calling the tool, to exercise watcher reloads
+        #[arg(
+            long,
+            help = "Wait N seconds before calling the tool",
+            value_name = "SECONDS"
+        )]
+        delay: Option<u64>,
     },
 
     /// Call MCP tools directly (advanced)
@@ -460,8 +468,8 @@ enum RetrieveQuery {
 async fn main() {
     let cli = Cli::parse();
 
-    // For index command, auto-initialize if needed
-    if matches!(cli.command, Commands::Index { .. }) {
+    // For index command, auto-initialize if needed (but not when using --config)
+    if matches!(cli.command, Commands::Index { .. }) && cli.config.is_none() {
         if Settings::check_init().is_err() {
             // Auto-initialize for index command
             eprintln!("Initializing project configuration...");
@@ -475,8 +483,8 @@ async fn main() {
                 }
             }
         }
-    } else if !matches!(cli.command, Commands::Init { .. }) {
-        // For other commands, just warn
+    } else if !matches!(cli.command, Commands::Init { .. }) && cli.config.is_none() {
+        // For other commands without --config flag, just warn
         if let Err(warning) = Settings::check_init() {
             eprintln!("Warning: {warning}");
             eprintln!("Using default configuration for now.");
@@ -559,9 +567,26 @@ async fn main() {
         _ => {}
     }
 
+    // Early return for parse command - it needs no indexing infrastructure
+    if let Commands::Parse {
+        ref file,
+        ref output,
+        max_depth,
+        all_nodes,
+    } = cli.command
+    {
+        run_parse_command(file, output.clone(), max_depth, all_nodes);
+        // run_parse_command already calls std::process::exit
+    }
+
     // Set up persistence based on config
-    let index_path = config.index_path.clone();
-    let persistence = IndexPersistence::new(index_path);
+    // Use global path resolution that handles --config properly
+    let index_path = codanna::init::resolve_index_path(&config, cli.config.as_deref());
+
+    // Update the config with the resolved index_path so SimpleIndexer uses the correct path
+    config.index_path = index_path.clone();
+
+    let persistence = IndexPersistence::new(index_path.clone());
 
     // Skip loading index for commands that don't need it
     let skip_index_load = matches!(
@@ -765,14 +790,15 @@ async fn main() {
                     }
                     eprintln!("To test: npx @modelcontextprotocol/inspector cargo run -- serve");
 
-                    // Create MCP server from existing index
-                    let server = codanna::mcp::CodeIntelligenceServer::from_persistence(&config)
-                        .await
-                        .map_err(|e| {
-                            eprintln!("Failed to create MCP server: {e}");
-                            std::process::exit(1);
-                        })
-                        .unwrap();
+                    // Create MCP server using the already-loaded indexer
+                    if config.mcp.debug {
+                        eprintln!(
+                            "MCP DEBUG: Creating server with indexer - symbols: {}, semantic: {}",
+                            indexer.symbol_count(),
+                            indexer.has_semantic_search()
+                        );
+                    }
+                    let server = codanna::mcp::CodeIntelligenceServer::new(indexer);
 
                     // If watch mode is enabled, start the index watcher
                     if watch {
@@ -780,11 +806,10 @@ async fn main() {
                         use std::time::Duration;
 
                         let indexer_arc = server.get_indexer_arc();
-                        let settings = Arc::new(config.clone());
                         let server_arc = Arc::new(server.clone());
                         let watcher = IndexWatcher::new(
                             indexer_arc,
-                            settings,
+                            settings.clone(),
                             Duration::from_secs(actual_watch_interval),
                         )
                         .with_mcp_server(server_arc);
@@ -809,6 +834,7 @@ async fn main() {
                             watcher_indexer,
                             config.file_watch.debounce_ms,
                             config.mcp.debug,
+                            &index_path,
                         )
                         .map_err(|e| {
                             eprintln!("Failed to create file system watcher: {e}");
@@ -1227,18 +1253,27 @@ async fn main() {
 
         Commands::McpTest {
             server_binary,
-            tool: _,
-            args: _,
+            tool,
+            args,
+            delay,
         } => {
             use codanna::mcp::client::CodeIntelligenceClient;
 
             // Get server binary path (default to current executable)
-            let server_path = server_binary.unwrap_or_else(|| {
+            let server_path = server_binary.clone().unwrap_or_else(|| {
                 std::env::current_exe().expect("Failed to get current executable path")
             });
 
             // Run the test
-            if let Err(e) = CodeIntelligenceClient::test_server(server_path).await {
+            if let Err(e) = CodeIntelligenceClient::test_server(
+                server_path,
+                cli.config.clone(),
+                tool.clone(),
+                args.clone(),
+                delay,
+            )
+            .await
+            {
                 eprintln!("MCP test failed: {e}");
                 std::process::exit(1);
             }
@@ -2467,13 +2502,9 @@ async fn main() {
             run_benchmark_command(&language, file);
         }
 
-        Commands::Parse {
-            file,
-            output,
-            max_depth,
-            all_nodes,
-        } => {
-            run_parse_command(&file, output, max_depth, all_nodes);
+        Commands::Parse { .. } => {
+            // Already handled with early return above
+            unreachable!("Parse command should have been handled earlier");
         }
     }
 }

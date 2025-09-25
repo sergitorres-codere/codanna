@@ -305,8 +305,23 @@ impl SimpleIndexer {
     pub fn load_semantic_search(&mut self, path: &Path, info: bool) -> IndexResult<bool> {
         use crate::semantic::{SemanticMetadata, SimpleSemanticSearch};
 
+        // Debug output to understand path resolution
+        if self.settings.debug || info {
+            eprintln!(
+                "DEBUG: Attempting to load semantic search from: {}",
+                path.display()
+            );
+        }
+
         // Check if semantic data exists
         if !SemanticMetadata::exists(path) {
+            if self.settings.debug || info {
+                eprintln!("DEBUG: Semantic metadata not found at: {}", path.display());
+                eprintln!(
+                    "DEBUG: Looking for: {}",
+                    path.join("metadata.json").display()
+                );
+            }
             return Ok(false);
         }
 
@@ -513,8 +528,8 @@ impl SimpleIndexer {
                     semantic.lock().unwrap().remove_embeddings(&symbol_ids);
 
                     // CRITICAL: Save embeddings to disk after removal to prevent cache desync
-                    let semantic_path = std::path::Path::new(".codanna/index/semantic");
-                    if let Err(e) = semantic.lock().unwrap().save(semantic_path) {
+                    let semantic_path = self.settings.index_path.join("semantic");
+                    if let Err(e) = semantic.lock().unwrap().save(&semantic_path) {
                         eprintln!(
                             "Warning: Failed to save semantic search after embedding removal: {e}"
                         );
@@ -2629,10 +2644,11 @@ impl SimpleIndexer {
 
                 let to_symbol_id = match to_symbol_id {
                     Some(id) => {
-                        debug_print!(self, "Resolved target symbol to: {:?}", id);
-                        eprintln!(
-                            "DEBUG: Resolved target symbol '{}' to ID: {:?}",
-                            rel.to_name, id
+                        debug_print!(
+                            self,
+                            "Resolved target symbol '{}' to ID: {:?}",
+                            rel.to_name,
+                            id
                         );
                         id
                     }

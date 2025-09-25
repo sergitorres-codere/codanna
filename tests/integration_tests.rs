@@ -13,5 +13,17 @@ mod embedding_model_comparison;
 #[path = "integration/test_resolution_persistence.rs"]
 mod test_resolution_persistence;
 
+#[path = "integration/test_init_module.rs"]
+mod test_init_module;
+
 #[path = "integration/test_parse_command.rs"]
 mod test_parse_command;
+
+#[path = "integration/test_settings_init_integration.rs"]
+mod test_settings_init_integration;
+
+#[path = "integration/test_project_registry.rs"]
+mod test_project_registry;
+
+#[path = "integration/test_config_path_resolution.rs"]
+mod test_config_path_resolution;

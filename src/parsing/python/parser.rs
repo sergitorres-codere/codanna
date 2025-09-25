@@ -2976,8 +2976,10 @@ class ClassWithDocs:
     #[test]
     fn test_comprehensive_docstring_extraction() {
         let mut parser = PythonParser::new().unwrap();
-        let code = std::fs::read_to_string("examples/python/comprehensive.py")
-            .expect("Should find comprehensive test file");
+        // Use relative path from the workspace root
+        let test_file = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples/python/comprehensive.py");
+        let code = std::fs::read_to_string(test_file).expect("Should find comprehensive test file");
 
         println!("=== COMPREHENSIVE PYTHON DOCSTRING EXTRACTION TEST ===");
         let symbols = parser.parse(&code, FileId::new(1).unwrap(), &mut SymbolCounter::new());
