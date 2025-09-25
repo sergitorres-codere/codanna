@@ -22,11 +22,28 @@ fn get_codanna_binary() -> PathBuf {
     }
 
     // 2. For standalone tests, ensure debug binary exists
-    let debug_bin = PathBuf::from("target/debug/codanna");
+    // Use absolute path based on CARGO_MANIFEST_DIR to handle CI working directory issues
+    let manifest_dir = env::var("CARGO_MANIFEST_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| env::current_dir().expect("Failed to get current directory"));
+
+    let debug_bin = manifest_dir.join("target/debug/codanna");
+
     if !debug_bin.exists() {
         eprintln!("Building debug binary for tests...");
+        eprintln!("Expected at: {}", debug_bin.display());
+
+        // Skip building in CI - binary should already exist
+        if env::var("CI").is_ok() || env::var("GITHUB_ACTIONS").is_ok() {
+            panic!(
+                "Debug binary not found at {} in CI environment. Check build step.",
+                debug_bin.display()
+            );
+        }
+
         let status = Command::new("cargo")
             .args(["build", "--bin", "codanna"])
+            .current_dir(&manifest_dir)
             .status()
             .expect("Failed to build codanna binary");
 
