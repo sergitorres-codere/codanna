@@ -33,3 +33,9 @@ mod test_cross_module_resolution;
 
 #[path = "integration/test_python_cross_module_resolution.rs"]
 mod test_python_cross_module_resolution;
+
+#[path = "integration/test_provider_initialization.rs"]
+mod test_provider_initialization;
+
+#[path = "integration/test_typescript_alias_relationships.rs"]
+mod test_typescript_alias_relationships;

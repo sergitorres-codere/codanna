@@ -1363,10 +1363,13 @@ impl SimpleIndexer {
                 // Executable code can call other executable code
                 // Extend to support module-level execution (e.g., Python module top-level)
                 // and class instantiation as a call target in dynamic languages.
+                // In JavaScript/TypeScript, constants and variables can hold function references
+                // (e.g., React components: const Button = () => {...})
                 let caller_can_call =
                     |k: &crate::SymbolKind| matches!(k, Function | Method | Macro | Module);
-                let callee_can_be_called =
-                    |k: &crate::SymbolKind| matches!(k, Function | Method | Macro | Class);
+                let callee_can_be_called = |k: &crate::SymbolKind| {
+                    matches!(k, Function | Method | Macro | Class | Constant | Variable)
+                };
 
                 caller_can_call(&from_kind) && callee_can_be_called(&to_kind)
             }
@@ -2297,13 +2300,10 @@ impl SimpleIndexer {
             unresolved.len()
         );
 
-        // Track which external symbols we've already created to avoid duplicates
-        // Key: (module_path, symbol_name), Value: SymbolId
-        let mut created_external_symbols: std::collections::HashMap<(String, String), SymbolId> =
-            std::collections::HashMap::new();
+        // No longer tracking external symbols since we don't create them anymore
 
         // Track the symbol counter to ensure unique IDs
-        let mut symbol_counter = self.get_next_symbol_counter()?;
+        let symbol_counter = self.get_next_symbol_counter()?;
 
         for rel in &unresolved {
             debug_print!(
@@ -2338,32 +2338,14 @@ impl SimpleIndexer {
                                 if let Some((module_path, symbol_name)) =
                                     behavior.resolve_external_call_target(&target, rel.file_id)
                                 {
-                                    let key = (module_path.clone(), symbol_name.clone());
-                                    if let std::collections::hash_map::Entry::Vacant(e) =
-                                        created_external_symbols.entry(key)
-                                    {
-                                        debug_print!(
-                                            self,
-                                            "Pre-creating external symbol: {}::{}",
-                                            module_path,
-                                            symbol_name
-                                        );
-                                        if let Some(lang_id) =
-                                            self.file_languages.get(&rel.file_id).copied()
-                                        {
-                                            // Create the external symbol now
-                                            if let Ok(symbol_id) = behavior.create_external_symbol(
-                                                &mut self.document_index,
-                                                &module_path,
-                                                &symbol_name,
-                                                lang_id,
-                                            ) {
-                                                e.insert(symbol_id);
-                                                // Advance the counter to track the next ID
-                                                let _ = symbol_counter.next_id();
-                                            }
-                                        }
-                                    }
+                                    // Skip external symbol creation - we don't want to pollute the index
+                                    // with stub files for unresolved imports
+                                    debug_print!(
+                                        self,
+                                        "Skipping external symbol creation for: {}::{}",
+                                        module_path,
+                                        symbol_name
+                                    );
                                 }
                                 break;
                             }
@@ -2380,30 +2362,14 @@ impl SimpleIndexer {
                     if let Some((module_path, symbol_name)) =
                         behavior.resolve_external_call_target(&rel.to_name, rel.file_id)
                     {
-                        let key = (module_path.clone(), symbol_name.clone());
-                        if let std::collections::hash_map::Entry::Vacant(e) =
-                            created_external_symbols.entry(key)
-                        {
-                            debug_print!(
-                                self,
-                                "Pre-creating external symbol: {}::{}",
-                                module_path,
-                                symbol_name
-                            );
-                            if let Some(lang_id) = self.file_languages.get(&rel.file_id).copied() {
-                                // Create the external symbol now
-                                if let Ok(symbol_id) = behavior.create_external_symbol(
-                                    &mut self.document_index,
-                                    &module_path,
-                                    &symbol_name,
-                                    lang_id,
-                                ) {
-                                    e.insert(symbol_id);
-                                    // Advance the counter to track the next ID
-                                    let _ = symbol_counter.next_id();
-                                }
-                            }
-                        }
+                        // Skip external symbol creation - we don't want to pollute the index
+                        // with stub files for unresolved imports
+                        debug_print!(
+                            self,
+                            "Skipping external symbol pre-creation for: {}::{}",
+                            module_path,
+                            symbol_name
+                        );
                     }
                 }
             }
@@ -2414,15 +2380,9 @@ impl SimpleIndexer {
             self.update_symbol_counter(&symbol_counter)?;
         }
 
-        // Commit the external symbols so they're searchable
-        debug_print!(self, "Committing pre-created external symbols");
-        self.commit_tantivy_batch()?;
-
-        // Rebuild symbol cache to include the new external symbols
-        debug_print!(self, "Rebuilding symbol cache with external symbols");
-        if let Err(e) = self.build_symbol_cache() {
-            debug_print!(self, "Warning: Failed to rebuild symbol cache: {}", e);
-        }
+        // No longer creating external symbols, so skip the external symbol commit
+        // External symbols are a wrong design decision - we don't want to pollute
+        // the index with stub files for unresolved imports
 
         // Start a new batch for relationship updates
         self.start_tantivy_batch()?;
@@ -2565,23 +2525,15 @@ impl SimpleIndexer {
                             if let Some((module_path, symbol_name)) =
                                 behavior.resolve_external_call_target(&to_key, file_id)
                             {
+                                // Skip external symbol creation for resolved external calls
                                 debug_print!(
                                     self,
-                                    "External call resolved: {} -> {}::{}",
+                                    "Skipping external symbol for resolved call: {} -> {}::{}",
                                     to_key,
                                     module_path,
                                     symbol_name
                                 );
-                                if let Some(lang_id) = self.file_languages.get(&file_id).copied() {
-                                    Some(behavior.create_external_symbol(
-                                        &mut self.document_index,
-                                        &module_path,
-                                        &symbol_name,
-                                        lang_id,
-                                    )?)
-                                } else {
-                                    None
-                                }
+                                None
                             } else {
                                 None
                             }
@@ -2614,23 +2566,15 @@ impl SimpleIndexer {
                             if let Some((module_path, symbol_name)) =
                                 behavior.resolve_external_call_target(&rel.to_name, file_id)
                             {
+                                // Skip external symbol creation for mapped external calls
                                 debug_print!(
                                     self,
-                                    "External call target mapped: {} -> {}::{}",
+                                    "Skipping external symbol for mapped call: {} -> {}::{}",
                                     rel.to_name,
                                     module_path,
                                     symbol_name
                                 );
-                                if let Some(lang_id) = self.file_languages.get(&file_id).copied() {
-                                    Some(behavior.create_external_symbol(
-                                        &mut self.document_index,
-                                        &module_path,
-                                        &symbol_name,
-                                        lang_id,
-                                    )?)
-                                } else {
-                                    None
-                                }
+                                None
                             } else {
                                 None
                             }

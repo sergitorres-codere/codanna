@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.16] - 2025-09-28
+
+### Added
+- TypeScript path alias resolution with full cross-module support
+  - Aliases like `@/*` resolved to actual paths (`./src/*`)
+  - Symbols added by module_path for cross-module resolution
+  - Import paths enhanced at storage time for correct resolution
+- Default export visibility tracking for TypeScript
+  - `export default` symbols now marked as Public
+  - Enables proper cross-module access to default exports
+- React component relationship support
+  - Constants and Variables now callable (React functional components)
+  - Proper relationship tracking for component hierarchies
+
+### Changed
+- **BREAKING**: External stub symbols no longer created for unresolved imports
+  - Cleaner index without placeholder symbols
+  - Requires full project reindex: `codanna index --force`
+- TypeScript behavior enhanced with module_path resolution
+- Relationship validation extended for JavaScript/TypeScript patterns
+
+### Fixed
+- TypeScript imports using path aliases not resolving across modules
+- Default exported symbols incorrectly marked as Private
+- React components (Constants) not creating proper call relationships
+- Cross-module visibility checks for exported symbols
+
+### Migration Required
+To benefit from improved TypeScript resolution:
+```bash
+codanna index --force
+```
+
 ## [0.5.15] - 2025-09-27
 
 ### Added

@@ -859,4 +859,133 @@ mod tests {
         assert!(resolver.is_subtype("IChild", "IParent1"));
         assert!(resolver.is_subtype("IChild", "IParent2"));
     }
+
+    #[test]
+    fn test_cross_module_resolution_requires_module_path() {
+        // This test demonstrates the core issue: symbols must be added by their module_path
+        // for cross-module resolution to work with enhanced imports
+
+        println!("\n=== Testing Cross-Module Resolution with Module Path ===");
+
+        let mut context = TypeScriptResolutionContext::new(FileId::new(1).unwrap());
+        let button_id = SymbolId::new(42).unwrap();
+
+        // Scenario 1: Symbol added only by name
+        context.add_symbol("Button".to_string(), button_id, ScopeLevel::Global);
+        println!("Added symbol 'Button' with id {button_id:?}");
+
+        // Try to resolve by name - this works
+        let resolved_by_name = context.resolve("Button");
+        println!("Resolving 'Button' by name: {resolved_by_name:?}");
+        assert_eq!(resolved_by_name, Some(button_id));
+
+        // Try to resolve by module path - this DOESN'T work
+        let module_path = "examples.typescript.react.src.components.ui.button";
+        let resolved_by_module_before = context.resolve(module_path);
+        println!(
+            "Resolving '{module_path}' BEFORE adding by module_path: {resolved_by_module_before:?}"
+        );
+        assert_eq!(
+            resolved_by_module_before, None,
+            "Resolution by module path fails when symbol only added by name"
+        );
+
+        // Scenario 2: Symbol added ALSO by module_path (THE FIX)
+        context.add_symbol(module_path.to_string(), button_id, ScopeLevel::Global);
+        println!("\nAdded symbol by module_path '{module_path}'");
+
+        // Now resolution by module path works
+        let resolved_by_module_after = context.resolve(module_path);
+        println!(
+            "Resolving '{module_path}' AFTER adding by module_path: {resolved_by_module_after:?}"
+        );
+        assert_eq!(
+            resolved_by_module_after,
+            Some(button_id),
+            "Resolution by module path works when symbol added by module_path"
+        );
+
+        println!(
+            "\n✅ Test proves that symbols MUST be added by module_path for cross-module resolution!"
+        );
+        // The key insight: When imports are enhanced from aliases like "@/components/ui/button"
+        // to "./src/components/ui/button", we need to match against the module_path
+        // "examples.typescript.react.src.components.ui.button" for resolution to work
+    }
+
+    #[test]
+    fn test_enhanced_import_resolution_workflow() {
+        // This test shows the complete workflow for alias resolution
+
+        let mut context = TypeScriptResolutionContext::new(FileId::new(1).unwrap());
+        let button_id = SymbolId::new(42).unwrap();
+
+        // Step 1: Import with alias "@/components/ui/button" gets enhanced to "./src/components/ui/button"
+        let enhanced_import = "./src/components/ui/button";
+
+        // Step 2: The symbol exists with module_path "examples.typescript.react.src.components.ui.button"
+        let module_path = "examples.typescript.react.src.components.ui.button";
+
+        // Step 3: Add symbol by both name AND module_path for proper resolution
+        context.add_symbol("Button".to_string(), button_id, ScopeLevel::Module);
+        context.add_symbol(module_path.to_string(), button_id, ScopeLevel::Global);
+
+        // Step 4: We need to transform the enhanced import to match the module_path
+        // This is the missing piece - enhanced_import doesn't directly match module_path
+        assert_ne!(
+            enhanced_import, module_path,
+            "Enhanced import path doesn't match module_path directly"
+        );
+
+        // For now, resolution works if we use the full module_path
+        assert_eq!(context.resolve(module_path), Some(button_id));
+
+        // But resolution by enhanced import path doesn't work without transformation
+        assert_eq!(
+            context.resolve(enhanced_import),
+            None,
+            "Resolution by enhanced import path needs transformation to module_path"
+        );
+    }
+
+    #[test]
+    fn test_resolve_relationship_for_calls() {
+        // Test that resolve_relationship properly handles call relationships
+
+        let mut context = TypeScriptResolutionContext::new(FileId::new(1).unwrap());
+        let button_id = SymbolId::new(42).unwrap();
+
+        // Add Button symbol by name and module_path
+        context.add_symbol("Button".to_string(), button_id, ScopeLevel::Module);
+        let module_path = "examples.typescript.react.src.components.ui.button";
+        context.add_symbol(module_path.to_string(), button_id, ScopeLevel::Global);
+
+        // Test resolving a call relationship
+        let resolved = context.resolve_relationship(
+            "TestComponent",
+            "Button",
+            crate::RelationKind::Calls,
+            FileId::new(2).unwrap(),
+        );
+
+        assert_eq!(
+            resolved,
+            Some(button_id),
+            "Should resolve Button when called from TestComponent"
+        );
+
+        // Test resolving by module path in call relationship
+        let resolved_by_module = context.resolve_relationship(
+            "TestComponent",
+            module_path,
+            crate::RelationKind::Calls,
+            FileId::new(2).unwrap(),
+        );
+
+        assert_eq!(
+            resolved_by_module,
+            Some(button_id),
+            "Should resolve by module_path in call relationship"
+        );
+    }
 }

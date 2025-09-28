@@ -493,9 +493,7 @@ sudo dnf install pkgconfig openssl-devel
 - Semantic search requires English documentation/comments
 - Windows support is experimental
 
-## Roadmap
-
-### Current Release: v0.5.14
+## Releases
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed release notes and feature history.
 

@@ -11,6 +11,9 @@ use codanna::FileId;
 use codanna::parsing::{
     GoParser, LanguageParser, PhpParser, PythonParser, RustParser, TypeScriptParser,
 };
+use codanna::project_resolver::{
+    providers::typescript::TypeScriptProvider, registry::SimpleProviderRegistry,
+};
 use codanna::types::SymbolCounter;
 use codanna::{IndexPersistence, Settings, SimpleIndexer, Symbol, SymbolKind};
 use serde::Serialize;
@@ -460,6 +463,103 @@ enum RetrieveQuery {
     },
 }
 
+/// Create and populate the provider registry with all language providers.
+///
+/// This registry manages project-specific resolution providers that handle
+/// configuration files (like tsconfig.json) for enhanced import resolution.
+fn create_provider_registry() -> SimpleProviderRegistry {
+    let mut registry = SimpleProviderRegistry::new();
+
+    // Add TypeScript provider for tsconfig.json resolution
+    registry.add(Arc::new(TypeScriptProvider::new()));
+
+    // Future: Add more providers here
+    // registry.add(Arc::new(PythonProvider::new()));
+    // registry.add(Arc::new(RustProvider::new()));
+
+    registry
+}
+
+/// Initialize project resolution providers before indexing.
+///
+/// This validates configuration files and builds resolution caches for
+/// languages that have config_files specified in settings.toml.
+fn initialize_providers(
+    registry: &SimpleProviderRegistry,
+    settings: &Settings,
+) -> Result<(), codanna::IndexError> {
+    use codanna::IndexError;
+
+    let mut validation_errors = Vec::new();
+
+    for provider in registry.active_providers(settings) {
+        let lang_id = provider.language_id();
+        let config_paths = provider.config_paths(settings);
+
+        if config_paths.is_empty() {
+            continue; // Skip if no config files specified
+        }
+
+        println!("Initializing {lang_id} project resolver...");
+
+        // Validate config paths
+        let mut invalid_paths = Vec::new();
+        for path in &config_paths {
+            if !path.exists() {
+                invalid_paths.push(path.clone());
+            }
+        }
+
+        if !invalid_paths.is_empty() {
+            // Collect all invalid paths for error reporting
+            for path in &invalid_paths {
+                eprintln!("  ✗ {} config file not found: {}", lang_id, path.display());
+            }
+            validation_errors.push((lang_id.to_string(), invalid_paths));
+            continue;
+        }
+
+        // Build cache
+        if settings.debug {
+            println!(
+                "  Building resolution cache from {} config file(s)...",
+                config_paths.len()
+            );
+        }
+        if let Err(e) = provider.rebuild_cache(settings) {
+            // Warning only - continue without failing
+            if settings.debug {
+                eprintln!("  Warning: Failed to build {lang_id} resolution cache: {e}");
+                eprintln!("  Continuing without alias resolution for {lang_id}");
+            }
+        } else if settings.debug {
+            println!("  {lang_id} resolution cache built successfully");
+        }
+    }
+
+    if !validation_errors.is_empty() {
+        // Build detailed error message
+        let mut error_details = String::from("Invalid project configuration files:\n");
+        for (lang, paths) in &validation_errors {
+            error_details.push_str(&format!("\n{lang} configuration:\n"));
+            for path in paths {
+                error_details.push_str(&format!("  • {} not found\n", path.display()));
+            }
+        }
+        error_details.push_str("\nSuggestion: Check paths in .codanna/settings.toml");
+        error_details.push_str("\nExample for TypeScript:\n");
+        error_details.push_str("  [languages.typescript]\n");
+        error_details
+            .push_str("  config_files = [\"tsconfig.json\", \"packages/web/tsconfig.json\"]");
+
+        Err(IndexError::ConfigError {
+            reason: error_details,
+        })
+    } else {
+        Ok(())
+    }
+}
+
 /// Entry point with tokio async runtime.
 ///
 /// Handles config initialization, index loading/creation, and command dispatch.
@@ -889,6 +989,27 @@ async fn main() {
         } => {
             // Determine if path is a file or directory
             if path.is_file() {
+                // Initialize project resolution providers even for single file
+                // (needed for proper alias resolution)
+                let provider_registry = create_provider_registry();
+                if let Err(e) = initialize_providers(&provider_registry, &config) {
+                    eprintln!("\n{e}");
+
+                    // Display recovery suggestions
+                    let suggestions = e.recovery_suggestions();
+                    if !suggestions.is_empty() {
+                        eprintln!("\nRecovery steps:");
+                        for suggestion in suggestions {
+                            eprintln!("  • {suggestion}");
+                        }
+                    }
+
+                    // Exit with ConfigError code
+                    use codanna::io::ExitCode;
+                    let exit_code = ExitCode::from_error(&e);
+                    std::process::exit(exit_code as i32);
+                }
+
                 // Single file indexing
                 match indexer.index_file_with_force(&path, force) {
                     Ok(result) => {
@@ -979,6 +1100,26 @@ async fn main() {
                     }
                 }
             } else if path.is_dir() {
+                // Initialize project resolution providers before indexing
+                let provider_registry = create_provider_registry();
+                if let Err(e) = initialize_providers(&provider_registry, &config) {
+                    eprintln!("\n{e}");
+
+                    // Display recovery suggestions
+                    let suggestions = e.recovery_suggestions();
+                    if !suggestions.is_empty() {
+                        eprintln!("\nRecovery steps:");
+                        for suggestion in suggestions {
+                            eprintln!("  • {suggestion}");
+                        }
+                    }
+
+                    // Exit with ConfigError code
+                    use codanna::io::ExitCode;
+                    let exit_code = ExitCode::from_error(&e);
+                    std::process::exit(exit_code as i32);
+                }
+
                 // Directory indexing
                 if let Some(max) = max_files {
                     println!(

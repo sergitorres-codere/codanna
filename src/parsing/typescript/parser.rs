@@ -19,6 +19,8 @@ pub struct TypeScriptParser {
     parser: Parser,
     context: ParserContext,
     node_tracker: NodeTrackingState,
+    /// Track symbols that are default exported (e.g., export default Container)
+    default_exported_symbols: std::collections::HashSet<String>,
 }
 
 impl TypeScriptParser {
@@ -61,8 +63,9 @@ impl TypeScriptParser {
         file_id: FileId,
         symbol_counter: &mut SymbolCounter,
     ) -> Vec<Symbol> {
-        // Reset context for each file
+        // Reset context and default exports for each file
         self.context = ParserContext::new();
+        self.default_exported_symbols.clear();
         let mut symbols = Vec::new();
 
         match self.parser.parse(code, None) {
@@ -79,6 +82,19 @@ impl TypeScriptParser {
             }
             None => {
                 eprintln!("Failed to parse TypeScript file");
+            }
+        }
+
+        // Update visibility for default exported symbols
+        for symbol in &mut symbols {
+            if self.default_exported_symbols.contains(symbol.name.as_ref()) {
+                if crate::config::is_global_debug_enabled() {
+                    eprintln!(
+                        "DEBUG: Marking '{}' as Public (default export)",
+                        symbol.name
+                    );
+                }
+                symbol.visibility = Visibility::Public;
             }
         }
 
@@ -99,6 +115,7 @@ impl TypeScriptParser {
             parser,
             context: ParserContext::new(),
             node_tracker: NodeTrackingState::new(),
+            default_exported_symbols: std::collections::HashSet::new(),
         })
     }
 
@@ -307,6 +324,48 @@ impl TypeScriptParser {
                         module_path,
                     );
                     i += 1;
+                }
+            }
+            "export_statement" => {
+                // Check if this is a default export (export default SomeName)
+                self.register_handled_node(node.kind(), node.kind_id());
+
+                // Look for 'default' keyword followed by an identifier
+                let mut cursor = node.walk();
+                let children: Vec<Node> = node.children(&mut cursor).collect();
+
+                // Check if this is "export default <identifier>"
+                let mut found_default = false;
+                for (i, child) in children.iter().enumerate() {
+                    if child.kind() == "default" {
+                        found_default = true;
+                        // The next node should be the identifier being exported
+                        if i + 1 < children.len() {
+                            let next = &children[i + 1];
+                            if next.kind() == "identifier" {
+                                let symbol_name = &code[next.byte_range()];
+                                self.default_exported_symbols
+                                    .insert(symbol_name.to_string());
+                                if crate::config::is_global_debug_enabled() {
+                                    eprintln!("DEBUG: Found default export of '{symbol_name}'");
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Still process children for nested declarations (e.g., export function foo())
+                if !found_default {
+                    for child in children {
+                        self.extract_symbols_from_node(
+                            child,
+                            code,
+                            file_id,
+                            counter,
+                            symbols,
+                            module_path,
+                        );
+                    }
                 }
             }
             _ => {
