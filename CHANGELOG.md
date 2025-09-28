@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.15] - 2025-09-27
+
+### Added
+- Cross-module resolution: Full qualified path resolution for all languages
+  - Symbols now resolvable by both simple name and full module path
+  - Example: `crate::init::init_global_dirs`, `app.utils.helper.process_data`
+- Python parser: Methods now use qualified names (e.g., `Calculator.__init__`)
+- Resolution tests for Rust and Python cross-module calls
+- Architectural documentation: Universal vs language-specific concepts
+
+### Changed
+- **BREAKING**: Python method naming convention - requires reindexing Python codebases
+- Resolution context: Module paths added during symbol population
+
+### Fixed
+- Cross-module function calls not being resolved (e.g., `crate::module::function`)
+- Python parser tests updated for new qualified naming convention
+
 ## [0.5.14] - 2025-09-25
 
 ### Added

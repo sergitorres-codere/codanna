@@ -387,6 +387,12 @@ pub trait LanguageBehavior: Send + Sync {
         for symbol in file_symbols {
             if self.is_resolvable_symbol(&symbol) {
                 context.add_symbol(symbol.name.to_string(), symbol.id, ScopeLevel::Module);
+
+                // Also add by module_path for fully qualified resolution
+                // This allows resolving "crate::module::function" in addition to "function"
+                if let Some(module_path) = &symbol.module_path {
+                    context.add_symbol(module_path.to_string(), symbol.id, ScopeLevel::Module);
+                }
             }
         }
 
@@ -410,6 +416,11 @@ pub trait LanguageBehavior: Send + Sync {
             if self.is_symbol_visible_from_file(&symbol, file_id) {
                 // Add as global symbol (lower priority)
                 context.add_symbol(symbol.name.to_string(), symbol.id, ScopeLevel::Global);
+
+                // Also add by module_path for fully qualified resolution
+                if let Some(module_path) = &symbol.module_path {
+                    context.add_symbol(module_path.to_string(), symbol.id, ScopeLevel::Global);
+                }
             }
         }
 
@@ -530,6 +541,12 @@ pub trait LanguageBehavior: Send + Sync {
         for symbol in file_symbols {
             if self.is_resolvable_symbol(&symbol) {
                 context.add_symbol(symbol.name.to_string(), symbol.id, ScopeLevel::Module);
+
+                // Also add by module_path for fully qualified resolution
+                // This allows resolving "crate::module::function" in addition to "function"
+                if let Some(module_path) = &symbol.module_path {
+                    context.add_symbol(module_path.to_string(), symbol.id, ScopeLevel::Module);
+                }
             }
         }
 
@@ -583,6 +600,11 @@ pub trait LanguageBehavior: Send + Sync {
                 // Only add if it's visible from our file
                 if self.is_symbol_visible_from_file(&symbol, file_id) {
                     context.add_symbol(symbol.name.to_string(), symbol.id, ScopeLevel::Global);
+
+                    // Also add by module_path for fully qualified resolution
+                    if let Some(module_path) = &symbol.module_path {
+                        context.add_symbol(module_path.to_string(), symbol.id, ScopeLevel::Global);
+                    }
                 }
             }
         }
@@ -604,6 +626,11 @@ pub trait LanguageBehavior: Send + Sync {
             for symbol in minimal_symbols {
                 if symbol.file_id != file_id && self.is_symbol_visible_from_file(&symbol, file_id) {
                     context.add_symbol(symbol.name.to_string(), symbol.id, ScopeLevel::Global);
+
+                    // Also add by module_path for fully qualified resolution
+                    if let Some(module_path) = &symbol.module_path {
+                        context.add_symbol(module_path.to_string(), symbol.id, ScopeLevel::Global);
+                    }
                 }
             }
         } else {

@@ -27,3 +27,9 @@ mod test_project_registry;
 
 #[path = "integration/test_config_path_resolution.rs"]
 mod test_config_path_resolution;
+
+#[path = "integration/test_cross_module_resolution.rs"]
+mod test_cross_module_resolution;
+
+#[path = "integration/test_python_cross_module_resolution.rs"]
+mod test_python_cross_module_resolution;
