@@ -919,8 +919,7 @@ impl TypeScriptParser {
         // 3) Token check: if the source preceding the node contains 'export '
         // This catches inline modifiers when export is not represented as a wrapper.
         let start = node.start_byte();
-        let prefix_start = start.saturating_sub(10); // small window
-        let prefix = &code[prefix_start..start];
+        let prefix = crate::parsing::safe_substring_window(code, start, 10);
         if prefix.contains("export ") || prefix.contains("export\n") {
             return Visibility::Public;
         }

@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.17] - 2025-09-29
+
+### Changed
+- Refactored relationship compatibility logic from indexer to language behaviors
+  - Moved `is_compatible_relationship` from SimpleIndexer to ResolutionScope trait
+  - Each language now controls its own relationship validation rules
+  - Cleaner separation between orchestration and language-specific logic
+
+### Fixed
+- UTF-8 character boundary parsing error when encountering Unicode characters
+  - Added `safe_substring_window()` utility for UTF-8-safe string slicing
+  - TypeScript parser now handles box-drawing characters and emojis correctly
+  - Prevents panic when checking for export modifiers before symbols
+  - Fixes Issue #38
+
 ## [0.5.16] - 2025-09-28
 
 ### Added

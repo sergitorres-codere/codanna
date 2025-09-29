@@ -26,8 +26,8 @@ pub use language::Language;
 pub use language_behavior::{LanguageBehavior, LanguageMetadata};
 pub use method_call::MethodCall;
 pub use parser::{
-    HandledNode, LanguageParser, NodeTracker, NodeTrackingState, safe_truncate_str,
-    truncate_for_display,
+    HandledNode, LanguageParser, NodeTracker, NodeTrackingState, safe_substring_window,
+    safe_truncate_str, truncate_for_display,
 };
 pub use php::{PhpBehavior, PhpParser};
 pub use python::{PythonBehavior, PythonParser};
