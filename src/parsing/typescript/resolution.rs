@@ -381,6 +381,119 @@ impl ResolutionScope for TypeScriptResolutionContext {
             }
         }
     }
+
+    fn is_compatible_relationship(
+        &self,
+        from_kind: crate::SymbolKind,
+        to_kind: crate::SymbolKind,
+        rel_kind: crate::RelationKind,
+    ) -> bool {
+        use crate::RelationKind::*;
+        use crate::SymbolKind::*;
+
+        match rel_kind {
+            Calls => {
+                // TypeScript-specific: Functions/Methods can call
+                let caller_can_call = matches!(from_kind, Function | Method | Macro | Module);
+                // TypeScript-specific: Constants and Variables can be callable
+                // This enables React component patterns: const Button = () => {}
+                let callee_can_be_called = matches!(
+                    to_kind,
+                    Function | Method | Macro | Class | Constant | Variable
+                );
+                caller_can_call && callee_can_be_called
+            }
+            CalledBy => {
+                // Reverse of Calls
+                let caller_can_call = matches!(to_kind, Function | Method | Macro | Module);
+                let callee_can_be_called = matches!(
+                    from_kind,
+                    Function | Method | Macro | Class | Constant | Variable
+                );
+                callee_can_be_called && caller_can_call
+            }
+            // For all other relationships, delegate to the default implementation
+            // by replicating the logic (can't call trait default directly)
+            Implements => {
+                matches!(from_kind, Struct | Enum | Class) && matches!(to_kind, Trait | Interface)
+            }
+            ImplementedBy => {
+                matches!(from_kind, Trait | Interface) && matches!(to_kind, Struct | Enum | Class)
+            }
+            Uses => {
+                let can_use = matches!(
+                    from_kind,
+                    Function | Method | Struct | Class | Trait | Interface | Module | Enum
+                );
+                let can_be_used = matches!(
+                    to_kind,
+                    Struct
+                        | Enum
+                        | Class
+                        | Trait
+                        | Interface
+                        | TypeAlias
+                        | Constant
+                        | Variable
+                        | Function
+                        | Method
+                );
+
+                can_use && can_be_used
+            }
+            UsedBy => {
+                let can_be_used = matches!(
+                    from_kind,
+                    Struct
+                        | Enum
+                        | Class
+                        | Trait
+                        | Interface
+                        | TypeAlias
+                        | Constant
+                        | Variable
+                        | Function
+                        | Method
+                );
+                let can_use = matches!(
+                    to_kind,
+                    Function | Method | Struct | Class | Trait | Interface | Module | Enum
+                );
+                can_be_used && can_use
+            }
+            Defines => {
+                let container = matches!(
+                    from_kind,
+                    Trait | Interface | Module | Struct | Enum | Class
+                );
+                let member = matches!(to_kind, Method | Function | Constant | Field | Variable);
+                container && member
+            }
+            DefinedIn => {
+                let member = matches!(from_kind, Method | Function | Constant | Field | Variable);
+                let container =
+                    matches!(to_kind, Trait | Interface | Module | Struct | Enum | Class);
+                member && container
+            }
+            Extends => {
+                let extendable = matches!(from_kind, Class | Interface | Trait | Struct | Enum);
+                let can_be_extended = matches!(to_kind, Class | Interface | Trait | Struct | Enum);
+                extendable && can_be_extended
+            }
+            ExtendedBy => {
+                matches!(from_kind, Class | Interface | Trait | Struct | Enum)
+                    && matches!(to_kind, Class | Interface | Trait | Struct | Enum)
+            }
+            References => {
+                // Very permissive - almost anything can reference anything
+                true
+            }
+            ReferencedBy => {
+                // Very permissive - almost anything can reference anything
+                true
+            }
+        }
+    }
 }
 
 /// TypeScript inheritance resolution system
@@ -772,6 +885,28 @@ impl ProjectResolutionEnhancer for TypeScriptProjectEnhancer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_typescript_function_can_call_constant() {
+        // React pattern: const Button = () => {}
+        let context = TypeScriptResolutionContext::new(FileId::new(1).unwrap());
+        assert!(context.is_compatible_relationship(
+            crate::SymbolKind::Function,
+            crate::SymbolKind::Constant,
+            crate::RelationKind::Calls
+        ));
+    }
+
+    #[test]
+    fn test_typescript_function_can_call_variable() {
+        // Functional component stored in variable
+        let context = TypeScriptResolutionContext::new(FileId::new(1).unwrap());
+        assert!(context.is_compatible_relationship(
+            crate::SymbolKind::Function,
+            crate::SymbolKind::Variable,
+            crate::RelationKind::Calls
+        ));
+    }
 
     #[test]
     fn test_typescript_hoisting() {
