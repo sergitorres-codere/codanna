@@ -767,8 +767,19 @@ async fn main() {
             let mut new_indexer = SimpleIndexer::with_settings_lazy(settings.clone());
             // Clear Tantivy index if force re-indexing directory
             if force_recreate_index {
+                // First clear the persisted Tantivy files on disk
+                if let Err(e) = persistence.clear() {
+                    eprintln!("Warning: Failed to clear persisted Tantivy index: {e}");
+                }
+
+                // Then clear in-memory state
                 if let Err(e) = new_indexer.clear_tantivy_index() {
-                    eprintln!("Warning: Failed to clear Tantivy index: {e}");
+                    eprintln!("Warning: Failed to clear Tantivy index state: {e}");
+                }
+
+                // Also clear symbol cache to fix Windows file locking issues
+                if let Err(e) = new_indexer.clear_symbol_cache(true) {
+                    eprintln!("Warning: Failed to clear symbol cache: {e}");
                 }
             }
             new_indexer

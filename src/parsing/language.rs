@@ -16,6 +16,7 @@ pub enum Language {
     Go,
     C,
     Cpp,
+    CSharp,
 }
 
 impl Language {
@@ -34,6 +35,7 @@ impl Language {
             Language::Go => super::LanguageId::new("go"),
             Language::C => super::LanguageId::new("c"),
             Language::Cpp => super::LanguageId::new("cpp"),
+            Language::CSharp => super::LanguageId::new("csharp"),
         }
     }
 
@@ -51,6 +53,7 @@ impl Language {
             "go" => Some(Language::Go),
             "c" => Some(Language::C),
             "cpp" => Some(Language::Cpp),
+            "csharp" => Some(Language::CSharp),
             _ => None,
         }
     }
@@ -83,6 +86,7 @@ impl Language {
             "go" | "go.mod" | "go.sum" => Some(Language::Go),
             "c" | "h" => Some(Language::C),
             "cpp" | "hpp" | "cc" | "cxx" | "hxx" => Some(Language::Cpp),
+            "cs" | "csx" => Some(Language::CSharp),
             _ => None,
         }
     }
@@ -107,6 +111,7 @@ impl Language {
             Language::Go => &["go", "go.mod", "go.sum"],
             Language::C => &["c", "h"],
             Language::Cpp => &["cpp", "hpp", "cc", "cxx", "hxx"],
+            Language::CSharp => &["cs", "csx"],
         }
     }
 
@@ -121,6 +126,7 @@ impl Language {
             Language::Go => "go",
             Language::C => "c",
             Language::Cpp => "cpp",
+            Language::CSharp => "csharp",
         }
     }
 
@@ -135,6 +141,7 @@ impl Language {
             Language::Go => "Go",
             Language::C => "C",
             Language::Cpp => "C++",
+            Language::CSharp => "C#",
         }
     }
 }

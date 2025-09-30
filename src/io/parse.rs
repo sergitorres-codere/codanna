@@ -256,6 +256,7 @@ pub fn execute_parse(
         Language::Go => tree_sitter_go::LANGUAGE.into(),
         Language::C => tree_sitter_c::LANGUAGE.into(),
         Language::Cpp => tree_sitter_cpp::LANGUAGE.into(),
+        Language::CSharp => tree_sitter_c_sharp::LANGUAGE.into(),
     };
 
     parser

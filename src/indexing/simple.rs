@@ -2182,6 +2182,7 @@ impl SimpleIndexer {
         // Process all unresolved relationships
         let unresolved = std::mem::take(&mut self.unresolved_relationships);
 
+        eprintln!("DEBUG: resolve_cross_file_relationships: {} unresolved relationships", unresolved.len());
         debug_print!(
             self,
             "resolve_cross_file_relationships: {} unresolved relationships",
@@ -2189,6 +2190,7 @@ impl SimpleIndexer {
         );
 
         if unresolved.is_empty() {
+            eprintln!("DEBUG: No unresolved relationships to process");
             return Ok(());
         }
 
@@ -2684,6 +2686,9 @@ impl SimpleIndexer {
     pub fn build_symbol_cache(&mut self) -> IndexResult<()> {
         let cache_path = self.get_cache_path();
 
+        // Clear any existing cache first to release memory-mapped views (Windows fix)
+        self.clear_symbol_cache(false)?;
+
         // Get all symbols from the index (use the existing public method)
         let all_symbols = self.get_all_symbols();
         debug_print!(
@@ -2726,6 +2731,24 @@ impl SimpleIndexer {
             "Built symbol cache with {} symbols",
             all_symbols.len()
         );
+        Ok(())
+    }
+
+    /// Clear symbol cache (drop memory-mapped view and optionally delete file)
+    pub fn clear_symbol_cache(&mut self, delete_file: bool) -> IndexResult<()> {
+        // Drop the existing cache to release any memory-mapped views
+        self.symbol_cache = None;
+
+        if delete_file {
+            let cache_path = self.get_cache_path();
+            if cache_path.exists() {
+                std::fs::remove_file(&cache_path).map_err(|e| {
+                    IndexError::General(format!("Failed to delete symbol cache file: {e}"))
+                })?;
+                debug_print!(self, "Deleted symbol cache file: {}", cache_path.display());
+            }
+        }
+
         Ok(())
     }
 
