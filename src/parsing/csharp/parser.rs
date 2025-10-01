@@ -906,6 +906,216 @@ impl CSharpParser {
         code[start..end].trim().to_string()
     }
 
+    /// Extract variable type declarations from a node tree (recursive helper)
+    ///
+    /// This method recursively traverses the syntax tree looking for variable declarations
+    /// and extracts variable→type mappings. These mappings are crucial for resolving
+    /// method calls on local variables (e.g., `helper.DoWork()` where `helper` is a local variable).
+    ///
+    /// ## Tree-sitter C# Grammar
+    ///
+    /// The C# tree-sitter grammar represents variable declarations as either:
+    /// - `local_declaration_statement` - for local variables inside methods
+    /// - `variable_declaration` - the actual declaration node containing type and declarators
+    ///
+    /// Example AST structure for `var helper = new Helper();`:
+    /// ```text
+    /// local_declaration_statement
+    ///   └── variable_declaration
+    ///       ├── implicit_type ("var")
+    ///       └── variable_declarator
+    ///           ├── identifier ("helper")
+    ///           ├── =
+    ///           └── object_creation_expression ("new Helper()")
+    /// ```
+    ///
+    /// ## Supported Patterns
+    ///
+    /// - `var x = new Type()` - Infers type from initializer
+    /// - `Type x = new Type()` - Uses explicit type annotation
+    /// - `var x = expr` - For qualified types (when expr type is explicit)
+    ///
+    /// ## Parameters
+    ///
+    /// * `node` - Current AST node being processed
+    /// * `code` - Source code as string slice
+    /// * `bindings` - Accumulated list of (variable_name, type_name, range) tuples
+    ///
+    /// ## Returns
+    ///
+    /// Returns tuples of (variable_name, type_name, range) via the `bindings` parameter
+    fn find_variable_types_in_node<'a>(
+        &self,
+        node: &Node,
+        code: &'a str,
+        bindings: &mut Vec<(&'a str, &'a str, Range)>,
+    ) {
+        // Match both node types directly (same pattern as extract_symbols_from_node:304)
+        // We need to handle both because the tree structure can vary
+        if node.kind() == "variable_declaration" || node.kind() == "local_declaration_statement" {
+            self.extract_variable_bindings(node, code, bindings);
+        }
+
+        // Recurse into all children to find nested variable declarations
+        // (e.g., variables inside nested blocks, loops, etc.)
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            self.find_variable_types_in_node(&child, code, bindings);
+        }
+    }
+
+    /// Extract variable bindings from a variable_declaration node
+    ///
+    /// This method processes a single variable declaration and extracts all variable→type
+    /// mappings from it. A single declaration can contain multiple variables (e.g.,
+    /// `var x = new A(), y = new B();`).
+    ///
+    /// ## Strategy
+    ///
+    /// 1. **Type from initializer** (preferred): If the variable has a `new Type()` initializer,
+    ///    extract the type from there. This handles the `var` keyword case.
+    /// 2. **Explicit type** (fallback): If no initializer or not a `new` expression, use the
+    ///    explicit type annotation (but skip "var" since we can't infer the type without initializer).
+    ///
+    /// ## Examples
+    ///
+    /// - `var helper = new Helper()` → (helper, Helper) - type inferred from initializer
+    /// - `Helper helper = new Helper()` → (helper, Helper) - explicit type used
+    /// - `IService service = factory.Create()` → (service, IService) - explicit type used (can't infer from method call)
+    /// - `var x = 5` → skipped (no type info available for primitives without full type inference)
+    ///
+    /// ## Parameters
+    ///
+    /// * `var_decl` - The variable_declaration or local_declaration_statement node
+    /// * `code` - Source code as string slice
+    /// * `bindings` - Output list of (variable_name, type_name, range) tuples
+    fn extract_variable_bindings<'a>(
+        &self,
+        var_decl: &Node,
+        code: &'a str,
+        bindings: &mut Vec<(&'a str, &'a str, Range)>,
+    ) {
+        // Variable declaration structure in tree-sitter C#:
+        // variable_declaration has:
+        // - type field: could be "implicit_type" (var) or explicit type like "Helper", "List<T>", etc.
+        // - variable_declarator children: one or more declarators (the actual variables)
+
+        let type_node = var_decl.child_by_field_name("type");
+        let mut cursor = var_decl.walk();
+
+        for child in var_decl.children(&mut cursor) {
+            if child.kind() == "variable_declarator" {
+                // Each variable_declarator represents one variable in the declaration
+                // Structure: identifier = initializer
+                // Example: in "var x = new A(), y = new B()", there are two variable_declarators
+
+                if let Some(name_node) = child.child_by_field_name("name") {
+                    // Ensure the name is a simple identifier (not a pattern)
+                    if name_node.kind() != "identifier" {
+                        continue;
+                    }
+                    let var_name = &code[name_node.byte_range()];
+
+                    // Strategy 1: Try to extract type from initializer (handles "var" keyword)
+                    // In tree-sitter C#, object_creation_expression is a direct child of variable_declarator
+                    // Example structure: variable_declarator -> [identifier, "=", object_creation_expression]
+                    let mut init_expr = None;
+                    let mut sub_cursor = child.walk();
+                    for vchild in child.children(&mut sub_cursor) {
+                        if vchild.kind() == "object_creation_expression" {
+                            init_expr = Some(vchild);
+                            break;
+                        }
+                    }
+
+                    if let Some(init_node) = init_expr {
+                        // Found a "new Type()" expression - extract the type
+                        if let Some(type_name) = self.extract_type_from_initializer(&init_node, code) {
+                            let range = Range::new(
+                                child.start_position().row as u32,
+                                child.start_position().column as u16,
+                                child.end_position().row as u32,
+                                child.end_position().column as u16,
+                            );
+                            bindings.push((var_name, type_name, range));
+                            continue; // Successfully extracted, move to next variable
+                        }
+                    }
+
+                    // Strategy 2: Fall back to explicit type annotation
+                    // This handles cases like "Helper helper = ..." or "IService service = factory.Create()"
+                    if let Some(type_node) = type_node {
+                        let type_str = &code[type_node.byte_range()];
+                        // Skip "var" keyword - we can't infer type without analyzing the full expression
+                        // (which would require complex type inference beyond current scope)
+                        if type_str != "var" {
+                            let range = Range::new(
+                                child.start_position().row as u32,
+                                child.start_position().column as u16,
+                                child.end_position().row as u32,
+                                child.end_position().column as u16,
+                            );
+                            bindings.push((var_name, type_str, range));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Extract type name from an initializer expression
+    ///
+    /// Handles:
+    /// - `new Type()` → Some("Type")
+    /// - `new Generic<T>()` → Some("Generic")
+    /// - `new Namespace.Type()` → Some("Type")
+    fn extract_type_from_initializer<'a>(
+        &self,
+        init_node: &Node,
+        code: &'a str,
+    ) -> Option<&'a str> {
+        // Look for object_creation_expression
+        if init_node.kind() == "object_creation_expression" {
+            // object_creation_expression has a 'type' field
+            if let Some(type_node) = init_node.child_by_field_name("type") {
+                return Some(self.extract_simple_type_name(&type_node, code));
+            }
+        }
+        None
+    }
+
+    /// Extract simple type name from a type node, handling qualified names and generics
+    ///
+    /// Examples:
+    /// - `Helper` → "Helper"
+    /// - `List<T>` → "List"
+    /// - `System.Collections.List` → "List"
+    fn extract_simple_type_name<'a>(&self, type_node: &Node, code: &'a str) -> &'a str {
+        match type_node.kind() {
+            "identifier" => &code[type_node.byte_range()],
+            "generic_name" => {
+                // Generic name has an identifier child
+                if let Some(ident) = type_node.child_by_field_name("name") {
+                    &code[ident.byte_range()]
+                } else {
+                    &code[type_node.byte_range()]
+                }
+            }
+            "qualified_name" => {
+                // Take the last identifier (rightmost part)
+                let mut cursor = type_node.walk();
+                let mut last_ident = None;
+                for child in type_node.children(&mut cursor) {
+                    if child.kind() == "identifier" {
+                        last_ident = Some(&code[child.byte_range()]);
+                    }
+                }
+                last_ident.unwrap_or(&code[type_node.byte_range()])
+            }
+            _ => &code[type_node.byte_range()],
+        }
+    }
+
     /// Determine visibility from modifiers
     fn determine_visibility(&self, node: Node, code: &str) -> Visibility {
         let mut cursor = node.walk();
@@ -1430,14 +1640,86 @@ impl LanguageParser for CSharpParser {
 
     fn find_uses<'a>(&mut self, _code: &'a str) -> Vec<(&'a str, &'a str, Range)> {
         // TODO: Implement proper type usage tracking for C#
-        // Currently disabled as it was creating invalid relationships with "use" as context
+        //
+        // This should track where types are referenced/used, for example:
+        // - Method parameter types: `void DoWork(Helper helper)`
+        // - Return types: `Helper GetHelper()`
+        // - Field/property types: `private Helper _helper;`
+        // - Base classes/interfaces: `class Foo : IBar`
+        //
+        // Previously disabled because it was creating invalid relationships with "use" as context
+        // instead of proper semantic relationships.
+        //
+        // Implementation approach:
+        // 1. Traverse AST looking for type references
+        // 2. Extract (user_symbol, used_type, range) tuples
+        // 3. Filter out primitive types (int, string, etc.)
+        // 4. Ensure proper context (method names, not node kinds)
         Vec::new()
     }
 
     fn find_defines<'a>(&mut self, _code: &'a str) -> Vec<(&'a str, &'a str, Range)> {
         // TODO: Implement proper defines tracking for C#
-        // Currently disabled as it was using node.kind() instead of actual definer names
+        //
+        // This should track definition relationships, for example:
+        // - Variable definitions: `var x = 5;` → (containing_method, "x", range)
+        // - Field definitions: `private int _count;` → (containing_class, "_count", range)
+        // - Property definitions: `public string Name { get; set; }` → (containing_class, "Name", range)
+        //
+        // Previously disabled because it was using node.kind() instead of actual definer names,
+        // creating relationships like "variable_declaration defines x" instead of "Method defines x".
+        //
+        // Implementation approach:
+        // 1. Track current scope context (class, method, etc.)
+        // 2. For each definition, extract (definer_name, defined_symbol, range)
+        // 3. Ensure definer_name is the actual symbol name, not AST node type
         Vec::new()
+    }
+
+    /// Extract variable type bindings from C# code
+    ///
+    /// This method implements variable type tracking for C#, which is essential for
+    /// resolving method calls on local variables. Without this, codanna cannot resolve
+    /// relationships like `var service = new MyService(); service.DoWork();` because
+    /// it doesn't know that `service` is of type `MyService`.
+    ///
+    /// ## How It Works
+    ///
+    /// 1. Parse the C# file into an AST using tree-sitter-c-sharp
+    /// 2. Recursively traverse the tree looking for variable declarations
+    /// 3. For each variable, extract the type either from:
+    ///    - The initializer expression (`new Type()`)
+    ///    - The explicit type annotation
+    /// 4. Return list of (variable_name, type_name, source_location) tuples
+    ///
+    /// ## Example
+    ///
+    /// ```csharp
+    /// public void Example() {
+    ///     var helper = new Helper();  // → ("helper", "Helper", Range)
+    ///     helper.DoWork();             // Now codanna can resolve DoWork() on Helper type
+    /// }
+    /// ```
+    ///
+    /// ## Limitations
+    ///
+    /// - Only tracks variables with explicit type or `new Type()` initializers
+    /// - Does not perform full type inference (e.g., `var x = 5` is not tracked)
+    /// - Does not track method return types without explicit annotation
+    ///
+    /// ## Returns
+    ///
+    /// Vector of tuples: (variable_name, type_name, source_range)
+    /// where type_name is a string slice pointing into the original source code (zero-copy)
+    fn find_variable_types<'a>(&mut self, code: &'a str) -> Vec<(&'a str, &'a str, Range)> {
+        let mut bindings = Vec::new();
+
+        if let Some(tree) = self.parser.parse(code, None) {
+            let root = tree.root_node();
+            self.find_variable_types_in_node(&root, code, &mut bindings);
+        }
+
+        bindings
     }
 
     fn find_imports(&mut self, code: &str, file_id: FileId) -> Vec<Import> {
