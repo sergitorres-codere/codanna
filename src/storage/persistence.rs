@@ -209,6 +209,14 @@ impl IndexPersistence {
                     Err(e) => return Err(e),
                 }
             }
+            // Recreate the empty tantivy directory after clearing
+            std::fs::create_dir_all(&tantivy_path)?;
+
+            // On Windows, add extra delay after recreating directory to ensure filesystem is ready
+            #[cfg(windows)]
+            {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
         }
         Ok(())
     }

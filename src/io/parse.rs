@@ -239,11 +239,13 @@ pub fn execute_parse(
             extension: extension.to_string(),
         })?;
 
-    // Read file content
-    let code = std::fs::read_to_string(file_path).map_err(|e| ParseError::FileReadError {
+    // Read file content with lossy UTF-8 conversion
+    // This handles files with invalid UTF-8 sequences by replacing them with �
+    let bytes = std::fs::read(file_path).map_err(|e| ParseError::FileReadError {
         path: file_path.display().to_string(),
         source: e,
     })?;
+    let code = String::from_utf8_lossy(&bytes).into_owned();
 
     // Create tree-sitter parser for the language
     let mut parser = tree_sitter::Parser::new();

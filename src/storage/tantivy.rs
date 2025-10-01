@@ -1136,6 +1136,13 @@ impl DocumentIndex {
 
     /// Clear all documents from the index
     pub fn clear(&self) -> StorageResult<()> {
+        // Check if index has been initialized (has meta.json)
+        // If not, there's nothing to clear
+        let meta_path = self.index_path.join("meta.json");
+        if !meta_path.exists() {
+            return Ok(());
+        }
+
         let mut writer = self.index.writer::<Document>(50_000_000)?;
         writer.delete_all_documents()?;
         writer.commit()?;

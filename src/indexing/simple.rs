@@ -621,11 +621,15 @@ impl SimpleIndexer {
     }
 
     /// Read file content and calculate its hash
+    /// Uses lossy UTF-8 conversion to handle files with invalid encoding
     fn read_file_with_hash(&self, path: &Path) -> IndexResult<(String, String)> {
-        let content = fs::read_to_string(path).map_err(|e| IndexError::FileRead {
+        // Read as bytes first, then convert with lossy UTF-8
+        // This handles BOM, Windows-1252, and other non-UTF-8 encodings
+        let bytes = fs::read(path).map_err(|e| IndexError::FileRead {
             path: path.to_path_buf(),
             source: e,
         })?;
+        let content = String::from_utf8_lossy(&bytes).into_owned();
 
         let hash = calculate_hash(&content);
         Ok((content, hash))
@@ -1961,20 +1965,28 @@ impl SimpleIndexer {
 
         let mut stats = IndexStats::new();
 
-        // Process files one at a time with individual batches
+        // Process files one at a time with batched commits
         let processed = Arc::new(AtomicUsize::new(0));
+
+        // Start batch once before the loop
+        self.start_tantivy_batch()?;
+        const COMMIT_BATCH_SIZE: usize = 100; // Commit every 100 files to reduce I/O
+        let mut files_in_batch = 0;
 
         for file_path in files {
             // Track files as they are processed
 
             {
-                // Start a new batch for this file
-                self.start_tantivy_batch()?;
-
                 match self.index_file_internal(&file_path, force) {
                     Ok(result) => {
-                        // Commit this file's symbols so they're searchable
-                        self.commit_tantivy_batch()?;
+                        files_in_batch += 1;
+
+                        // Commit batch periodically to avoid excessive memory usage
+                        if files_in_batch >= COMMIT_BATCH_SIZE {
+                            self.commit_tantivy_batch()?;
+                            self.start_tantivy_batch()?;
+                            files_in_batch = 0;
+                        }
 
                         let file_id = result.file_id();
 
@@ -2007,6 +2019,11 @@ impl SimpleIndexer {
 
         if progress {
             eprintln!(); // New line after progress
+        }
+
+        // Commit any remaining files in the batch
+        if files_in_batch > 0 {
+            self.commit_tantivy_batch()?;
         }
 
         // Resolve cross-file relationships after all files are indexed
