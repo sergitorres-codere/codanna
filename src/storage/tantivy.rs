@@ -372,6 +372,8 @@ pub struct DocumentIndex {
     pub(crate) pending_embeddings: Mutex<Vec<(SymbolId, String)>>,
     /// Pending symbol counter during batch operations
     pending_symbol_counter: Mutex<Option<u32>>,
+    /// Pending file counter during batch operations
+    pending_file_counter: Mutex<Option<u32>>,
 }
 
 impl std::fmt::Debug for DocumentIndex {
@@ -435,6 +437,7 @@ impl DocumentIndex {
             embedding_generator: None,
             pending_embeddings: Mutex::new(Vec::new()),
             pending_symbol_counter: Mutex::new(None),
+            pending_file_counter: Mutex::new(None),
         })
     }
 
@@ -777,6 +780,14 @@ impl DocumentIndex {
             if let Ok(mut pending_guard) = self.pending_symbol_counter.lock() {
                 *pending_guard = Some(current + 1);
             }
+
+            // Initialize the pending file counter for this batch
+            let file_current = self
+                .query_metadata(MetadataKey::FileCounter)?
+                .unwrap_or(0) as u32;
+            if let Ok(mut pending_guard) = self.pending_file_counter.lock() {
+                *pending_guard = Some(file_current + 1);
+            }
         }
         Ok(())
     }
@@ -887,6 +898,11 @@ impl DocumentIndex {
 
             // Clear the pending symbol counter after commit
             if let Ok(mut pending_guard) = self.pending_symbol_counter.lock() {
+                *pending_guard = None;
+            }
+
+            // Clear the pending file counter after commit
+            if let Ok(mut pending_guard) = self.pending_file_counter.lock() {
                 *pending_guard = None;
             }
 
@@ -1541,6 +1557,16 @@ impl DocumentIndex {
 
     /// Get next file ID
     pub fn get_next_file_id(&self) -> StorageResult<u32> {
+        // During batch operations, use and increment the pending counter
+        if let Ok(mut pending_guard) = self.pending_file_counter.lock() {
+            if let Some(ref mut counter) = *pending_guard {
+                let next_id = *counter;
+                *counter += 1;
+                return Ok(next_id);
+            }
+        }
+
+        // Otherwise, query the committed metadata
         let current = self.query_metadata(MetadataKey::FileCounter)?.unwrap_or(0) as u32;
         Ok(current + 1)
     }

@@ -649,6 +649,8 @@ impl SimpleIndexer {
         let file_id = FileId::new(file_counter).ok_or(IndexError::FileIdExhausted)?;
 
         // Update the file counter for next use
+        // Note: file_counter is already the next ID from get_next_file_id()
+        // It handles incrementing via pending_file_counter during batches
         self.document_index
             .store_metadata(
                 crate::storage::MetadataKey::FileCounter,
