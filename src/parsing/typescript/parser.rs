@@ -21,6 +21,8 @@ pub struct TypeScriptParser {
     node_tracker: NodeTrackingState,
     /// Track symbols that are default exported (e.g., export default Container)
     default_exported_symbols: std::collections::HashSet<String>,
+    /// Track JSX component usages (caller -> component name)
+    component_usages: Vec<(String, String)>,
 }
 
 impl TypeScriptParser {
@@ -66,6 +68,7 @@ impl TypeScriptParser {
         // Reset context and default exports for each file
         self.context = ParserContext::new();
         self.default_exported_symbols.clear();
+        self.component_usages.clear();
         let mut symbols = Vec::new();
 
         match self.parser.parse(code, None) {
@@ -116,6 +119,7 @@ impl TypeScriptParser {
             context: ParserContext::new(),
             node_tracker: NodeTrackingState::new(),
             default_exported_symbols: std::collections::HashSet::new(),
+            component_usages: Vec::new(),
         })
     }
 
@@ -130,7 +134,7 @@ impl TypeScriptParser {
         module_path: &str,
     ) {
         match node.kind() {
-            "function_declaration" => {
+            "function_declaration" | "generator_function_declaration" => {
                 // Register ALL child nodes for audit (including type_parameters, parameters, etc.)
                 self.register_node_recursively(node);
 
@@ -366,6 +370,38 @@ impl TypeScriptParser {
                             module_path,
                         );
                     }
+                }
+            }
+            "jsx_element" | "jsx_self_closing_element" => {
+                // Track JSX component usage as Uses relationship
+                self.register_handled_node(node.kind(), node.kind_id());
+
+                if crate::config::is_global_debug_enabled() {
+                    eprintln!(
+                        "DEBUG: Found JSX node: {} at {}:{}",
+                        node.kind(),
+                        node.start_position().row,
+                        node.start_position().column
+                    );
+                    eprintln!(
+                        "DEBUG: Current function: {:?}",
+                        self.context.current_function()
+                    );
+                }
+
+                self.track_jsx_component_usage(node, code);
+
+                // Process children to find nested JSX elements
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    self.extract_symbols_from_node(
+                        child,
+                        code,
+                        file_id,
+                        counter,
+                        symbols,
+                        module_path,
+                    );
                 }
             }
             _ => {
@@ -1409,7 +1445,9 @@ impl TypeScriptParser {
         if node.kind() == "export_statement" {
             let mut w = node.walk();
             for child in node.children(&mut w) {
-                if child.kind() == "function_declaration" {
+                if child.kind() == "function_declaration"
+                    || child.kind() == "generator_function_declaration"
+                {
                     // Try to get function name
                     let func_name = child
                         .child_by_field_name("name")
@@ -1427,6 +1465,7 @@ impl TypeScriptParser {
         // Handle function context - track which function we're inside
         // CRITICAL: Only set NEW context when entering a function, otherwise INHERIT current context
         let function_context = if node.kind() == "function_declaration"
+            || node.kind() == "generator_function_declaration"
             || node.kind() == "method_definition"
             || node.kind() == "arrow_function"
             || node.kind() == "function_expression"
@@ -1538,7 +1577,7 @@ impl TypeScriptParser {
                         let mut ctx: Option<&'a str> = None;
                         while let Some(a) = anc {
                             match a.kind() {
-                                "function_declaration" => {
+                                "function_declaration" | "generator_function_declaration" => {
                                     if let Some(name_node) =
                                         a.child_by_field_name("name").or_else(|| {
                                             let mut w = a.walk();
@@ -1598,6 +1637,7 @@ impl TypeScriptParser {
                                 // Heuristic boundary: stop if we hit another top-level declaration
                                 let k = sibling.kind();
                                 if k == "function_declaration"
+                                    || k == "generator_function_declaration"
                                     || k == "class_declaration"
                                     || k == "abstract_class_declaration"
                                     || k == "export_statement"
@@ -1636,6 +1676,7 @@ impl TypeScriptParser {
         match node.kind() {
             // Function declarations with parameters and return types
             "function_declaration"
+            | "generator_function_declaration"
             | "function_signature"
             | "method_definition"
             | "method_signature" => {
@@ -2087,6 +2128,7 @@ impl TypeScriptParser {
         // Track function context - SAME FIX as extract_calls_recursive
         // Only set NEW context when entering a function, otherwise INHERIT
         let function_context = if node.kind() == "function_declaration"
+            || node.kind() == "generator_function_declaration"
             || node.kind() == "method_definition"
             || node.kind() == "arrow_function"
             || node.kind() == "function_expression"
@@ -2199,6 +2241,48 @@ impl TypeScriptParser {
         }
     }
 
+    /// Track JSX component usage relationships
+    fn track_jsx_component_usage(&mut self, node: Node, code: &str) {
+        let component_name = match node.kind() {
+            "jsx_element" => {
+                // For <Component>...</Component>, get name from opening element
+                node.child_by_field_name("open_tag")
+                    .and_then(|tag| tag.child_by_field_name("name"))
+                    .map(|name| &code[name.byte_range()])
+            }
+            "jsx_self_closing_element" => {
+                // For <Component />, get name directly
+                node.child_by_field_name("name")
+                    .map(|name| &code[name.byte_range()])
+            }
+            _ => None,
+        };
+
+        if crate::config::is_global_debug_enabled() {
+            eprintln!("DEBUG: JSX component_name extracted: {component_name:?}");
+        }
+
+        if let Some(component_name) = component_name {
+            // Filter out HTML elements (lowercase) - only track React components (uppercase)
+            if component_name
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_uppercase())
+            {
+                // Track this as a component usage from current context
+                if let Some(current_fn) = self.context.current_function() {
+                    if crate::config::is_global_debug_enabled() {
+                        eprintln!("DEBUG: Tracking JSX usage: {current_fn} uses {component_name}");
+                    }
+                    self.component_usages
+                        .push((current_fn.to_string(), component_name.to_string()));
+                }
+            } else if crate::config::is_global_debug_enabled() {
+                eprintln!("DEBUG: Skipping lowercase JSX element: {component_name}");
+            }
+        }
+    }
+
     fn extract_function_name<'a>(node: &tree_sitter::Node, code: &'a str) -> Option<&'a str> {
         match node.kind() {
             "identifier" => Some(&code[node.byte_range()]),
@@ -2233,6 +2317,69 @@ impl TypeScriptParser {
         for child in node.children(&mut cursor) {
             self.register_node_recursively(child);
         }
+    }
+
+    /// Extract JSX component usages recursively
+    /// Tracks function context and collects JSX component uses
+    fn extract_jsx_uses_recursive<'a>(
+        node: &Node,
+        code: &'a str,
+        current_fn: Option<&'a str>,
+        uses: &mut Vec<(&'a str, &'a str, Range)>,
+    ) -> Option<&'a str> {
+        // Track current function context
+        let func_context = if node.kind() == "function_declaration"
+            || node.kind() == "generator_function_declaration"
+            || node.kind() == "arrow_function"
+        {
+            if let Some(name_node) = node.child_by_field_name("name") {
+                Some(&code[name_node.byte_range()])
+            } else {
+                current_fn
+            }
+        } else {
+            current_fn
+        };
+
+        // Extract JSX component usage
+        if node.kind() == "jsx_element" || node.kind() == "jsx_self_closing_element" {
+            let component_name = match node.kind() {
+                "jsx_element" => node
+                    .child_by_field_name("open_tag")
+                    .and_then(|tag| tag.child_by_field_name("name"))
+                    .map(|name| &code[name.byte_range()]),
+                "jsx_self_closing_element" => node
+                    .child_by_field_name("name")
+                    .map(|name| &code[name.byte_range()]),
+                _ => None,
+            };
+
+            if let Some(component_name) = component_name {
+                // Only track uppercase components (React convention)
+                if component_name
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_uppercase())
+                {
+                    if let Some(fn_name) = func_context {
+                        let range = Range {
+                            start_line: node.start_position().row as u32,
+                            start_column: node.start_position().column as u16,
+                            end_line: node.end_position().row as u32,
+                            end_column: node.end_position().column as u16,
+                        };
+                        uses.push((fn_name, component_name, range));
+                    }
+                }
+            }
+        }
+
+        // Recurse to children with current context
+        for child in node.children(&mut node.walk()) {
+            Self::extract_jsx_uses_recursive(&child, code, func_context, uses);
+        }
+
+        func_context
     }
 }
 
@@ -2370,6 +2517,9 @@ impl LanguageParser for TypeScriptParser {
         let mut uses = Vec::new();
 
         self.extract_type_uses_recursive(&root, code, &mut uses);
+
+        // Extract JSX component usages during find_uses traversal
+        Self::extract_jsx_uses_recursive(&root, code, None, &mut uses);
 
         uses
     }
@@ -2935,5 +3085,50 @@ export type { Props } from './types';
         assert!(imports.iter().any(|i| i.path == "./utils" && i.is_glob));
 
         println!("✅ Export variations handled correctly");
+    }
+
+    #[test]
+    fn test_jsx_component_usage_tracking() {
+        let mut parser = TypeScriptParser::new().unwrap();
+        let code = r#"
+import React from 'react';
+import { Button } from './components/ui/button';
+
+export function MyPage() {
+  return (
+    <div>
+      <Button>Click me</Button>
+    </div>
+  );
+}
+
+export function AnotherComponent() {
+  return <Button>Another</Button>;
+}
+        "#;
+
+        let uses = parser.find_uses(code);
+
+        println!("\nJSX Uses found:");
+        for (caller, component, _range) in &uses {
+            println!("  {caller} uses {component}");
+        }
+
+        // Check that MyPage uses Button
+        assert!(
+            uses.iter()
+                .any(|(caller, component, _)| *caller == "MyPage" && *component == "Button"),
+            "MyPage should use Button component"
+        );
+
+        // Check that AnotherComponent uses Button
+        assert!(
+            uses.iter()
+                .any(|(caller, component, _)| *caller == "AnotherComponent"
+                    && *component == "Button"),
+            "AnotherComponent should use Button component"
+        );
+
+        println!("✅ JSX component usage tracking working");
     }
 }

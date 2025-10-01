@@ -370,7 +370,9 @@ impl CodeIntelligenceServer {
         Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
-    #[tool(description = "Get all functions that a given function calls")]
+    #[tool(
+        description = "Get functions that a given function CALLS (invokes with parentheses).\n\nShows: function_name() → what it calls\nDoes NOT show: Type usage, component rendering, or who calls this function.\n\nUse analyze_impact for: Type dependencies, component usage (JSX), or reverse lookups."
+    )]
     pub async fn get_calls(
         &self,
         Parameters(GetCallsRequest { function_name }): Parameters<GetCallsRequest>,
@@ -463,7 +465,9 @@ impl CodeIntelligenceServer {
         Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
-    #[tool(description = "Find all functions that call a given function")]
+    #[tool(
+        description = "Find functions that CALL a given function (invoke it with parentheses).\n\nShows: what calls → function_name()\nDoes NOT show: Type references, component rendering, or what this function calls.\n\nUse analyze_impact for: Complete dependency graph including type usage and composition."
+    )]
     pub async fn find_callers(
         &self,
         Parameters(FindCallersRequest { function_name }): Parameters<FindCallersRequest>,
@@ -563,7 +567,9 @@ impl CodeIntelligenceServer {
         Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
-    #[tool(description = "Analyze the impact radius of changing a symbol")]
+    #[tool(
+        description = "Analyze complete impact of changing a symbol. Shows ALL relationships: function calls, type usage, composition.\n\nShows:\n- What CALLS this function\n- What USES this as a type (fields, parameters, returns)\n- What RENDERS/COMPOSES this (JSX: <Component>, Rust: struct fields, etc.)\n- Full dependency graph across files\n\nUse this when: You need to see everything that depends on a symbol."
+    )]
     pub async fn analyze_impact(
         &self,
         Parameters(AnalyzeImpactRequest {
@@ -801,7 +807,7 @@ impl CodeIntelligenceServer {
     }
 
     #[tool(
-        description = "Search documentation with full context including dependencies, callers, and impact"
+        description = "Search by natural language and get full context: documentation, dependencies, callers, impact.\n\nReturns symbols with:\n- Their documentation\n- What calls them\n- What they call\n- Complete impact graph (includes ALL relationships: calls, type usage, composition)\n\nUse this when: You want to find and understand symbols with their complete usage context."
     )]
     pub async fn semantic_search_with_context(
         &self,

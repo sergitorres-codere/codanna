@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.18] - 2025-09-30
+
+### Added
+- JSX component usage tracking in TypeScript parser
+  - New `component_usages` field tracks function → component relationships
+  - `extract_jsx_uses_recursive()` traverses AST to find JSX elements
+  - `track_jsx_component_usage()` filters components by uppercase naming convention
+  - Supports `jsx_element` and `jsx_self_closing_element` nodes
+  - Generator functions (`generator_function_declaration`) included in function context
+- Test fixtures for JSX usage patterns
+  - Profile.tsx: React component with JSX
+  - test_documented_jsx.tsx: JSX with documentation
+  - test_jsx_same_file.tsx: JSX defined and used in same file
+  - test_jsx_usage.tsx: Multiple components using shared JSX
+
+### Changed
+- Audit reports regenerated to reflect JSX and generator function support
+- All language parser audit reports updated with latest node counts
+
 ## [0.5.17] - 2025-09-29
 
 ### Changed
