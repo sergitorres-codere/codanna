@@ -321,6 +321,36 @@ codanna retrieve search "parser" --json | jq -r '.items[].file_path' | sort -u
 codanna retrieve search "create_parser" --json | jq -r '.items[] | "\(.symbol.name) (\(.symbol.scope_context)) - \(.file_path)\n  \(.symbol.signature)"'
 ```
 
+**Advanced Piping: Extract System Messages and Map Call Graphs**
+
+System messages guide agents toward the next hop. Humans don't see them, but piping with jq reveals them:
+
+```bash
+# Extract system guidance from tool responses
+codanna mcp find_callers walk_and_stream --json | jq -r '.system_message'
+# Output: Found 18 callers. Run 'analyze_impact' to map the change radius.
+
+# Build a complete call graph: find a symbol, show what it calls, and trace one level deeper
+codanna mcp semantic_search_with_context query:"file processing" limit:1 --json | \
+jq -r '.data[0].symbol.name' | \
+xargs -I {} sh -c '
+  echo "=== Symbol: {} ==="
+  codanna mcp get_calls {} --json | jq -r ".data[]? | \"\(.name) - \(.file_path):\(.range.start_line)-\(.range.end_line)\""
+'
+# Output:
+# === Symbol: walk_and_stream ===
+# process_entry - src/io/parse.rs:285-291
+# parse_file - src/io/parse.rs:219-282
+# ...
+
+# Reverse it: find who calls a critical function and show exact line ranges
+codanna mcp find_callers parse_file --json | \
+jq -r '.data[]? | "\(.name) (\(.kind)) - \(.file_path):\(.range.start_line)-\(.range.end_line)"'
+# Output:
+# walk_and_stream (Function) - src/io/parse.rs:144-213
+# index_project (Method) - src/indexing/mod.rs:423-502
+```
+
 ### Documentation Comments for Better Search
 
 Semantic search works by understanding your documentation comments:

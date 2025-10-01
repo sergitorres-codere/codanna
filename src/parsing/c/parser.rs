@@ -83,6 +83,7 @@ impl CParser {
     fn create_symbol(
         &mut self,
         counter: &mut SymbolCounter,
+        full_node: Node,
         name_node: Node,
         kind: SymbolKind,
         file_id: FileId,
@@ -92,10 +93,10 @@ impl CParser {
         let symbol_id = counter.next_id();
 
         let range = Range::new(
-            name_node.start_position().row as u32,
-            name_node.start_position().column as u16,
-            name_node.end_position().row as u32,
-            name_node.end_position().column as u16,
+            full_node.start_position().row as u32,
+            full_node.start_position().column as u16,
+            full_node.end_position().row as u32,
+            full_node.end_position().column as u16,
         );
 
         let mut symbol = Symbol::new(symbol_id, name.to_string(), kind, file_id, range);
@@ -233,6 +234,7 @@ impl CParser {
                     if let Some(name_node) = Self::find_function_name_node(declarator) {
                         if let Some(symbol) = self.create_symbol(
                             counter,
+                            node,
                             name_node,
                             SymbolKind::Function,
                             file_id,
@@ -261,9 +263,14 @@ impl CParser {
             "struct_specifier" => {
                 self.register_handled_node("struct_specifier", node.kind_id());
                 if let Some(name_node) = node.child_by_field_name("name") {
-                    if let Some(symbol) =
-                        self.create_symbol(counter, name_node, SymbolKind::Struct, file_id, code)
-                    {
+                    if let Some(symbol) = self.create_symbol(
+                        counter,
+                        node,
+                        name_node,
+                        SymbolKind::Struct,
+                        file_id,
+                        code,
+                    ) {
                         symbols.push(symbol);
                     }
                 }
@@ -280,9 +287,14 @@ impl CParser {
             "union_specifier" => {
                 self.register_handled_node("union_specifier", node.kind_id());
                 if let Some(name_node) = node.child_by_field_name("name") {
-                    if let Some(symbol) =
-                        self.create_symbol(counter, name_node, SymbolKind::Struct, file_id, code)
-                    {
+                    if let Some(symbol) = self.create_symbol(
+                        counter,
+                        node,
+                        name_node,
+                        SymbolKind::Struct,
+                        file_id,
+                        code,
+                    ) {
                         symbols.push(symbol);
                     }
                 }
@@ -299,9 +311,14 @@ impl CParser {
             "enum_specifier" => {
                 self.register_handled_node("enum_specifier", node.kind_id());
                 if let Some(name_node) = node.child_by_field_name("name") {
-                    if let Some(symbol) =
-                        self.create_symbol(counter, name_node, SymbolKind::Enum, file_id, code)
-                    {
+                    if let Some(symbol) = self.create_symbol(
+                        counter,
+                        node,
+                        name_node,
+                        SymbolKind::Enum,
+                        file_id,
+                        code,
+                    ) {
                         symbols.push(symbol);
                     }
                 }
@@ -314,6 +331,7 @@ impl CParser {
                             if let Some(name_node) = child.child_by_field_name("name") {
                                 if let Some(symbol) = self.create_symbol(
                                     counter,
+                                    child,
                                     name_node,
                                     SymbolKind::Constant,
                                     file_id,
@@ -334,6 +352,7 @@ impl CParser {
                         if let Some(name_node) = Self::find_declarator_name(child) {
                             if let Some(symbol) = self.create_symbol(
                                 counter,
+                                child,
                                 name_node,
                                 SymbolKind::Variable,
                                 file_id,
@@ -349,9 +368,14 @@ impl CParser {
                 self.register_handled_node("init_declarator", node.kind_id());
                 // Handle variable initialization (int x = 5, Rectangle *rect = malloc(...), etc.)
                 if let Some(name_node) = Self::find_declarator_name(node) {
-                    if let Some(symbol) =
-                        self.create_symbol(counter, name_node, SymbolKind::Variable, file_id, code)
-                    {
+                    if let Some(symbol) = self.create_symbol(
+                        counter,
+                        node,
+                        name_node,
+                        SymbolKind::Variable,
+                        file_id,
+                        code,
+                    ) {
                         symbols.push(symbol);
                     }
                 }
@@ -376,9 +400,14 @@ impl CParser {
                 self.register_handled_node("parameter_declaration", node.kind_id());
                 // Handle function parameters
                 if let Some(name_node) = Self::find_declarator_name(node) {
-                    if let Some(symbol) =
-                        self.create_symbol(counter, name_node, SymbolKind::Parameter, file_id, code)
-                    {
+                    if let Some(symbol) = self.create_symbol(
+                        counter,
+                        node,
+                        name_node,
+                        SymbolKind::Parameter,
+                        file_id,
+                        code,
+                    ) {
                         symbols.push(symbol);
                     }
                 }
@@ -392,6 +421,7 @@ impl CParser {
                             if name_node.kind() == "field_identifier" {
                                 if let Some(symbol) = self.create_symbol(
                                     counter,
+                                    child,
                                     name_node,
                                     SymbolKind::Field,
                                     file_id,
@@ -410,9 +440,14 @@ impl CParser {
                 // This helps with cross-file symbol resolution and dependency analysis
                 if let Some(path_node) = node.child_by_field_name("path") {
                     // Create an import symbol for the included file
-                    if let Some(symbol) =
-                        self.create_symbol(counter, path_node, SymbolKind::Macro, file_id, code)
-                    {
+                    if let Some(symbol) = self.create_symbol(
+                        counter,
+                        node,
+                        path_node,
+                        SymbolKind::Macro,
+                        file_id,
+                        code,
+                    ) {
                         symbols.push(symbol);
                     }
                 }
@@ -423,9 +458,14 @@ impl CParser {
                 // This helps with macro expansion and cross-file symbol analysis
                 if let Some(name_node) = node.child_by_field_name("name") {
                     // Create a macro symbol for the definition
-                    if let Some(symbol) =
-                        self.create_symbol(counter, name_node, SymbolKind::Macro, file_id, code)
-                    {
+                    if let Some(symbol) = self.create_symbol(
+                        counter,
+                        node,
+                        name_node,
+                        SymbolKind::Macro,
+                        file_id,
+                        code,
+                    ) {
                         symbols.push(symbol);
                     }
                 }
@@ -573,9 +613,14 @@ impl CParser {
                 if let Some(name_node) = node.child(0) {
                     if name_node.kind() == "identifier" {
                         // Track macro calls as macro symbols for analysis
-                        if let Some(symbol) =
-                            self.create_symbol(counter, name_node, SymbolKind::Macro, file_id, code)
-                        {
+                        if let Some(symbol) = self.create_symbol(
+                            counter,
+                            node,
+                            name_node,
+                            SymbolKind::Macro,
+                            file_id,
+                            code,
+                        ) {
                             symbols.push(symbol);
                         }
                     }

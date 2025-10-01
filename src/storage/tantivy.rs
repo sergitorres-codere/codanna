@@ -41,6 +41,8 @@ pub struct IndexSchema {
     pub file_path: Field,
     pub line_number: Field,
     pub column: Field,
+    pub end_line: Field,
+    pub end_column: Field,
     pub context: Field,
     pub visibility: Field,
     pub scope_context: Field,
@@ -89,6 +91,8 @@ impl IndexSchema {
         let file_path = builder.add_text_field("file_path", STRING | STORED);
         let line_number = builder.add_u64_field("line_number", STORED | FAST);
         let column = builder.add_u64_field("column", STORED);
+        let end_line = builder.add_u64_field("end_line", STORED | FAST);
+        let end_column = builder.add_u64_field("end_column", STORED);
 
         // Text fields for search
         let text_options = TextOptions::default()
@@ -146,6 +150,8 @@ impl IndexSchema {
             file_path,
             line_number,
             column,
+            end_line,
+            end_column,
             context,
             visibility,
             scope_context,
@@ -786,6 +792,8 @@ impl DocumentIndex {
         file_path: &str,
         line: u32,
         column: u16,
+        end_line: u32,
+        end_column: u16,
         doc_comment: Option<&str>,
         signature: Option<&str>,
         module_path: &str,
@@ -805,6 +813,8 @@ impl DocumentIndex {
         doc.add_text(self.schema.file_path, file_path);
         doc.add_u64(self.schema.line_number, line as u64);
         doc.add_u64(self.schema.column, column as u64);
+        doc.add_u64(self.schema.end_line, end_line as u64);
+        doc.add_u64(self.schema.end_column, end_column as u64);
 
         if let Some(comment) = doc_comment {
             doc.add_text(self.schema.doc_comment, comment);
@@ -1349,9 +1359,15 @@ impl DocumentIndex {
             .and_then(|v| v.as_u64())
             .unwrap_or(0) as u16;
 
-        let end_line = start_line; // We don't store end_line separately
+        let end_line = doc
+            .get_first(self.schema.end_line)
+            .and_then(|v| v.as_u64())
+            .unwrap_or(start_line as u64) as u32;
 
-        let end_col = 0u16; // We don't store end_col separately
+        let end_col = doc
+            .get_first(self.schema.end_column)
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as u16;
 
         let signature = doc
             .get_first(self.schema.signature)
@@ -1951,6 +1967,8 @@ impl DocumentIndex {
             file_path,
             symbol.range.start_line,
             symbol.range.start_column,
+            symbol.range.end_line,
+            symbol.range.end_column,
             symbol.doc_comment.as_ref().map(|s| s.as_ref()),
             symbol.signature.as_ref().map(|s| s.as_ref()),
             symbol
@@ -2293,6 +2311,8 @@ mod tests {
                 "src/parser.rs",
                 42,
                 5,
+                50, // end_line
+                0,  // end_column
                 Some("Parse JSON string into a Value"),
                 Some("fn parse_json(input: &str) -> StorageResult<Value, Error>"),
                 "crate::parser",
@@ -2375,6 +2395,8 @@ mod tests {
                 "src/server.rs",
                 100,
                 0,
+                120, // end_line
+                0,   // end_column
                 Some("Handle incoming HTTP request"),
                 None,
                 "crate::server",
@@ -2531,6 +2553,8 @@ mod tests {
                 "src/main.rs",
                 42,
                 5,
+                50, // end_line
+                0,  // end_column
                 Some("Test function"),
                 Some("fn test_function()"),
                 "crate",
@@ -2720,6 +2744,8 @@ mod tests {
                 "test.rs",
                 1,
                 1,
+                10, // end_line
+                0,  // end_column
                 None,
                 None,
                 "test",
@@ -2760,6 +2786,8 @@ mod tests {
                 "test.rs",
                 10,
                 1,
+                20, // end_line
+                0,  // end_column
                 None,
                 None,
                 "test",
@@ -3065,6 +3093,8 @@ mod tests {
                 "src/main.rs",
                 0,                         // line
                 0,                         // column
+                5,                         // end_line
+                0,                         // end_column
                 Some("Entry point"),       // doc_comment
                 Some("fn main() {}"),      // signature
                 "crate",                   // module_path
@@ -3085,6 +3115,8 @@ mod tests {
                 "src/main.py",
                 0,                          // line
                 0,                          // column
+                5,                          // end_line
+                0,                          // end_column
                 Some("Python entry point"), // doc_comment
                 Some("def main():"),        // signature
                 "__main__",                 // module_path
@@ -3105,6 +3137,8 @@ mod tests {
                 "src/main.ts",
                 0,                             // line
                 0,                             // column
+                5,                             // end_line
+                0,                             // end_column
                 Some("TypeScript entry"),      // doc_comment
                 Some("function main(): void"), // signature
                 "app",                         // module_path
@@ -3214,6 +3248,8 @@ mod tests {
                 "src/config.rs",
                 10,                                            // line
                 0,                                             // column
+                20,                                            // end_line
+                0,                                             // end_column
                 Some("Parse configuration from file"),         // doc_comment
                 Some("fn parse_config(path: &str) -> Config"), // signature
                 "crate::config",                               // module_path
@@ -3234,6 +3270,8 @@ mod tests {
                 "src/parser.py",
                 5,                                         // line
                 0,                                         // column
+                10,                                        // end_line
+                0,                                         // end_column
                 Some("Parse JSON data"),                   // doc_comment
                 Some("def parse_json(data: str) -> dict"), // signature
                 "parser",                                  // module_path
@@ -3254,6 +3292,8 @@ mod tests {
                 "src/parser.ts",
                 1,                                                // line
                 0,                                                // column
+                8,                                                // end_line
+                0,                                                // end_column
                 Some("Parse XML string"),                         // doc_comment
                 Some("function parseXML(xml: string): Document"), // signature
                 "utils.parser",                                   // module_path
@@ -3366,6 +3406,8 @@ mod tests {
                 "src/server.rs",
                 1,                         // line
                 0,                         // column
+                10,                        // end_line
+                0,                         // end_column
                 Some("Request handler"),   // doc_comment
                 Some("struct Handler"),    // signature
                 "server",                  // module_path
@@ -3385,6 +3427,8 @@ mod tests {
                 "src/server.py",
                 1,                             // line
                 0,                             // column
+                12,                            // end_line
+                0,                             // end_column
                 Some("Request handler class"), // doc_comment
                 Some("class Handler"),         // signature
                 "server",                      // module_path
