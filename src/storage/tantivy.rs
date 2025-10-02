@@ -23,6 +23,7 @@ use tantivy::{
         FAST, Field, IndexRecordOption, NumericOptions, STORED, STRING, Schema, SchemaBuilder,
         TextFieldIndexing, TextOptions, Value,
     },
+    tokenizer::{NgramTokenizer, TextAnalyzer},
 };
 
 /// Schema fields for the document index
@@ -33,7 +34,8 @@ pub struct IndexSchema {
 
     // Symbol fields
     pub symbol_id: Field,
-    pub name: Field,
+    pub name: Field,           // STRING field for exact matching
+    pub name_text: Field,      // TEXT field for full-text search
     pub doc_comment: Field,
     pub signature: Field,
     pub module_path: Field,
@@ -103,7 +105,21 @@ impl IndexSchema {
             )
             .set_stored();
 
-        let name = builder.add_text_field("name", text_options.clone());
+        // IMPORTANT: Use STRING for exact matching of symbol names without tokenization
+        // This prevents partial matches and ensures "MyService" doesn't match "Main"
+        let name = builder.add_text_field("name", STRING | STORED);
+
+        // ALSO add name_text for full-text search with ngram tokenization
+        // This allows partial matching: "Archive" will match "ArchiveAppService"
+        let ngram_text_options = TextOptions::default()
+            .set_indexing_options(
+                TextFieldIndexing::default()
+                    .set_tokenizer("ngram")
+                    .set_index_option(IndexRecordOption::WithFreqsAndPositions),
+            )
+            .set_stored();
+        let name_text = builder.add_text_field("name_text", ngram_text_options);
+
         let doc_comment = builder.add_text_field("doc_comment", text_options.clone());
         let signature = builder.add_text_field("signature", text_options.clone());
         let context = builder.add_text_field("context", text_options.clone());
@@ -143,6 +159,7 @@ impl IndexSchema {
             doc_type,
             symbol_id,
             name,
+            name_text,
             doc_comment,
             signature,
             module_path,
@@ -414,6 +431,13 @@ impl DocumentIndex {
             let dir = MmapDirectory::open(&index_path)?;
             Index::create(dir, schema, IndexSettings::default())?
         };
+
+        // Register custom tokenizer for partial matching (ngram with min_gram=3, max_gram=10)
+        // This allows "Archive" to match "ArchiveAppService"
+        let ngram_tokenizer = TextAnalyzer::builder(NgramTokenizer::new(3, 10, false).unwrap())
+            .build();
+        index.tokenizers()
+            .register("ngram", ngram_tokenizer);
 
         let reader = index
             .reader_builder()
@@ -821,6 +845,7 @@ impl DocumentIndex {
         doc.add_u64(self.schema.symbol_id, symbol_id.value() as u64);
         doc.add_u64(self.schema.file_id, file_id.value() as u64);
         doc.add_text(self.schema.name, name);
+        doc.add_text(self.schema.name_text, name); // Also add to full-text searchable field
         doc.add_text(self.schema.file_path, file_path);
         doc.add_u64(self.schema.line_number, line as u64);
         doc.add_u64(self.schema.column, column as u64);
@@ -953,7 +978,7 @@ impl DocumentIndex {
         let query_parser = QueryParser::for_index(
             &self.index,
             vec![
-                self.schema.name,
+                self.schema.name_text,    // Use name_text for full-text search (tokenized)
                 self.schema.doc_comment,
                 self.schema.signature,
                 self.schema.context,
@@ -967,7 +992,7 @@ impl DocumentIndex {
             Err(_parse_error) => {
                 // Query contains syntax that conflicts with Tantivy parser.
                 // Fall back to literal term matching across searchable fields.
-                let name_term = Term::from_field_text(self.schema.name, query_str);
+                let name_term = Term::from_field_text(self.schema.name_text, query_str);
                 let doc_term = Term::from_field_text(self.schema.doc_comment, query_str);
                 let sig_term = Term::from_field_text(self.schema.signature, query_str);
                 let ctx_term = Term::from_field_text(self.schema.context, query_str);
@@ -997,8 +1022,8 @@ impl DocumentIndex {
             }
         };
 
-        // Fuzzy query for typo tolerance on the name field
-        let term = Term::from_field_text(self.schema.name, query_str);
+        // Fuzzy query for typo tolerance on the name_text field
+        let term = Term::from_field_text(self.schema.name_text, query_str);
         let fuzzy_query = FuzzyTermQuery::new(term, 1, true);
 
         // All queries will be collected here.
@@ -1228,22 +1253,16 @@ impl DocumentIndex {
     ) -> StorageResult<Vec<crate::Symbol>> {
         let searcher = self.reader.searcher();
 
-        // Use a QueryParser to correctly handle tokenization of the symbol name.
-        let query_parser = QueryParser::for_index(&self.index, vec![self.schema.name]);
-        let query = match query_parser.parse_query(name) {
-            Ok(q) => q,
-            Err(_) => {
-                // If parsing fails (e.g., special characters), fall back to a simple term query.
-                Box::new(TermQuery::new(
-                    Term::from_field_text(self.schema.name, name),
-                    IndexRecordOption::Basic,
-                ))
-            }
-        };
+        // Use exact term matching for symbol names (name field is STRING type, not TEXT)
+        // This prevents tokenization issues that cause "MyService" to match "Main"
+        let name_query = Box::new(TermQuery::new(
+            Term::from_field_text(self.schema.name, name),
+            IndexRecordOption::Basic,
+        )) as Box<dyn Query>;
 
         // Build query clauses
         let mut query_clauses = vec![
-            (Occur::Must, query),
+            (Occur::Must, name_query),
             (
                 Occur::Must,
                 Box::new(TermQuery::new(
@@ -1587,6 +1606,16 @@ impl DocumentIndex {
             .query_metadata(MetadataKey::SymbolCounter)?
             .unwrap_or(0) as u32;
         Ok(current + 1)
+    }
+
+    /// Update the pending symbol counter (for cross-file symbol ID continuity in batches)
+    pub fn update_pending_symbol_counter(&self, new_value: u32) -> StorageResult<()> {
+        if let Ok(mut pending_guard) = self.pending_symbol_counter.lock() {
+            if let Some(ref mut counter) = *pending_guard {
+                *counter = new_value;
+            }
+        }
+        Ok(())
     }
 
     /// Delete a symbol

@@ -1262,17 +1262,31 @@ impl SimpleIndexer {
         Ok(())
     }
 
-    /// Update the symbol counter in Tantivy metadata
+    /// Update the symbol counter in Tantivy metadata AND pending counter
     fn update_symbol_counter(&mut self, symbol_counter: &SymbolCounter) -> IndexResult<()> {
+        let current_count = symbol_counter.current_count();
+
+        // Update the metadata (for persistence after commit)
         self.document_index
             .store_metadata(
                 crate::storage::MetadataKey::SymbolCounter,
-                symbol_counter.current_count() as u64,
+                current_count as u64,
             )
             .map_err(|e| IndexError::TantivyError {
                 operation: "store_metadata".to_string(),
                 cause: e.to_string(),
-            })
+            })?;
+
+        // CRITICAL: Also update the pending_symbol_counter so next file gets correct starting ID
+        // This fixes the bug where symbol IDs were reused across files in the same batch
+        self.document_index
+            .update_pending_symbol_counter(current_count + 1)
+            .map_err(|e| IndexError::TantivyError {
+                operation: "update_pending_symbol_counter".to_string(),
+                cause: e.to_string(),
+            })?;
+
+        Ok(())
     }
 
     /// Check if two symbols are in the same module
@@ -1354,20 +1368,155 @@ impl SimpleIndexer {
         }
     }
 
-    /// Check if a relationship between two symbol kinds is valid.
-    /// This is designed to be language-agnostic and permissive.
+    /// Check if a relationship between two symbol kinds is valid
+    /// This is designed to be language-agnostic and permissive
+    fn is_compatible_relationship(
+        from_kind: crate::SymbolKind,
+        to_kind: crate::SymbolKind,
+        rel_kind: crate::RelationKind,
+    ) -> bool {
+        use crate::RelationKind::*;
+        use crate::SymbolKind::*;
+
+        match rel_kind {
+            Calls | CalledBy => {
+                // Executable code can call other executable code
+                // Extend to support module-level execution (e.g., Python module top-level)
+                // and class instantiation as a call target in dynamic languages.
+                // In JavaScript/TypeScript, constants and variables can hold function references
+                // (e.g., React components: const Button = () => {...})
+                let caller_can_call =
+                    |k: &crate::SymbolKind| matches!(k, Function | Method | Macro | Module);
+                let callee_can_be_called = |k: &crate::SymbolKind| {
+                    matches!(k, Function | Method | Macro | Class | Constant | Variable)
+                };
+
+                caller_can_call(&from_kind) && callee_can_be_called(&to_kind)
+            }
+            Implements | ImplementedBy => {
+                // Types can implement interfaces/traits
+                let implementor = |k: &crate::SymbolKind| matches!(k, Struct | Enum | Class);
+                let interface = |k: &crate::SymbolKind| matches!(k, Trait | Interface);
+
+                match rel_kind {
+                    Implements => implementor(&from_kind) && interface(&to_kind),
+                    ImplementedBy => interface(&from_kind) && implementor(&to_kind),
+                    _ => unreachable!(),
+                }
+            }
+            Uses | UsedBy => {
+                // Most symbols can use/reference types and values
+                // Be permissive here as different languages have different rules
+                let can_use = |k: &crate::SymbolKind| {
+                    matches!(
+                        k,
+                        Function | Method | Struct | Class | Trait | Interface | Module | Enum
+                    )
+                };
+                let can_be_used = |k: &crate::SymbolKind| {
+                    matches!(
+                        k,
+                        Struct
+                            | Enum
+                            | Class
+                            | Trait
+                            | Interface
+                            | TypeAlias
+                            | Constant
+                            | Variable
+                            | Function
+                            | Method
+                    )
+                };
+
+                match rel_kind {
+                    Uses => can_use(&from_kind) && can_be_used(&to_kind),
+                    UsedBy => can_be_used(&from_kind) && can_use(&to_kind),
+                    _ => unreachable!(),
+                }
+            }
+            Defines | DefinedIn => {
+                // Containers can define members
+                let container = |k: &crate::SymbolKind| {
+                    matches!(k, Trait | Interface | Module | Struct | Enum | Class)
+                };
+                let member = |k: &crate::SymbolKind| {
+                    matches!(k, Method | Function | Constant | Field | Variable)
+                };
+
+                match rel_kind {
+                    Defines => container(&from_kind) && member(&to_kind),
+                    DefinedIn => member(&from_kind) && container(&to_kind),
+                    _ => unreachable!(),
+                }
+            }
+            Extends | ExtendedBy => {
+                // Types can extend other types (inheritance)
+                // In TypeScript: classes can extend classes, interfaces can extend interfaces
+                // In Rust: traits can extend traits (via supertraits)
+                let extendable =
+                    |k: &crate::SymbolKind| matches!(k, Class | Interface | Trait | Struct | Enum);
+                extendable(&from_kind) && extendable(&to_kind)
+            }
+            References | ReferencedBy => {
+                // Very permissive - almost anything can reference anything
+                // This is a catch-all for general references
+                true
+            }
+        }
+    }
+
+    /// Add a relationship to Tantivy
+    /// Automatically creates the reverse relationship as well (e.g., Implements → ImplementedBy)
     fn add_relationship_internal(
         &mut self,
         from: SymbolId,
         to: SymbolId,
         rel: Relationship,
     ) -> IndexResult<()> {
+        // Store the forward relationship
         self.document_index
             .store_relationship(from, to, &rel)
             .map_err(|e| IndexError::TantivyError {
                 operation: "store_relationship".to_string(),
                 cause: e.to_string(),
-            })
+            })?;
+
+        // Automatically create the reverse relationship
+        // This ensures bidirectional navigation (e.g., Class → Interface and Interface → Classes)
+        let reverse_kind = match rel.kind {
+            RelationKind::Implements => Some(RelationKind::ImplementedBy),
+            RelationKind::Extends => Some(RelationKind::ExtendedBy),
+            RelationKind::Calls => Some(RelationKind::CalledBy),
+            RelationKind::Uses => Some(RelationKind::UsedBy),
+            RelationKind::Defines => Some(RelationKind::DefinedIn),
+            RelationKind::References => Some(RelationKind::ReferencedBy),
+            // Don't create reverse for already-reverse relationships
+            RelationKind::ImplementedBy
+            | RelationKind::ExtendedBy
+            | RelationKind::CalledBy
+            | RelationKind::UsedBy
+            | RelationKind::DefinedIn
+            | RelationKind::ReferencedBy => None,
+        };
+
+        if let Some(reverse_kind) = reverse_kind {
+            let mut reverse_rel = Relationship::new(reverse_kind).with_weight(rel.weight);
+
+            // Copy metadata if present
+            if let Some(ref metadata) = rel.metadata {
+                reverse_rel = reverse_rel.with_metadata(metadata.clone());
+            }
+
+            self.document_index
+                .store_relationship(to, from, &reverse_rel)
+                .map_err(|e| IndexError::TantivyError {
+                    operation: "store_reverse_relationship".to_string(),
+                    cause: e.to_string(),
+                })?;
+        }
+
+        Ok(())
     }
 
     /// Helper method to add relationships by symbol names
@@ -2562,14 +2711,9 @@ impl SimpleIndexer {
                         to_symbol.name
                     );
 
-                    // Check symbol kind compatibility using language behavior
-                    let behavior = self.get_behavior_for_file(file_id)?;
-                    if !behavior.is_compatible_relationship(
-                        from_symbol.kind,
-                        to_symbol.kind,
-                        rel.kind,
-                        file_id,
-                    ) {
+                    // Check symbol kind compatibility
+                    if !Self::is_compatible_relationship(from_symbol.kind, to_symbol.kind, rel.kind)
+                    {
                         debug_print!(
                             self,
                             "Incompatible relationship: {} ({:?}) -> {} ({:?}) for {:?}",
@@ -3338,9 +3482,203 @@ pub struct Another {
         assert_eq!(SimpleIndexer::module_proximity(None, None), 4);
     }
 
+    #[test]
+    fn test_is_compatible_relationship_calls() {
+        // Valid call relationships - executable code calling executable code
+        assert!(SimpleIndexer::is_compatible_relationship(
+            SymbolKind::Function,
+            SymbolKind::Function,
+            RelationKind::Calls
+        ));
+        assert!(SimpleIndexer::is_compatible_relationship(
+            SymbolKind::Method,
+            SymbolKind::Function,
+            RelationKind::Calls
+        ));
+        assert!(SimpleIndexer::is_compatible_relationship(
+            SymbolKind::Function,
+            SymbolKind::Method,
+            RelationKind::Calls
+        ));
+        assert!(SimpleIndexer::is_compatible_relationship(
+            SymbolKind::Macro,
+            SymbolKind::Function,
+            RelationKind::Calls
+        ));
+
+        // Invalid call relationships - non-executable code
+        assert!(!SimpleIndexer::is_compatible_relationship(
+            SymbolKind::Struct,
+            SymbolKind::Function,
+            RelationKind::Calls
+        ));
+        assert!(!SimpleIndexer::is_compatible_relationship(
+            SymbolKind::Trait,
+            SymbolKind::Method,
+            RelationKind::Calls
+        ));
+        assert!(!SimpleIndexer::is_compatible_relationship(
+            SymbolKind::Function,
+            SymbolKind::Struct,
+            RelationKind::Calls
+        ));
+        assert!(!SimpleIndexer::is_compatible_relationship(
+            SymbolKind::Constant,
+            SymbolKind::Function,
+            RelationKind::Calls
+        ));
+    }
+
+    #[test]
+    fn test_is_compatible_relationship_implements() {
+        // Valid implements relationships - types implementing interfaces
+        assert!(SimpleIndexer::is_compatible_relationship(
+            SymbolKind::Struct,
+            SymbolKind::Trait,
+            RelationKind::Implements
+        ));
+        assert!(SimpleIndexer::is_compatible_relationship(
+            SymbolKind::Enum,
+            SymbolKind::Trait,
+            RelationKind::Implements
+        ));
+        assert!(SimpleIndexer::is_compatible_relationship(
+            SymbolKind::Class,
+            SymbolKind::Interface,
+            RelationKind::Implements
+        ));
+        assert!(SimpleIndexer::is_compatible_relationship(
+            SymbolKind::Class,
+            SymbolKind::Trait,
+            RelationKind::Implements
+        ));
+
+        // Invalid implements relationships
+        assert!(!SimpleIndexer::is_compatible_relationship(
+            SymbolKind::Function,
+            SymbolKind::Trait,
+            RelationKind::Implements
+        ));
+        assert!(!SimpleIndexer::is_compatible_relationship(
+            SymbolKind::Struct,
+            SymbolKind::Function,
+            RelationKind::Implements
+        ));
+        assert!(!SimpleIndexer::is_compatible_relationship(
+            SymbolKind::Trait,
+            SymbolKind::Struct,
+            RelationKind::Implements
+        ));
+    }
+
+    #[test]
+    fn test_is_compatible_relationship_uses() {
+        // Valid uses relationships - language agnostic
+        assert!(SimpleIndexer::is_compatible_relationship(
+            SymbolKind::Function,
+            SymbolKind::Struct,
+            RelationKind::Uses
+        ));
+        assert!(SimpleIndexer::is_compatible_relationship(
+            SymbolKind::Method,
+            SymbolKind::Enum,
+            RelationKind::Uses
+        ));
+        assert!(SimpleIndexer::is_compatible_relationship(
+            SymbolKind::Class,
+            SymbolKind::Interface,
+            RelationKind::Uses
+        ));
+        assert!(SimpleIndexer::is_compatible_relationship(
+            SymbolKind::Module,
+            SymbolKind::TypeAlias,
+            RelationKind::Uses
+        ));
+        assert!(SimpleIndexer::is_compatible_relationship(
+            SymbolKind::Function,
+            SymbolKind::Constant,
+            RelationKind::Uses
+        ));
+        assert!(SimpleIndexer::is_compatible_relationship(
+            SymbolKind::Method,
+            SymbolKind::Variable,
+            RelationKind::Uses
+        ));
+
+        // Invalid uses relationships - what can't use things
+        assert!(!SimpleIndexer::is_compatible_relationship(
+            SymbolKind::Constant,
+            SymbolKind::Struct,
+            RelationKind::Uses
+        ));
+        assert!(!SimpleIndexer::is_compatible_relationship(
+            SymbolKind::Variable,
+            SymbolKind::Class,
+            RelationKind::Uses
+        ));
+        assert!(!SimpleIndexer::is_compatible_relationship(
+            SymbolKind::Field,
+            SymbolKind::Function,
+            RelationKind::Uses
+        ));
+    }
+
+    #[test]
+    fn test_is_compatible_relationship_defines() {
+        // Valid defines relationships - containers defining members
+        assert!(SimpleIndexer::is_compatible_relationship(
+            SymbolKind::Trait,
+            SymbolKind::Method,
+            RelationKind::Defines
+        ));
+        assert!(SimpleIndexer::is_compatible_relationship(
+            SymbolKind::Module,
+            SymbolKind::Function,
+            RelationKind::Defines
+        ));
+        assert!(SimpleIndexer::is_compatible_relationship(
+            SymbolKind::Struct,
+            SymbolKind::Field,
+            RelationKind::Defines
+        ));
+        assert!(SimpleIndexer::is_compatible_relationship(
+            SymbolKind::Class,
+            SymbolKind::Method,
+            RelationKind::Defines
+        ));
+        assert!(SimpleIndexer::is_compatible_relationship(
+            SymbolKind::Interface,
+            SymbolKind::Method,
+            RelationKind::Defines
+        ));
+        assert!(SimpleIndexer::is_compatible_relationship(
+            SymbolKind::Enum,
+            SymbolKind::Constant,
+            RelationKind::Defines
+        ));
+
+        // Invalid defines relationships - non-containers
+        assert!(!SimpleIndexer::is_compatible_relationship(
+            SymbolKind::Function,
+            SymbolKind::Method,
+            RelationKind::Defines
+        ));
+        assert!(!SimpleIndexer::is_compatible_relationship(
+            SymbolKind::Method,
+            SymbolKind::Function,
+            RelationKind::Defines
+        ));
+        assert!(!SimpleIndexer::is_compatible_relationship(
+            SymbolKind::Variable,
+            SymbolKind::Field,
+            RelationKind::Defines
+        ));
+    }
+
     // ===== Stage 3 Baseline Tests =====
     // These tests capture the CURRENT behavior of configure_symbol
     // to ensure refactoring doesn't change functionality
+
     #[test]
     fn test_configure_symbol_baseline_rust() {
         use crate::parsing::RustBehavior;
