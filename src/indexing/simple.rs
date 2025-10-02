@@ -2141,18 +2141,16 @@ impl SimpleIndexer {
 
                         let file_id = result.file_id();
 
-                        // Only count as indexed if it wasn't from cache
-                        if !result.is_cached() {
-                            stats.files_indexed += 1;
+                        // Count all processed files (cached + newly indexed)
+                        stats.files_indexed += 1;
 
-                            // Update symbol count only for actually indexed files
-                            let new_symbols = self
-                                .document_index
-                                .find_symbols_by_file(file_id)
-                                .map(|symbols| symbols.len())
-                                .unwrap_or(0);
-                            stats.symbols_found += new_symbols;
-                        }
+                        // Count symbols from all files
+                        let new_symbols = self
+                            .document_index
+                            .find_symbols_by_file(file_id)
+                            .map(|symbols| symbols.len())
+                            .unwrap_or(0);
+                        stats.symbols_found += new_symbols;
                     }
                     Err(e) => {
                         eprintln!("Failed to index {}: {}", file_path.display(), e);

@@ -2930,8 +2930,229 @@ mod tests {
             audit.extracted_symbol_kinds.len()
         );
         println!();
+        // Also generate node_discovery.txt
+        let node_discovery = generate_csharp_node_discovery();
+        fs::write(
+            "contributing/parsers/csharp/node_discovery.txt",
+            node_discovery,
+        )
+        .expect("Failed to write C# node discovery");
+
         println!("Generated files:");
         println!("  - contributing/parsers/csharp/AUDIT_REPORT.md");
         println!("  - contributing/parsers/csharp/GRAMMAR_ANALYSIS.md");
+        println!("  - contributing/parsers/csharp/node_discovery.txt");
+    }
+
+    fn generate_csharp_node_discovery() -> String {
+        use super::abi15_exploration_common::print_node_tree;
+        use tree_sitter::{Language, Parser};
+
+        let mut output = String::new();
+        output.push_str("=== C# Language ABI-15 COMPREHENSIVE NODE MAPPING ===\n");
+        output.push_str(&format!("  Generated: {}\n", get_formatted_timestamp()));
+
+        let language: Language = tree_sitter_c_sharp::LANGUAGE.into();
+        output.push_str(&format!("  ABI Version: {}\n", language.abi_version()));
+
+        // Parse the comprehensive example
+        let mut parser = Parser::new();
+        parser.set_language(&language).unwrap();
+
+        let code = fs::read_to_string("examples/csharp/comprehensive.cs")
+            .unwrap_or_else(|_| "class Program { static void Main() {} }".to_string());
+
+        let tree = parser.parse(&code, None).unwrap();
+        let root = tree.root_node();
+
+        // Debug: print tree structure if verbose env var is set
+        if std::env::var("DEBUG_TREE").is_ok() {
+            println!("\n=== C# Tree Structure ===");
+            print_node_tree(root, &code, 0);
+        }
+
+        // Collect all nodes with their actual IDs from the parsed file
+        let mut node_registry: HashMap<String, u16> = HashMap::new();
+        let mut found_in_file = HashSet::new();
+        discover_nodes_with_ids(root, &mut node_registry, &mut found_in_file);
+
+        output.push_str(&format!("  Node kind count: {}\n\n", node_registry.len()));
+
+        // Define C# node categories for organization
+        let node_categories = vec![
+            (
+                "NAMESPACE & USING NODES",
+                vec![
+                    "using_directive",
+                    "namespace_declaration",
+                    "file_scoped_namespace_declaration",
+                    "qualified_name",
+                ],
+            ),
+            (
+                "TYPE DEFINITION NODES",
+                vec![
+                    "class_declaration",
+                    "struct_declaration",
+                    "interface_declaration",
+                    "enum_declaration",
+                    "record_declaration",
+                    "delegate_declaration",
+                    "type_parameter_list",
+                    "type_parameter",
+                    "type_parameter_constraint",
+                ],
+            ),
+            (
+                "MEMBER NODES",
+                vec![
+                    "method_declaration",
+                    "property_declaration",
+                    "field_declaration",
+                    "event_declaration",
+                    "indexer_declaration",
+                    "constructor_declaration",
+                    "destructor_declaration",
+                    "operator_declaration",
+                    "accessor_declaration",
+                ],
+            ),
+            (
+                "STATEMENT NODES",
+                vec![
+                    "if_statement",
+                    "switch_statement",
+                    "switch_expression",
+                    "for_statement",
+                    "foreach_statement",
+                    "while_statement",
+                    "do_statement",
+                    "try_statement",
+                    "catch_clause",
+                    "finally_clause",
+                    "using_statement",
+                    "lock_statement",
+                    "return_statement",
+                    "throw_statement",
+                    "yield_statement",
+                    "break_statement",
+                    "continue_statement",
+                ],
+            ),
+            (
+                "EXPRESSION NODES",
+                vec![
+                    "invocation_expression",
+                    "member_access_expression",
+                    "assignment_expression",
+                    "binary_expression",
+                    "prefix_unary_expression",
+                    "postfix_unary_expression",
+                    "conditional_expression",
+                    "lambda_expression",
+                    "object_creation_expression",
+                    "array_creation_expression",
+                    "element_access_expression",
+                    "cast_expression",
+                    "as_expression",
+                    "is_expression",
+                    "await_expression",
+                    "query_expression",
+                    "interpolated_string_expression",
+                ],
+            ),
+            (
+                "ASYNC & LINQ NODES",
+                vec![
+                    "query_expression",
+                    "from_clause",
+                    "select_clause",
+                    "where_clause",
+                    "order_by_clause",
+                    "group_clause",
+                    "join_clause",
+                    "await_expression",
+                ],
+            ),
+            (
+                "PATTERN NODES",
+                vec![
+                    "switch_expression_arm",
+                    "when_clause",
+                    "declaration_pattern",
+                    "recursive_pattern",
+                    "var_pattern",
+                    "discard_pattern",
+                ],
+            ),
+            (
+                "TYPE NODES",
+                vec![
+                    "predefined_type",
+                    "nullable_type",
+                    "array_type",
+                    "tuple_type",
+                    "pointer_type",
+                    "generic_name",
+                ],
+            ),
+            (
+                "LITERAL NODES",
+                vec![
+                    "integer_literal",
+                    "real_literal",
+                    "string_literal",
+                    "verbatim_string_literal",
+                    "interpolated_string_text",
+                    "character_literal",
+                    "boolean_literal",
+                    "null_literal",
+                ],
+            ),
+            ("COMMENT & DOCUMENTATION NODES", vec!["comment"]),
+        ];
+
+        // Output nodes organized by category
+        for (category_name, expected_nodes) in &node_categories {
+            output.push_str(&format!("=== {category_name} ===\n"));
+
+            for node_kind in expected_nodes {
+                if let Some(id) = node_registry.get(*node_kind) {
+                    if found_in_file.contains(*node_kind) {
+                        output.push_str(&format!("  ✓ {node_kind:<40} -> ID: {id}\n"));
+                    } else {
+                        output
+                            .push_str(&format!("  ✓ {node_kind:<40} -> ID: {id} (not verified)\n"));
+                    }
+                } else {
+                    output.push_str(&format!("  ✗ {node_kind:<40} NOT FOUND\n"));
+                }
+            }
+            output.push('\n');
+        }
+
+        // List any remaining nodes not in categories
+        let mut categorized = HashSet::new();
+        for (_, nodes) in &node_categories {
+            for node in nodes {
+                categorized.insert(node.to_string());
+            }
+        }
+
+        let mut uncategorized: Vec<_> = node_registry
+            .keys()
+            .filter(|k| !categorized.contains(*k))
+            .collect();
+        uncategorized.sort();
+
+        if !uncategorized.is_empty() {
+            output.push_str("--- UNCATEGORIZED NODES ---\n");
+            for node in uncategorized {
+                let id = node_registry[node];
+                output.push_str(&format!("  {node} (ID: {id})\n"));
+            }
+        }
+
+        output
     }
 }

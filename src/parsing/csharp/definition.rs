@@ -21,7 +21,7 @@ impl LanguageDefinition for CSharpLanguage {
     }
 
     fn extensions(&self) -> &'static [&'static str] {
-        &["cs", "csx"]
+        &["cs", "csx", "cshtml"]
     }
 
     fn create_parser(&self, _settings: &Settings) -> IndexResult<Box<dyn LanguageParser>> {

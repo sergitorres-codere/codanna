@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.20] - 2025-10-02
+
+### Added
+- C# language support with full parser implementation (PR#39)
+  - Symbol extraction for classes, interfaces, structs, enums, methods, properties, fields
+  - Relationship tracking for inheritance, interface implementation, and method calls
+  - XML documentation comment extraction
+  - File extensions: `.cs`, `.csx`, `.cshtml`
+- Fuzzy search on non-tokenized name field for whole-word typo tolerance
+  - Handles missing character typos in full symbol names (e.g., "ArchivService" finds "ArchiveService")
+  - Dual fuzzy strategy: ngram tokens for partial matches + whole words for full name typos
+
+### Changed
+- **BREAKING**: Tantivy schema `name` field changed from TEXT to STRING
+  - Enables exact matching without tokenization for fuzzy search
+  - Requires full reindex: `codanna index --force`
+- **PERFORMANCE**: Batch commits every 100 files instead of per-file commits
+  - 10-50x faster indexing (varies by platform and file count)
+  - macOS: ~10x improvement on typical projects
+  - Windows: 25-50x improvement (1-2 files/s → 46 files/s on 4,453 file project)
+  - Reduces disk I/O, segment creation, and cache rebuilds
+- Automatic reverse relationship creation for bidirectional graph navigation
+  - Implements ↔ ImplementedBy, Extends ↔ ExtendedBy, Calls ↔ CalledBy, Uses ↔ UsedBy
+
+### Fixed
+- File ID counter race condition during batch operations
+  - Pending counter prevents stale committed values from causing duplicate IDs
+- Windows file locking issues with proper retry logic and error logging
+  - Symbol cache and persistence layer handle OS error 1224 and permission denied
+
 ## [0.5.19] - 2025-10-01
 
 ### Added
