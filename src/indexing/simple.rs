@@ -2350,7 +2350,10 @@ impl SimpleIndexer {
         // Process all unresolved relationships
         let unresolved = std::mem::take(&mut self.unresolved_relationships);
 
-        eprintln!("DEBUG: resolve_cross_file_relationships: {} unresolved relationships", unresolved.len());
+        eprintln!(
+            "DEBUG: resolve_cross_file_relationships: {} unresolved relationships",
+            unresolved.len()
+        );
         debug_print!(
             self,
             "resolve_cross_file_relationships: {} unresolved relationships",
@@ -4535,10 +4538,10 @@ def main():
         }
         assert!(!logger_symbols.is_empty(), "Should find Logger class");
 
-        // Find the log method
+        // Find the log method (Python methods use qualified names: "Logger.log")
         let log_symbols = indexer
             .document_index
-            .find_symbols_by_name("log", None)
+            .find_symbols_by_name("Logger.log", None)
             .expect("Failed to find log method");
         println!("Found log symbols: {}", log_symbols.len());
         for symbol in &log_symbols {
@@ -4561,7 +4564,7 @@ def main():
         for (_from_id, to_id, _relationship) in &defines_relationships {
             if let Ok(Some(target_symbol)) = indexer.document_index.find_symbol_by_id(*to_id) {
                 println!("  Logger defines: {} (id: {:?})", target_symbol.name, to_id);
-                if target_symbol.name.as_ref() == "log" {
+                if target_symbol.name.as_ref() == "Logger.log" {
                     println!("  ✓ PASS: Logger correctly defines log method");
                 }
             }
@@ -4570,7 +4573,7 @@ def main():
         // Verify that Logger defines log was resolved correctly
         let log_defined_by_logger = defines_relationships.iter().any(|(_, to_id, _)| {
             if let Ok(Some(target)) = indexer.document_index.find_symbol_by_id(*to_id) {
-                target.name.as_ref() == "log"
+                target.name.as_ref() == "Logger.log"
             } else {
                 false
             }

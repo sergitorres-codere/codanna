@@ -189,11 +189,14 @@ impl IndexPersistence {
                     Err(e) if attempts < MAX_ATTEMPTS => {
                         attempts += 1;
 
+                        // Retry logic for file locking issues
                         #[cfg(windows)]
                         {
                             // Windows-specific: Check for permission denied (code 5)
                             if e.kind() == std::io::ErrorKind::PermissionDenied {
-                                eprintln!("Attempt {}/{}: Windows permission denied, retrying after delay...", attempts, MAX_ATTEMPTS);
+                                eprintln!(
+                                    "Attempt {attempts}/{MAX_ATTEMPTS}: Windows permission denied ({e}), retrying after delay..."
+                                );
 
                                 // Force garbage collection to release any handles
                                 std::hint::black_box(());
@@ -204,7 +207,12 @@ impl IndexPersistence {
                             }
                         }
 
-                        return Err(e);
+                        // On non-Windows or non-permission errors, log and retry with delay
+                        eprintln!(
+                            "Attempt {attempts}/{MAX_ATTEMPTS}: Failed to remove directory ({e}), retrying..."
+                        );
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                        continue;
                     }
                     Err(e) => return Err(e),
                 }

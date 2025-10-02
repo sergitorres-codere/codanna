@@ -1,5 +1,5 @@
 === Python Language ABI-15 COMPREHENSIVE NODE MAPPING ===
-  Generated: 2025-09-30 23:32:49 UTC
+  Generated: 2025-10-02 21:49:28 UTC
   ABI Version: 15
   Node kind count: 121
 

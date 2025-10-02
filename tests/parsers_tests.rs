@@ -24,3 +24,6 @@ mod test_cpp_resolution;
 
 #[path = "parsers/python/test_module_level_calls.rs"]
 mod test_python_module_level_calls;
+
+#[path = "parsers/csharp/test_parser.rs"]
+mod test_csharp_parser;

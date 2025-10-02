@@ -4,9 +4,9 @@
 //! Validates language enablement and provides discovery of supported languages.
 
 use super::{
-    CBehavior, CParser, CppBehavior, CppParser, CSharpBehavior, CSharpParser, GoBehavior, GoParser, Language, LanguageBehavior,
-    LanguageId, LanguageParser, PhpBehavior, PhpParser, PythonBehavior, PythonParser, RustBehavior,
-    RustParser, TypeScriptBehavior, TypeScriptParser, get_registry,
+    CBehavior, CParser, CSharpBehavior, CSharpParser, CppBehavior, CppParser, GoBehavior, GoParser,
+    Language, LanguageBehavior, LanguageId, LanguageParser, PhpBehavior, PhpParser, PythonBehavior,
+    PythonParser, RustBehavior, RustParser, TypeScriptBehavior, TypeScriptParser, get_registry,
 };
 use crate::{IndexError, IndexResult, Settings};
 use std::sync::Arc;

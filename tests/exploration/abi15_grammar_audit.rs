@@ -20,9 +20,9 @@ mod tests {
     // Import the timestamp utility from the main codebase
     use codanna::io::format::format_utc_timestamp as get_formatted_timestamp;
     use codanna::parsing::{
-        c::audit::CParserAudit, cpp::audit::CppParserAudit, go::audit::GoParserAudit,
-        php::audit::PhpParserAudit, python::audit::PythonParserAudit, rust::audit::RustParserAudit,
-        typescript::audit::TypeScriptParserAudit,
+        c::audit::CParserAudit, cpp::audit::CppParserAudit, csharp::audit::CSharpParserAudit,
+        go::audit::GoParserAudit, php::audit::PhpParserAudit, python::audit::PythonParserAudit,
+        rust::audit::RustParserAudit, typescript::audit::TypeScriptParserAudit,
     };
     use serde_json::Value;
     use std::collections::{HashMap, HashSet};
@@ -2813,5 +2813,125 @@ mod tests {
 
             println!("✅ C++ TREE_STRUCT.md generated with complete AST structure");
         }
+    }
+
+    #[test]
+    fn comprehensive_csharp_analysis() {
+        println!("=== C# Comprehensive Grammar Analysis ===\n");
+
+        // 1. Load ALL nodes from grammar JSON
+        let grammar_json =
+            fs::read_to_string("contributing/parsers/csharp/grammar-node-types.json")
+                .expect("Failed to read C# grammar file");
+        let grammar: Value =
+            serde_json::from_str(&grammar_json).expect("Failed to parse grammar JSON");
+
+        let mut all_grammar_nodes = HashSet::new();
+        if let Value::Array(nodes) = &grammar {
+            for node in nodes {
+                if let (Some(Value::Bool(true)), Some(Value::String(node_type))) =
+                    (node.get("named"), node.get("type"))
+                {
+                    all_grammar_nodes.insert(node_type.clone());
+                }
+            }
+        }
+
+        // 2. Run the REAL parser audit to get everything at once
+        let audit = match CSharpParserAudit::audit_file("examples/csharp/comprehensive.cs") {
+            Ok(audit) => audit,
+            Err(e) => {
+                println!("Warning: Failed to audit C# file: {e}");
+                // Create empty audit for fallback
+                CSharpParserAudit {
+                    grammar_nodes: HashMap::new(),
+                    implemented_nodes: HashSet::new(),
+                    extracted_symbol_kinds: HashSet::new(),
+                }
+            }
+        };
+
+        // The audit already discovered all nodes in the example file!
+        let example_nodes: HashSet<String> = audit.grammar_nodes.keys().cloned().collect();
+
+        // Save the audit report
+        let report = audit.generate_report();
+        fs::write("contributing/parsers/csharp/AUDIT_REPORT.md", &report)
+            .expect("Failed to write C# audit report");
+
+        // 3. Generate comprehensive analysis comparing all three sources
+        let mut analysis = String::new();
+        analysis.push_str("# C# Grammar Analysis\n\n");
+        analysis.push_str(&format!("*Generated: {}*\n\n", get_formatted_timestamp()));
+        analysis.push_str("## Statistics\n");
+        analysis.push_str(&format!(
+            "- Total nodes in grammar JSON: {}\n",
+            all_grammar_nodes.len()
+        ));
+        analysis.push_str(&format!(
+            "- Nodes found in comprehensive.cs: {}\n",
+            example_nodes.len()
+        ));
+        analysis.push_str(&format!(
+            "- Nodes handled by parser: {}\n",
+            audit.implemented_nodes.len()
+        ));
+        analysis.push_str(&format!(
+            "- Symbol kinds extracted: {}\n",
+            audit.extracted_symbol_kinds.len()
+        ));
+        analysis.push('\n');
+
+        // Categorize nodes
+        let mut in_grammar_only: Vec<_> = all_grammar_nodes.difference(&example_nodes).collect();
+        let mut in_example_not_handled: Vec<_> =
+            example_nodes.difference(&audit.implemented_nodes).collect();
+        let mut handled: Vec<_> = audit.implemented_nodes.iter().collect();
+
+        in_grammar_only.sort();
+        in_example_not_handled.sort();
+        handled.sort();
+
+        // Write comprehensive analysis
+        analysis.push_str("## Nodes in Grammar but Not in Example\n");
+        analysis.push_str(&format!("**Count**: {}\n\n", in_grammar_only.len()));
+        for node in &in_grammar_only {
+            analysis.push_str(&format!("- `{node}`\n"));
+        }
+        analysis.push('\n');
+
+        analysis.push_str("## Nodes in Example but Not Handled by Parser\n");
+        analysis.push_str(&format!("**Count**: {}\n\n", in_example_not_handled.len()));
+        for node in &in_example_not_handled {
+            analysis.push_str(&format!("- `{node}`\n"));
+        }
+        analysis.push('\n');
+
+        analysis.push_str("## Nodes Handled by Parser\n");
+        analysis.push_str(&format!("**Count**: {}\n\n", handled.len()));
+        for node in &handled {
+            analysis.push_str(&format!("- `{node}`\n"));
+        }
+        analysis.push('\n');
+
+        fs::write("contributing/parsers/csharp/GRAMMAR_ANALYSIS.md", analysis)
+            .expect("Failed to write C# grammar analysis");
+
+        // Print summary
+        println!("C# Grammar Analysis Summary:");
+        println!("- Total nodes in grammar: {}", all_grammar_nodes.len());
+        println!("- Nodes in comprehensive.cs: {}", example_nodes.len());
+        println!(
+            "- Nodes handled by parser: {}",
+            audit.implemented_nodes.len()
+        );
+        println!(
+            "- Symbol kinds extracted: {}",
+            audit.extracted_symbol_kinds.len()
+        );
+        println!();
+        println!("Generated files:");
+        println!("  - contributing/parsers/csharp/AUDIT_REPORT.md");
+        println!("  - contributing/parsers/csharp/GRAMMAR_ANALYSIS.md");
     }
 }

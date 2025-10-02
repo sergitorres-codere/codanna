@@ -202,7 +202,7 @@ impl LanguageBehavior for CSharpBehavior {
                 }
 
                 // Check if the qualifier matches an imported namespace
-                if import.path == qualifier || import.path.ends_with(&format!(".{}", qualifier)) {
+                if import.path == qualifier || import.path.ends_with(&format!(".{qualifier}")) {
                     return Some((import.path.clone(), member.to_string()));
                 }
             }
@@ -251,12 +251,13 @@ impl LanguageBehavior for CSharpBehavior {
         let file_id = if let Ok(Some((fid, _))) = document_index.get_file_info(&path_str) {
             fid
         } else {
-            let next_file_id = document_index
-                .get_next_file_id()
-                .map_err(|e| IndexError::TantivyError {
-                    operation: "get_next_file_id".to_string(),
-                    cause: e.to_string(),
-                })?;
+            let next_file_id =
+                document_index
+                    .get_next_file_id()
+                    .map_err(|e| IndexError::TantivyError {
+                        operation: "get_next_file_id".to_string(),
+                        cause: e.to_string(),
+                    })?;
             let file_id = crate::FileId::new(next_file_id).ok_or(IndexError::FileIdExhausted)?;
             let hash = format!("external:{module_path}");
             let ts = crate::indexing::get_utc_timestamp();
@@ -270,12 +271,13 @@ impl LanguageBehavior for CSharpBehavior {
         };
 
         // Allocate symbol ID
-        let next_id = document_index
-            .get_next_symbol_id()
-            .map_err(|e| IndexError::TantivyError {
-                operation: "get_next_symbol_id".to_string(),
-                cause: e.to_string(),
-            })?;
+        let next_id =
+            document_index
+                .get_next_symbol_id()
+                .map_err(|e| IndexError::TantivyError {
+                    operation: "get_next_symbol_id".to_string(),
+                    cause: e.to_string(),
+                })?;
         let symbol_id = SymbolId::new(next_id).ok_or(IndexError::SymbolIdExhausted)?;
 
         // Create external symbol
@@ -328,7 +330,7 @@ impl LanguageBehavior for CSharpBehavior {
                     import
                         .path
                         .split('.')
-                        .last()
+                        .next_back()
                         .unwrap_or(&import.path)
                         .to_string()
                 };
@@ -337,12 +339,13 @@ impl LanguageBehavior for CSharpBehavior {
         }
 
         // Add file's own symbols
-        let file_symbols = document_index
-            .find_symbols_by_file(file_id)
-            .map_err(|e| IndexError::TantivyError {
-                operation: "find_symbols_by_file".to_string(),
-                cause: e.to_string(),
-            })?;
+        let file_symbols =
+            document_index
+                .find_symbols_by_file(file_id)
+                .map_err(|e| IndexError::TantivyError {
+                    operation: "find_symbols_by_file".to_string(),
+                    cause: e.to_string(),
+                })?;
 
         for symbol in file_symbols {
             if self.is_resolvable_symbol(&symbol) {
@@ -364,12 +367,13 @@ impl LanguageBehavior for CSharpBehavior {
         }
 
         // Add visible symbols from other files
-        let all_symbols = document_index
-            .get_all_symbols(10000)
-            .map_err(|e| IndexError::TantivyError {
-                operation: "get_all_symbols".to_string(),
-                cause: e.to_string(),
-            })?;
+        let all_symbols =
+            document_index
+                .get_all_symbols(10000)
+                .map_err(|e| IndexError::TantivyError {
+                    operation: "get_all_symbols".to_string(),
+                    cause: e.to_string(),
+                })?;
 
         for symbol in all_symbols {
             if symbol.file_id != file_id && self.is_symbol_visible_from_file(&symbol, file_id) {
@@ -480,6 +484,7 @@ impl LanguageBehavior for CSharpBehavior {
     ) -> bool {
         // C# namespace matching
         // Exact match or symbol is in a sub-namespace of the import
-        import_path == symbol_module_path || symbol_module_path.starts_with(&format!("{import_path}."))
+        import_path == symbol_module_path
+            || symbol_module_path.starts_with(&format!("{import_path}."))
     }
 }

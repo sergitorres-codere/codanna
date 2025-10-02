@@ -200,7 +200,7 @@ impl ResolutionScope for CSharpResolutionContext {
                     if let Some(alias_name) = alias {
                         if alias_name == type_name {
                             // This is a using alias, resolve in the target namespace
-                            let qualified_name = format!("{}.{}", namespace, member_name);
+                            let qualified_name = format!("{namespace}.{member_name}");
                             return self.resolve(&qualified_name);
                         }
                     }
@@ -280,8 +280,12 @@ impl ResolutionScope for CSharpResolutionContext {
                 // Definition relationship
                 self.resolve(to_name)
             }
-            RelationKind::CalledBy | RelationKind::ExtendedBy | RelationKind::ImplementedBy
-            | RelationKind::UsedBy | RelationKind::DefinedIn | RelationKind::ReferencedBy => {
+            RelationKind::CalledBy
+            | RelationKind::ExtendedBy
+            | RelationKind::ImplementedBy
+            | RelationKind::UsedBy
+            | RelationKind::DefinedIn
+            | RelationKind::ReferencedBy => {
                 // Reverse relationships - typically used for finding references
                 self.resolve(to_name)
             }

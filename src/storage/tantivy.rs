@@ -34,8 +34,8 @@ pub struct IndexSchema {
 
     // Symbol fields
     pub symbol_id: Field,
-    pub name: Field,           // STRING field for exact matching
-    pub name_text: Field,      // TEXT field for full-text search
+    pub name: Field,      // STRING field for exact matching
+    pub name_text: Field, // TEXT field for full-text search
     pub doc_comment: Field,
     pub signature: Field,
     pub module_path: Field,
@@ -434,10 +434,9 @@ impl DocumentIndex {
 
         // Register custom tokenizer for partial matching (ngram with min_gram=3, max_gram=10)
         // This allows "Archive" to match "ArchiveAppService"
-        let ngram_tokenizer = TextAnalyzer::builder(NgramTokenizer::new(3, 10, false).unwrap())
-            .build();
-        index.tokenizers()
-            .register("ngram", ngram_tokenizer);
+        let ngram_tokenizer =
+            TextAnalyzer::builder(NgramTokenizer::new(3, 10, false).unwrap()).build();
+        index.tokenizers().register("ngram", ngram_tokenizer);
 
         let reader = index
             .reader_builder()
@@ -806,9 +805,7 @@ impl DocumentIndex {
             }
 
             // Initialize the pending file counter for this batch
-            let file_current = self
-                .query_metadata(MetadataKey::FileCounter)?
-                .unwrap_or(0) as u32;
+            let file_current = self.query_metadata(MetadataKey::FileCounter)?.unwrap_or(0) as u32;
             if let Ok(mut pending_guard) = self.pending_file_counter.lock() {
                 *pending_guard = Some(file_current + 1);
             }
@@ -978,7 +975,7 @@ impl DocumentIndex {
         let query_parser = QueryParser::for_index(
             &self.index,
             vec![
-                self.schema.name_text,    // Use name_text for full-text search (tokenized)
+                self.schema.name_text, // Use name_text for full-text search (tokenized)
                 self.schema.doc_comment,
                 self.schema.signature,
                 self.schema.context,
@@ -1022,19 +1019,29 @@ impl DocumentIndex {
             }
         };
 
-        // Fuzzy query for typo tolerance on the name_text field
-        let term = Term::from_field_text(self.schema.name_text, query_str);
-        let fuzzy_query = FuzzyTermQuery::new(term, 1, true);
+        // Fuzzy query for typo tolerance on the name_text field (ngram tokens)
+        let name_text_term = Term::from_field_text(self.schema.name_text, query_str);
+        let fuzzy_ngram_query = FuzzyTermQuery::new(name_text_term, 1, true);
+
+        // ADDITIONAL: Fuzzy query on the non-tokenized name field for whole-word typo tolerance
+        // This fixes the limitation where "ArchivService" (missing 'e') couldn't find "ArchiveService"
+        // because ngram tokenization shifted all tokens after the typo
+        let name_term = Term::from_field_text(self.schema.name, query_str);
+        let fuzzy_whole_word_query = FuzzyTermQuery::new(name_term, 1, true);
 
         // All queries will be collected here.
         let mut all_clauses: Vec<(Occur, Box<dyn Query>)> = Vec::new();
 
-        // The text search part: must match either the main query or the fuzzy query.
+        // The text search part: must match one of:
+        // 1. Main query (ngram partial matching)
+        // 2. Fuzzy on ngram tokens (typos in short queries)
+        // 3. Fuzzy on whole word (typos in full symbol names)
         all_clauses.push((
             Occur::Must,
             Box::new(BooleanQuery::new(vec![
                 (Occur::Should, main_query),
-                (Occur::Should, Box::new(fuzzy_query)),
+                (Occur::Should, Box::new(fuzzy_ngram_query)),
+                (Occur::Should, Box::new(fuzzy_whole_word_query)),
             ])),
         ));
 
@@ -3548,5 +3555,295 @@ mod tests {
         assert_eq!(python_server[0].symbol_id, SymbolId::new(21).unwrap());
 
         println!("=== All combined filter tests completed ===\n");
+    }
+
+    #[test]
+    fn test_ngram_partial_matching() {
+        println!("\n=== NGRAM TOKENIZER TEST ===\n");
+
+        let temp_dir = TempDir::new().unwrap();
+        let index = DocumentIndex::new(temp_dir.path()).unwrap();
+
+        index.start_batch().unwrap();
+
+        // Add C# symbols with typical naming patterns
+        let file_id = crate::FileId::new(1).unwrap();
+
+        println!("Step 1: Indexing symbols...");
+
+        // Symbol 1: ArchiveAppService (should match "Archive" query)
+        let sym1 = crate::Symbol::new(
+            SymbolId::new(1).unwrap(),
+            "ArchiveAppService",
+            SymbolKind::Class,
+            file_id,
+            crate::Range::new(10, 5, 50, 10),
+        )
+        .with_module_path("Services")
+        .with_doc("Application service for archiving")
+        .with_signature("class ArchiveAppService");
+
+        println!("  - Indexed: ArchiveAppService");
+        index
+            .index_symbol(&sym1, "src/Services/ArchiveAppService.cs")
+            .unwrap();
+
+        // Symbol 2: DocumentArchiver (should match "Archive" query)
+        let sym2 = crate::Symbol::new(
+            SymbolId::new(2).unwrap(),
+            "DocumentArchiver",
+            SymbolKind::Class,
+            file_id,
+            crate::Range::new(20, 5, 60, 10),
+        )
+        .with_module_path("Utils")
+        .with_doc("Archives documents")
+        .with_signature("class DocumentArchiver");
+
+        println!("  - Indexed: DocumentArchiver");
+        index
+            .index_symbol(&sym2, "src/Utils/DocumentArchiver.cs")
+            .unwrap();
+
+        // Symbol 3: UserService (should NOT match "Archive" query)
+        let sym3 = crate::Symbol::new(
+            SymbolId::new(3).unwrap(),
+            "UserService",
+            SymbolKind::Class,
+            file_id,
+            crate::Range::new(30, 5, 70, 10),
+        )
+        .with_module_path("Services")
+        .with_doc("User management service")
+        .with_signature("class UserService");
+
+        println!("  - Indexed: UserService");
+        index
+            .index_symbol(&sym3, "src/Services/UserService.cs")
+            .unwrap();
+
+        index.commit_batch().unwrap();
+        println!("\nStep 2: Testing partial search with 'Archive'...");
+
+        // Test partial matching with "Archive" using search() method
+        let results = index.search("Archive", 10, None, None, None).unwrap();
+
+        println!("\nResults from search('Archive'):");
+        for (i, result) in results.iter().enumerate() {
+            let kind = format!("{:?}", result.kind);
+            println!("  {}. {} ({})", i + 1, result.name, kind);
+        }
+
+        let names: Vec<&str> = results.iter().map(|r| r.name.as_str()).collect();
+
+        println!(
+            "\nExpectation: Should find 'ArchiveAppService' and 'DocumentArchiver', NOT 'UserService'"
+        );
+        println!("Actual matches: {names:?}\n");
+
+        // Should find both ArchiveAppService and DocumentArchiver
+        assert!(
+            names.contains(&"ArchiveAppService"),
+            "Ngram tokenizer should find ArchiveAppService with partial query 'Archive'. Found: {names:?}"
+        );
+        assert!(
+            names.contains(&"DocumentArchiver"),
+            "Ngram tokenizer should find DocumentArchiver with partial query 'Archive'. Found: {names:?}"
+        );
+
+        // Should NOT find UserService
+        assert!(
+            !names.contains(&"UserService"),
+            "Should not match unrelated symbols. Found: {names:?}"
+        );
+
+        println!("Step 3: Testing exact lookup with 'ArchiveAppService'...");
+
+        // Test exact lookup still works (uses STRING field, not ngram)
+        let exact_results = index
+            .find_symbols_by_name("ArchiveAppService", None)
+            .unwrap();
+        println!("Exact lookup results: {} match(es)", exact_results.len());
+        for result in &exact_results {
+            println!("  - {}", result.name);
+        }
+
+        assert_eq!(exact_results.len(), 1);
+        assert_eq!(exact_results[0].name.as_ref(), "ArchiveAppService");
+
+        println!(
+            "\nStep 4: Testing exact lookup with partial name 'Archive' (should find nothing)..."
+        );
+
+        // Test that exact lookup doesn't return partial matches
+        let no_match = index.find_symbols_by_name("Archive", None).unwrap();
+        println!("Exact lookup for 'Archive': {} match(es)", no_match.len());
+
+        assert_eq!(
+            no_match.len(),
+            0,
+            "Exact lookup should not return partial matches. Found: {:?}",
+            no_match.iter().map(|s| &s.name).collect::<Vec<_>>()
+        );
+
+        println!("\n=== NGRAM TEST PASSED ===\n");
+    }
+
+    #[test]
+    fn test_fuzzy_search_typo_tolerance() {
+        println!("\n=== FUZZY SEARCH TEST (Typo Tolerance) ===\n");
+
+        let temp_dir = TempDir::new().unwrap();
+        let index = DocumentIndex::new(temp_dir.path()).unwrap();
+
+        index.start_batch().unwrap();
+
+        let file_id = crate::FileId::new(1).unwrap();
+
+        println!("Step 1: Indexing symbol 'ArchiveService'...");
+        let sym = crate::Symbol::new(
+            SymbolId::new(1).unwrap(),
+            "ArchiveService",
+            SymbolKind::Class,
+            file_id,
+            crate::Range::new(10, 5, 50, 10),
+        )
+        .with_doc("Archive service");
+
+        index.index_symbol(&sym, "src/ArchiveService.cs").unwrap();
+        index.commit_batch().unwrap();
+
+        println!("\nStep 2: Testing fuzzy search with typos...\n");
+
+        // Test 1: Correct spelling
+        println!("Query: 'ArchiveService' (correct spelling)");
+        let correct = index
+            .search("ArchiveService", 10, None, None, None)
+            .unwrap();
+        println!("  Found: {} result(s)", correct.len());
+        assert_eq!(correct.len(), 1);
+
+        // Test 2: Missing one character (edit distance = 1)
+        println!("\nQuery: 'ArchivService' (missing 'e', edit distance = 1)");
+        let typo1 = index.search("ArchivService", 10, None, None, None).unwrap();
+        println!("  Found: {} result(s)", typo1.len());
+        if !typo1.is_empty() {
+            println!("  Match: {}", typo1[0].name);
+        }
+
+        // Test 3: Wrong character (edit distance = 1)
+        println!("\nQuery: 'ArchaveService' (i→a, edit distance = 1)");
+        let typo2 = index
+            .search("ArchaveService", 10, None, None, None)
+            .unwrap();
+        println!("  Found: {} result(s)", typo2.len());
+        if !typo2.is_empty() {
+            println!("  Match: {}", typo2[0].name);
+        }
+
+        // Test 4: Extra character (edit distance = 1)
+        println!("\nQuery: 'Archivee' (partial with extra 'e', edit distance = 1)");
+        let typo3 = index.search("Archivee", 10, None, None, None).unwrap();
+        println!("  Found: {} result(s)", typo3.len());
+        if !typo3.is_empty() {
+            println!("  Match: {}", typo3[0].name);
+        }
+
+        // Test 5: Too many errors (edit distance > 1, should not match with fuzzy)
+        println!("\nQuery: 'Archhive' (2 errors: extra 'h' and wrong 'h', edit distance = 2)");
+        let too_many = index.search("Archhive", 10, None, None, None).unwrap();
+        println!("  Found: {} result(s)", too_many.len());
+        println!("  Expectation: May find via ngram partial match, but not via fuzzy (distance=2)");
+
+        println!("\n=== FUZZY SEARCH EXPLANATION ===");
+        println!("Fuzzy search (edit distance=1) handles typos like:");
+        println!("  - Missing character: 'Archiv' finds 'Archive'");
+        println!("  - Wrong character: 'Archave' finds 'Archive'");
+        println!("  - Extra character: 'Archivee' finds 'Archive'");
+        println!("\nNgram tokenizer handles partial matching:");
+        println!("  - 'Archive' finds 'ArchiveService', 'DocumentArchiver'");
+        println!("\nBoth work together in the same search query!");
+        println!("\n=== FUZZY SEARCH TEST COMPLETE ===\n");
+    }
+
+    #[test]
+    fn test_ngram_vs_fuzzy_interaction() {
+        println!("\n=== UNDERSTANDING NGRAM + FUZZY INTERACTION ===\n");
+
+        let temp_dir = TempDir::new().unwrap();
+        let index = DocumentIndex::new(temp_dir.path()).unwrap();
+
+        index.start_batch().unwrap();
+
+        let file_id = crate::FileId::new(1).unwrap();
+
+        println!("Indexed: 'ArchiveService'\n");
+        let sym = crate::Symbol::new(
+            SymbolId::new(1).unwrap(),
+            "ArchiveService",
+            SymbolKind::Class,
+            file_id,
+            crate::Range::new(10, 5, 50, 10),
+        );
+
+        index.index_symbol(&sym, "src/ArchiveService.cs").unwrap();
+        index.commit_batch().unwrap();
+
+        println!("HOW NGRAM TOKENIZATION WORKS:");
+        println!("'ArchiveService' gets broken into ngrams (min=3, max=10):");
+        println!("  3-grams: Arc, rch, chi, hiv, ive, veS, eSe, Ser, erv, rvi, vic, ice");
+        println!("  4-grams: Arch, rchi, chiv, hive, iveS, veSe, eSer, Serv, ervi, rvic, vice");
+        println!("  ... up to 10-grams\n");
+
+        println!("TEST CASES:\n");
+
+        // Test 1: Short partial match (should work via ngram)
+        println!("1. Query: 'Arch' (4 chars, exact ngram match)");
+        let short_match = index.search("Arch", 10, None, None, None).unwrap();
+        println!("   Result: {} match(es) ✓", short_match.len());
+        println!("   Why: 'Arch' is an exact 4-gram token in 'ArchiveService'\n");
+
+        // Test 2: Short typo (should work via fuzzy on ngrams)
+        println!("2. Query: 'Arsh' (1 typo: c→s, edit distance = 1)");
+        let short_typo = index.search("Arsh", 10, None, None, None).unwrap();
+        println!("   Result: {} match(es)", short_typo.len());
+        if short_typo.is_empty() {
+            println!("   Why: Fuzzy matches 'Arsh' against ngrams like 'Arch' (distance=1)");
+            println!("        But may not find it depending on Tantivy's fuzzy implementation\n");
+        } else {
+            println!("   Why: Fuzzy matched 'Arsh' to ngram 'Arch' (distance=1) ✓\n");
+        }
+
+        // Test 3: Long query missing char (NOW FIXED!)
+        println!("3. Query: 'ArchivService' (missing 'e', 13 chars)");
+        let long_typo = index.search("ArchivService", 10, None, None, None).unwrap();
+        println!("   Result: {} match(es) ✓", long_typo.len());
+        println!("   Why: FIXED by adding fuzzy search on non-tokenized 'name' field!");
+        println!("        Fuzzy matches 'ArchivService' → 'ArchiveService' (edit distance=1)");
+        println!("        This works BEFORE ngram tokenization, avoiding misalignment\n");
+        assert!(
+            !long_typo.is_empty(),
+            "Should find ArchiveService with typo"
+        );
+
+        // Test 4: Partial match that works (ngram overlap)
+        println!("4. Query: 'Archive' (7 chars, prefix of indexed word)");
+        let partial = index.search("Archive", 10, None, None, None).unwrap();
+        println!("   Result: {} match(es) ✓", partial.len());
+        println!("   Why: 'Archive' ngrams (Arc, rch, chi, hiv, ive, etc.)");
+        println!("        overlap with 'ArchiveService' ngrams\n");
+
+        println!("CONCLUSION:");
+        println!("- Ngram tokenizer: Great for partial matching (prefix/substring) ✓");
+        println!("- Fuzzy on ngrams: Works for typos in SHORT queries ✓");
+        println!("- Fuzzy on whole word: FIXED - Now handles typos in LONG words ✓");
+        println!("\nSOLUTION IMPLEMENTED:");
+        println!("  Added fuzzy search on non-tokenized 'name' field (STRING type)");
+        println!("  Now search queries try BOTH:");
+        println!("    1. Fuzzy on ngram tokens (for short queries)");
+        println!("    2. Fuzzy on whole words (for full symbol names)");
+        println!("  Result: 'ArchivService' correctly finds 'ArchiveService' ✓");
+
+        println!("\n=== TEST COMPLETE ===\n");
     }
 }

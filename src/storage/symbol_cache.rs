@@ -335,7 +335,9 @@ impl SymbolHashCache {
                         // Check for Windows file locking error (os error 1224)
                         if cfg!(windows) && e.to_string().contains("os error 1224") {
                             attempts += 1;
-                            eprintln!("Attempt {}/{}: Windows file lock detected, retrying...", attempts, MAX_ATTEMPTS);
+                            eprintln!(
+                                "Attempt {attempts}/{MAX_ATTEMPTS}: Windows file lock detected, retrying..."
+                            );
 
                             // Try to delete the file if it exists to break the lock
                             if path.exists() {
