@@ -648,6 +648,12 @@ impl Settings {
         crate::init::init_global_dirs()?;
         crate::init::create_fastembed_symlink()?;
 
+        // Create index directory structure (including tantivy subdirectory)
+        let index_path = PathBuf::from(crate::init::local_dir_name()).join("index");
+        std::fs::create_dir_all(&index_path)?;
+        let tantivy_path = index_path.join("tantivy");
+        std::fs::create_dir_all(&tantivy_path)?;
+
         // Check if project is already registered (by path in registry or by local file)
         let local_dir = crate::init::local_dir_name();
         let project_id_path = PathBuf::from(local_dir).join(".project-id");

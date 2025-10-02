@@ -4,7 +4,7 @@
 //! Validates language enablement and provides discovery of supported languages.
 
 use super::{
-    CBehavior, CParser, CppBehavior, CppParser, GoBehavior, GoParser, Language, LanguageBehavior,
+    CBehavior, CParser, CppBehavior, CppParser, CSharpBehavior, CSharpParser, GoBehavior, GoParser, Language, LanguageBehavior,
     LanguageId, LanguageParser, PhpBehavior, PhpParser, PythonBehavior, PythonParser, RustBehavior,
     RustParser, TypeScriptBehavior, TypeScriptParser, get_registry,
 };
@@ -159,6 +159,10 @@ impl ParserFactory {
                 let parser = CppParser::new().map_err(|e| IndexError::General(e.to_string()))?;
                 Ok(Box::new(parser))
             }
+            Language::CSharp => {
+                let parser = CSharpParser::new().map_err(|e| IndexError::General(e.to_string()))?;
+                Ok(Box::new(parser))
+            }
         }
     }
 
@@ -252,6 +256,13 @@ impl ParserFactory {
                 ParserWithBehavior {
                     parser: Box::new(parser),
                     behavior: Box::new(CppBehavior::new()),
+                }
+            }
+            Language::CSharp => {
+                let parser = CSharpParser::new().map_err(|e| IndexError::General(e.to_string()))?;
+                ParserWithBehavior {
+                    parser: Box::new(parser),
+                    behavior: Box::new(CSharpBehavior::new()),
                 }
             }
         };

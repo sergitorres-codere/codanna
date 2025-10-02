@@ -179,7 +179,44 @@ impl IndexPersistence {
     pub fn clear(&self) -> Result<(), std::io::Error> {
         let tantivy_path = self.base_path.join("tantivy");
         if tantivy_path.exists() {
-            std::fs::remove_dir_all(tantivy_path)?;
+            // On Windows, we may need multiple attempts due to file locking
+            let mut attempts = 0;
+            const MAX_ATTEMPTS: u32 = 3;
+
+            loop {
+                match std::fs::remove_dir_all(&tantivy_path) {
+                    Ok(()) => break,
+                    Err(e) if attempts < MAX_ATTEMPTS => {
+                        attempts += 1;
+
+                        #[cfg(windows)]
+                        {
+                            // Windows-specific: Check for permission denied (code 5)
+                            if e.kind() == std::io::ErrorKind::PermissionDenied {
+                                eprintln!("Attempt {}/{}: Windows permission denied, retrying after delay...", attempts, MAX_ATTEMPTS);
+
+                                // Force garbage collection to release any handles
+                                std::hint::black_box(());
+
+                                // Brief delay to allow file handles to close
+                                std::thread::sleep(std::time::Duration::from_millis(200));
+                                continue;
+                            }
+                        }
+
+                        return Err(e);
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+            // Recreate the empty tantivy directory after clearing
+            std::fs::create_dir_all(&tantivy_path)?;
+
+            // On Windows, add extra delay after recreating directory to ensure filesystem is ready
+            #[cfg(windows)]
+            {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
         }
         Ok(())
     }
