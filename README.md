@@ -284,6 +284,32 @@ These commands use Codanna's MCP tools under the hood but provide guided workflo
 
 Lives in `.codanna/settings.toml`:
 
+### Project-Specific Path Resolution
+
+Codanna understands project configuration files and uses them to resolve imports correctly.
+
+**TypeScript**: Reads `tsconfig.json` to resolve path aliases:
+
+```toml
+# .codanna/settings.toml
+[languages.typescript]
+enabled = true
+config_files = [
+    "tsconfig.json",
+    "packages/web/tsconfig.json"
+]
+```
+
+When your TypeScript code imports `@app/utils`, Codanna uses your `tsconfig.json` path mappings to resolve it to the actual file location (`src/app/utils`). This works across modules in monorepos.
+
+**How it works**:
+1. Codanna reads your project config files (`tsconfig.json`)
+2. Extracts path aliases, baseUrl, and other resolution rules
+3. Stores them in `.codanna/index/resolvers/`
+4. Uses these rules during indexing to resolve imports accurately
+
+**Coming soon**: Python (`pyproject.toml`), Go (`go.mod`), and other languages with project-specific import resolution.
+
 ## Nerds Section
 
 Codanna respects `.gitignore` and adds its own `.codannaignore`:

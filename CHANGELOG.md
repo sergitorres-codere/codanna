@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.19] - 2025-10-01
+
+### Added
+- Full symbol boundary tracking for precise editor navigation
+  - `create_symbol()` accepts `full_node` parameter for complete range extraction
+  - Tantivy schema extended with `end_line` and `end_column` fields
+  - MCP tools now return precise symbol ranges (start_line, start_column, end_line, end_column)
+
+### Changed
+- C parser: Functions, structs, unions, enums, fields, and macros now use full boundaries
+- Rust parser: Functions, structs, enums, traits, and modules now use full boundaries
+- README: Added documentation for precise symbol boundary support
+
 ## [0.5.18] - 2025-09-30
 
 ### Added
