@@ -228,7 +228,14 @@ impl CParser {
 
                 // Process all top-level declarations
                 for child in node.children(&mut node.walk()) {
-                    self.extract_symbols_from_node(child, code, file_id, symbols, counter, depth + 1);
+                    self.extract_symbols_from_node(
+                        child,
+                        code,
+                        file_id,
+                        symbols,
+                        counter,
+                        depth + 1,
+                    );
                 }
 
                 self.context.exit_scope();
@@ -260,7 +267,14 @@ impl CParser {
                 for child in node.children(&mut node.walk()) {
                     // Skip declarator (already processed) and parameter lists
                     if child.kind() != "function_declarator" && child.kind() != "parameter_list" {
-                        self.extract_symbols_from_node(child, code, file_id, symbols, counter, depth + 1);
+                        self.extract_symbols_from_node(
+                            child,
+                            code,
+                            file_id,
+                            symbols,
+                            counter,
+                            depth + 1,
+                        );
                     }
                 }
 
@@ -286,7 +300,14 @@ impl CParser {
                 if let Some(body) = node.child_by_field_name("body") {
                     self.context.enter_scope(ScopeType::Class);
                     for child in body.children(&mut body.walk()) {
-                        self.extract_symbols_from_node(child, code, file_id, symbols, counter, depth + 1);
+                        self.extract_symbols_from_node(
+                            child,
+                            code,
+                            file_id,
+                            symbols,
+                            counter,
+                            depth + 1,
+                        );
                     }
                     self.context.exit_scope();
                 }
@@ -310,7 +331,14 @@ impl CParser {
                 if let Some(body) = node.child_by_field_name("body") {
                     self.context.enter_scope(ScopeType::Class);
                     for child in body.children(&mut body.walk()) {
-                        self.extract_symbols_from_node(child, code, file_id, symbols, counter, depth + 1);
+                        self.extract_symbols_from_node(
+                            child,
+                            code,
+                            file_id,
+                            symbols,
+                            counter,
+                            depth + 1,
+                        );
                     }
                     self.context.exit_scope();
                 }
@@ -396,7 +424,14 @@ impl CParser {
                 for child in node.children(&mut node.walk()) {
                     // Skip braces, process the contents
                     if child.kind() != "{" && child.kind() != "}" {
-                        self.extract_symbols_from_node(child, code, file_id, symbols, counter, depth + 1);
+                        self.extract_symbols_from_node(
+                            child,
+                            code,
+                            file_id,
+                            symbols,
+                            counter,
+                            depth + 1,
+                        );
                     }
                 }
 
@@ -485,7 +520,14 @@ impl CParser {
 
                 // Process all children (condition, then clause, else clause)
                 for child in node.children(&mut node.walk()) {
-                    self.extract_symbols_from_node(child, code, file_id, symbols, counter, depth + 1);
+                    self.extract_symbols_from_node(
+                        child,
+                        code,
+                        file_id,
+                        symbols,
+                        counter,
+                        depth + 1,
+                    );
                 }
 
                 self.context.exit_scope();
@@ -499,7 +541,14 @@ impl CParser {
 
                 // Process all children (condition, body)
                 for child in node.children(&mut node.walk()) {
-                    self.extract_symbols_from_node(child, code, file_id, symbols, counter, depth + 1);
+                    self.extract_symbols_from_node(
+                        child,
+                        code,
+                        file_id,
+                        symbols,
+                        counter,
+                        depth + 1,
+                    );
                 }
 
                 self.context.exit_scope();
@@ -513,7 +562,14 @@ impl CParser {
 
                 // Process all children (initialization, condition, update, body)
                 for child in node.children(&mut node.walk()) {
-                    self.extract_symbols_from_node(child, code, file_id, symbols, counter, depth + 1);
+                    self.extract_symbols_from_node(
+                        child,
+                        code,
+                        file_id,
+                        symbols,
+                        counter,
+                        depth + 1,
+                    );
                 }
 
                 self.context.exit_scope();
@@ -527,7 +583,14 @@ impl CParser {
 
                 // Process all children (body, condition)
                 for child in node.children(&mut node.walk()) {
-                    self.extract_symbols_from_node(child, code, file_id, symbols, counter, depth + 1);
+                    self.extract_symbols_from_node(
+                        child,
+                        code,
+                        file_id,
+                        symbols,
+                        counter,
+                        depth + 1,
+                    );
                 }
 
                 self.context.exit_scope();
@@ -541,7 +604,14 @@ impl CParser {
 
                 // Process all children (expression, case statements)
                 for child in node.children(&mut node.walk()) {
-                    self.extract_symbols_from_node(child, code, file_id, symbols, counter, depth + 1);
+                    self.extract_symbols_from_node(
+                        child,
+                        code,
+                        file_id,
+                        symbols,
+                        counter,
+                        depth + 1,
+                    );
                 }
 
                 self.context.exit_scope();
@@ -553,7 +623,14 @@ impl CParser {
                 // These don't create new scopes but are important for control flow analysis
                 // Process all children (label, statements)
                 for child in node.children(&mut node.walk()) {
-                    self.extract_symbols_from_node(child, code, file_id, symbols, counter, depth + 1);
+                    self.extract_symbols_from_node(
+                        child,
+                        code,
+                        file_id,
+                        symbols,
+                        counter,
+                        depth + 1,
+                    );
                 }
                 return; // Skip default traversal since we handled children
             }
@@ -563,7 +640,14 @@ impl CParser {
                 // These typically don't create symbols but are part of comprehensive AST coverage
                 // Process all children
                 for child in node.children(&mut node.walk()) {
-                    self.extract_symbols_from_node(child, code, file_id, symbols, counter, depth + 1);
+                    self.extract_symbols_from_node(
+                        child,
+                        code,
+                        file_id,
+                        symbols,
+                        counter,
+                        depth + 1,
+                    );
                 }
                 return; // Skip default traversal since we handled children
             }
@@ -578,7 +662,14 @@ impl CParser {
                 // Compound literals like (struct Point){.x=1, .y=2}
                 // These may contain initializer_pair children that we want to track
                 for child in node.children(&mut node.walk()) {
-                    self.extract_symbols_from_node(child, code, file_id, symbols, counter, depth + 1);
+                    self.extract_symbols_from_node(
+                        child,
+                        code,
+                        file_id,
+                        symbols,
+                        counter,
+                        depth + 1,
+                    );
                 }
                 return; // Skip default traversal since we handled children
             }
@@ -587,7 +678,14 @@ impl CParser {
                 // Designated initializers like .field = value or [index] = value
                 // These don't create symbols but are important for initialization patterns
                 for child in node.children(&mut node.walk()) {
-                    self.extract_symbols_from_node(child, code, file_id, symbols, counter, depth + 1);
+                    self.extract_symbols_from_node(
+                        child,
+                        code,
+                        file_id,
+                        symbols,
+                        counter,
+                        depth + 1,
+                    );
                 }
                 return; // Skip default traversal since we handled children
             }
@@ -598,7 +696,14 @@ impl CParser {
                 self.context.enter_scope(ScopeType::Block);
 
                 for child in node.children(&mut node.walk()) {
-                    self.extract_symbols_from_node(child, code, file_id, symbols, counter, depth + 1);
+                    self.extract_symbols_from_node(
+                        child,
+                        code,
+                        file_id,
+                        symbols,
+                        counter,
+                        depth + 1,
+                    );
                 }
 
                 self.context.exit_scope();
@@ -609,7 +714,14 @@ impl CParser {
                 // Conditional preprocessing directives - important for build-time logic
                 // These control compilation and symbol visibility
                 for child in node.children(&mut node.walk()) {
-                    self.extract_symbols_from_node(child, code, file_id, symbols, counter, depth + 1);
+                    self.extract_symbols_from_node(
+                        child,
+                        code,
+                        file_id,
+                        symbols,
+                        counter,
+                        depth + 1,
+                    );
                 }
                 return; // Skip default traversal since we handled children
             }
@@ -635,7 +747,14 @@ impl CParser {
 
                 // Process remaining children for arguments
                 for child in node.children(&mut node.walk()) {
-                    self.extract_symbols_from_node(child, code, file_id, symbols, counter, depth + 1);
+                    self.extract_symbols_from_node(
+                        child,
+                        code,
+                        file_id,
+                        symbols,
+                        counter,
+                        depth + 1,
+                    );
                 }
                 return; // Skip default traversal since we handled children
             }
@@ -644,7 +763,14 @@ impl CParser {
                 // __attribute__ declarations for compiler directives
                 // Important for understanding code structure and optimization hints
                 for child in node.children(&mut node.walk()) {
-                    self.extract_symbols_from_node(child, code, file_id, symbols, counter, depth + 1);
+                    self.extract_symbols_from_node(
+                        child,
+                        code,
+                        file_id,
+                        symbols,
+                        counter,
+                        depth + 1,
+                    );
                 }
                 return; // Skip default traversal since we handled children
             }
