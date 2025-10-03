@@ -6,6 +6,7 @@
 //! When migrating or updating the parser, ensure compatibility with ABI-15 features.
 
 use crate::parsing::Import;
+use crate::parsing::parser::check_recursion_depth;
 use crate::parsing::{
     HandledNode, LanguageParser, MethodCall, NodeTracker, NodeTrackingState, ParserContext,
     ScopeType,
@@ -55,6 +56,7 @@ impl GoParser {
                     symbol_counter,
                     &mut symbols,
                     "", // Module path will be determined by behavior
+                    0,
                 );
             }
             None => {
@@ -128,7 +130,11 @@ impl GoParser {
         counter: &mut SymbolCounter,
         symbols: &mut Vec<Symbol>,
         module_path: &str,
+        depth: usize,
     ) {
+        if !check_recursion_depth(depth, node) {
+            return;
+        }
         match node.kind() {
             "function_declaration" => {
                 self.register_handled_node("function_declaration", node.kind_id());
@@ -177,6 +183,7 @@ impl GoParser {
                             counter,
                             symbols,
                             module_path,
+                            depth + 1,
                         );
                     }
                 }
@@ -249,6 +256,7 @@ impl GoParser {
                             counter,
                             symbols,
                             module_path,
+                            depth + 1,
                         );
                     }
                 }
@@ -284,6 +292,7 @@ impl GoParser {
                         counter,
                         symbols,
                         module_path,
+                        depth + 1,
                     );
                 }
 
@@ -304,6 +313,7 @@ impl GoParser {
                             counter,
                             symbols,
                             module_path,
+                            depth,
                         );
                     } else {
                         self.extract_symbols_from_node(
@@ -313,6 +323,7 @@ impl GoParser {
                             counter,
                             symbols,
                             module_path,
+                            depth + 1,
                         );
                     }
                 }
@@ -333,6 +344,7 @@ impl GoParser {
                         counter,
                         symbols,
                         module_path,
+                        depth + 1,
                     );
                 }
 
@@ -352,6 +364,7 @@ impl GoParser {
                         counter,
                         symbols,
                         module_path,
+                        depth + 1,
                     );
                 }
 
@@ -371,6 +384,7 @@ impl GoParser {
                         counter,
                         symbols,
                         module_path,
+                        depth + 1,
                     );
                 }
 
@@ -399,6 +413,7 @@ impl GoParser {
                         counter,
                         symbols,
                         module_path,
+                        depth + 1,
                     );
                 }
             }
@@ -1194,6 +1209,7 @@ impl GoParser {
         counter: &mut SymbolCounter,
         symbols: &mut Vec<Symbol>,
         module_path: &str,
+        depth: usize,
     ) {
         // Range clause format: index, value := range items
         // Extract the variable names from the left side
@@ -1222,6 +1238,7 @@ impl GoParser {
                         counter,
                         symbols,
                         module_path,
+                        depth + 1,
                     );
                 }
             }

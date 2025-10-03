@@ -6,6 +6,7 @@
 //! When migrating or updating the parser, ensure compatibility with ABI-14 features.
 
 use crate::parsing::Import;
+use crate::parsing::parser::check_recursion_depth;
 use crate::parsing::{
     LanguageParser, MethodCall, NodeTracker, NodeTrackingState, ParserContext, ScopeType,
 };
@@ -81,6 +82,7 @@ impl TypeScriptParser {
                     symbol_counter,
                     &mut symbols,
                     "", // Module path will be determined by behavior
+                    0,
                 );
             }
             None => {
@@ -132,7 +134,12 @@ impl TypeScriptParser {
         counter: &mut SymbolCounter,
         symbols: &mut Vec<Symbol>,
         module_path: &str,
+        depth: usize,
     ) {
+        // Guard against stack overflow
+        if !check_recursion_depth(depth, node) {
+            return;
+        }
         match node.kind() {
             "function_declaration" | "generator_function_declaration" => {
                 // Register ALL child nodes for audit (including type_parameters, parameters, etc.)
@@ -171,6 +178,7 @@ impl TypeScriptParser {
                         counter,
                         symbols,
                         module_path,
+                        depth + 1,
                     );
                 }
 
@@ -204,7 +212,15 @@ impl TypeScriptParser {
                     self.context.set_current_class(class_name.clone());
 
                     // Extract class members
-                    self.extract_class_members(node, code, file_id, counter, symbols, module_path);
+                    self.extract_class_members(
+                        node,
+                        code,
+                        file_id,
+                        counter,
+                        symbols,
+                        module_path,
+                        depth + 1,
+                    );
 
                     // Exit scope first (this clears the current context)
                     self.context.exit_scope();
@@ -248,6 +264,7 @@ impl TypeScriptParser {
                     counter,
                     symbols,
                     module_path,
+                    depth + 1,
                 );
             }
             "arrow_function" => {
@@ -326,6 +343,7 @@ impl TypeScriptParser {
                         counter,
                         symbols,
                         module_path,
+                        depth + 1,
                     );
                     i += 1;
                 }
@@ -368,6 +386,7 @@ impl TypeScriptParser {
                             counter,
                             symbols,
                             module_path,
+                            depth + 1,
                         );
                     }
                 }
@@ -401,6 +420,7 @@ impl TypeScriptParser {
                         counter,
                         symbols,
                         module_path,
+                        depth + 1,
                     );
                 }
             }
@@ -417,6 +437,7 @@ impl TypeScriptParser {
                         counter,
                         symbols,
                         module_path,
+                        depth + 1,
                     );
                 }
             }
@@ -503,6 +524,7 @@ impl TypeScriptParser {
         counter: &mut SymbolCounter,
         symbols: &mut Vec<Symbol>,
         module_path: &str,
+        depth: usize,
     ) {
         if let Some(body) = class_node.child_by_field_name("body") {
             let mut cursor = body.walk();
@@ -544,6 +566,7 @@ impl TypeScriptParser {
                                 counter,
                                 symbols,
                                 module_path,
+                                depth + 1,
                             );
 
                             // Exit scope first (this clears the current context)
@@ -680,6 +703,7 @@ impl TypeScriptParser {
         counter: &mut SymbolCounter,
         symbols: &mut Vec<Symbol>,
         module_path: &str,
+        depth: usize,
     ) {
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
@@ -792,6 +816,7 @@ impl TypeScriptParser {
                                             counter,
                                             symbols,
                                             module_path,
+                                            depth + 1,
                                         );
 
                                         // Exit scope and restore context
