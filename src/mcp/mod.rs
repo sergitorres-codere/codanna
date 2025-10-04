@@ -38,6 +38,65 @@ use tokio::sync::{Mutex, RwLock};
 
 use crate::{IndexPersistence, Settings, SimpleIndexer, Symbol};
 
+/// Simple glob pattern matching for file paths
+/// Supports: *, **, ?, and exact matches
+fn glob_match(pattern: &str, path: &str) -> bool {
+    // Normalize path separators to forward slashes
+    let path = path.replace('\\', "/");
+    let pattern = pattern.replace('\\', "/");
+
+    // Handle ** (match any number of directories)
+    if pattern.contains("**") {
+        let parts: Vec<&str> = pattern.split("**").collect();
+        if parts.len() == 2 {
+            let prefix = parts[0];
+            let suffix = parts[1];
+
+            // Match prefix at start
+            if !prefix.is_empty() && !path.starts_with(prefix) {
+                return false;
+            }
+
+            // Match suffix at end
+            if !suffix.is_empty() && !path.ends_with(suffix) {
+                return false;
+            }
+
+            return true;
+        }
+    }
+
+    // Handle * (match within a directory)
+    if pattern.contains('*') {
+        let parts: Vec<&str> = pattern.split('*').collect();
+        let mut pos = 0;
+
+        for (i, part) in parts.iter().enumerate() {
+            if i == 0 {
+                // First part must match at start
+                if !path[pos..].starts_with(part) {
+                    return false;
+                }
+                pos += part.len();
+            } else if i == parts.len() - 1 {
+                // Last part must match at end
+                return path[pos..].ends_with(part);
+            } else {
+                // Middle parts must exist in order
+                if let Some(found_pos) = path[pos..].find(part) {
+                    pos += found_pos + part.len();
+                } else {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    // Exact match
+    path == pattern
+}
+
 /// Format a Unix timestamp as relative time (e.g., "2 hours ago")
 pub fn format_relative_time(timestamp: u64) -> String {
     use chrono::{DateTime, Utc};
@@ -110,6 +169,12 @@ pub struct SearchSymbolsRequest {
     /// Filter by programming language (e.g., "rust", "python", "typescript", "php")
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lang: Option<String>,
+    /// Filter by file path pattern (glob syntax, e.g., "**/Base/**", "*.cs")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_pattern: Option<String>,
+    /// Exclude file path pattern (glob syntax, e.g., "**/Test/**", "**/node_modules/**")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exclude_pattern: Option<String>,
     /// Skip first N results for pagination (default: 0)
     #[serde(default)]
     pub offset: u32,
@@ -269,7 +334,12 @@ impl CodeIntelligenceServer {
 
         if symbols.is_empty() {
             return Ok(CallToolResult::success(vec![Content::text(format!(
-                "No symbols found with name: {name}"
+                "No symbols found with name: {name}\n\n\
+                 💡 Try:\n\
+                   - Partial name search with search_symbols (e.g., query:{})\n\
+                   - Check spelling or try a similar name\n\
+                   - Use semantic_search_docs for natural language search",
+                &name[..name.len().min(5)]
             ))]));
         }
 
@@ -389,7 +459,12 @@ impl CodeIntelligenceServer {
 
         if symbols.is_empty() {
             return Ok(CallToolResult::success(vec![Content::text(format!(
-                "Function not found: {function_name}"
+                "Function not found: {function_name}\n\n\
+                 💡 Try:\n\
+                   - Use find_symbol to verify the exact function name\n\
+                   - Search with search_symbols (e.g., query:{} kind:function)\n\
+                   - Check if it's a method instead of a function",
+                &function_name[..function_name.len().min(5)]
             ))]));
         }
 
@@ -484,7 +559,12 @@ impl CodeIntelligenceServer {
 
         if symbols.is_empty() {
             return Ok(CallToolResult::success(vec![Content::text(format!(
-                "Function not found: {function_name}"
+                "Function not found: {function_name}\n\n\
+                 💡 Try:\n\
+                   - Use find_symbol to verify the exact function name\n\
+                   - Search with search_symbols (e.g., query:{} kind:method)\n\
+                   - Check if it's spelled differently or in a different namespace",
+                &function_name[..function_name.len().min(5)]
             ))]));
         }
 
@@ -1140,6 +1220,8 @@ impl CodeIntelligenceServer {
             kind,
             module,
             lang,
+            file_pattern,
+            exclude_pattern,
             offset,
             summary_only,
         }): Parameters<SearchSymbolsRequest>,
@@ -1170,11 +1252,44 @@ impl CodeIntelligenceServer {
             lang.as_deref(),
         ) {
             Ok(mut results) => {
+                // Apply file pattern filtering if specified
+                if file_pattern.is_some() || exclude_pattern.is_some() {
+                    results.retain(|r| {
+                        let file_path = &r.file_path;
+
+                        // Check inclusion pattern
+                        if let Some(ref pattern) = file_pattern {
+                            if !glob_match(pattern, file_path) {
+                                return false;
+                            }
+                        }
+
+                        // Check exclusion pattern
+                        if let Some(ref pattern) = exclude_pattern {
+                            if glob_match(pattern, file_path) {
+                                return false;
+                            }
+                        }
+
+                        true
+                    });
+                }
+
                 let total_count = results.len();
 
                 if total_count == 0 {
+                    let suggestion = if query.len() > 5 {
+                        format!("Try a shorter/partial query (e.g., query:{})", &query[..query.len().min(5)])
+                    } else {
+                        "Try a different query or use semantic_search_docs for natural language".to_string()
+                    };
+
                     return Ok(CallToolResult::success(vec![Content::text(format!(
-                        "No results found for query: {query}"
+                        "No results found for query: {query}\n\n\
+                         💡 Try:\n\
+                           - {suggestion}\n\
+                           - Remove kind/module filters if using them\n\
+                           - Check spelling or try synonyms"
                     ))]));
                 }
 
@@ -1311,9 +1426,20 @@ impl CodeIntelligenceServer {
 
                 Ok(CallToolResult::success(vec![Content::text(result)]))
             }
-            Err(e) => Ok(CallToolResult::error(vec![Content::text(format!(
-                "Search failed: {e}"
-            ))])),
+            Err(e) => {
+                let error_msg = format!("Search failed: {e}");
+                let suggestion = if error_msg.contains("token") || error_msg.contains("size") {
+                    "\n\n💡 Try: Use limit=10 or summary_only=true to reduce response size"
+                } else if error_msg.contains("index") || error_msg.contains("not found") {
+                    "\n\n💡 Try: Verify the index exists and is up to date with get_index_info"
+                } else {
+                    "\n\n💡 Try: Check query syntax or reduce complexity"
+                };
+
+                Ok(CallToolResult::error(vec![Content::text(format!(
+                    "{error_msg}{suggestion}"
+                ))]))
+            },
         }
     }
 }
