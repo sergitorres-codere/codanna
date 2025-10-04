@@ -214,6 +214,18 @@ pub struct SemanticSearchWithContextRequest {
 }
 
 #[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
+pub struct GetSymbolDetailsRequest {
+    /// Name of the symbol to get details for
+    pub symbol_name: String,
+    /// Optional file path to disambiguate (e.g., "src/module.rs:42")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_path: Option<String>,
+    /// Optional module path to disambiguate
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub module: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
 pub struct GetIndexInfoRequest {}
 
 fn default_depth() -> u32 {
@@ -734,6 +746,165 @@ impl CodeIntelligenceServer {
                 "Symbol not found: {symbol_name}"
             ))])),
         }
+    }
+
+    #[tool(description = "Get detailed information about a specific symbol. Use after search_symbols with summary_only=true to get full details.")]
+    pub async fn get_symbol_details(
+        &self,
+        Parameters(GetSymbolDetailsRequest {
+            symbol_name,
+            file_path,
+            module,
+        }): Parameters<GetSymbolDetailsRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        use crate::symbol::context::ContextIncludes;
+
+        let indexer = self.indexer.read().await;
+        let symbols = indexer.find_symbols_by_name(&symbol_name, None);
+
+        if symbols.is_empty() {
+            return Ok(CallToolResult::success(vec![Content::text(format!(
+                "Symbol not found: {symbol_name}\n\n\
+                 💡 Try: Use search_symbols to find available symbols first"
+            ))]));
+        }
+
+        // Filter by file_path if provided
+        let filtered_symbols: Vec<_> = if let Some(ref path) = file_path {
+            symbols
+                .into_iter()
+                .filter(|s| {
+                    let sym_path = indexer
+                        .get_file_path(s.file_id)
+                        .unwrap_or_default();
+                    sym_path.contains(path) || path.contains(&sym_path)
+                })
+                .collect()
+        } else if let Some(ref mod_path) = module {
+            symbols
+                .into_iter()
+                .filter(|s| {
+                    s.as_module_path()
+                        .map(|m| m.contains(mod_path))
+                        .unwrap_or(false)
+                })
+                .collect()
+        } else {
+            symbols
+        };
+
+        if filtered_symbols.is_empty() {
+            return Ok(CallToolResult::success(vec![Content::text(format!(
+                "No symbols found matching: {symbol_name} with filters\n\n\
+                 💡 Try: Remove file_path or module filter, or check the values"
+            ))]));
+        }
+
+        let mut result = format!("Found {} symbol(s) named '{}':\n\n", filtered_symbols.len(), symbol_name);
+
+        for (idx, symbol) in filtered_symbols.iter().enumerate() {
+            if idx > 0 {
+                result.push_str("\n---\n\n");
+            }
+
+            // Get full context with all relationships
+            if let Some(ctx) = indexer.get_symbol_context(
+                symbol.id,
+                ContextIncludes::IMPLEMENTATIONS
+                    | ContextIncludes::DEFINITIONS
+                    | ContextIncludes::CALLERS,
+            ) {
+                result.push_str(&ctx.format_location_with_type());
+                result.push('\n');
+
+                // Module path
+                if let Some(module) = symbol.as_module_path() {
+                    result.push_str(&format!("Module: {module}\n"));
+                }
+
+                // Full signature
+                if let Some(sig) = symbol.as_signature() {
+                    result.push_str(&format!("Signature:\n{sig}\n"));
+                }
+
+                // Full documentation
+                if let Some(doc) = symbol.as_doc_comment() {
+                    result.push_str(&format!("\nDocumentation:\n{doc}\n"));
+                }
+
+                // Relationships
+                if let Some(impls) = &ctx.relationships.implemented_by {
+                    if !impls.is_empty() {
+                        result.push_str(&format!("\nImplemented by {} type(s):\n", impls.len()));
+                        for impl_sym in impls.iter().take(10) {
+                            result.push_str(&format!("  - {}\n", impl_sym.name));
+                        }
+                        if impls.len() > 10 {
+                            result.push_str(&format!("  ... and {} more\n", impls.len() - 10));
+                        }
+                    }
+                }
+
+                if let Some(defines) = &ctx.relationships.defines {
+                    if !defines.is_empty() {
+                        let methods: Vec<_> = defines
+                            .iter()
+                            .filter(|s| s.kind == crate::SymbolKind::Method)
+                            .collect();
+                        if !methods.is_empty() {
+                            result.push_str(&format!("\nDefines {} method(s):\n", methods.len()));
+                            for method in methods.iter().take(10) {
+                                result.push_str(&format!("  - {}\n", method.name));
+                            }
+                            if methods.len() > 10 {
+                                result.push_str(&format!("  ... and {} more\n", methods.len() - 10));
+                            }
+                        }
+                    }
+                }
+
+                if let Some(callers) = &ctx.relationships.called_by {
+                    if !callers.is_empty() {
+                        result.push_str(&format!("\nCalled by {} function(s):\n", callers.len()));
+                        for (caller_sym, _) in callers.iter().take(10) {
+                            let caller_file = indexer
+                                .get_file_path(caller_sym.file_id)
+                                .unwrap_or_else(|| "<unknown>".to_string());
+                            result.push_str(&format!(
+                                "  - {} at {}:{}\n",
+                                caller_sym.name,
+                                caller_file,
+                                caller_sym.range.start_line + 1
+                            ));
+                        }
+                        if callers.len() > 10 {
+                            result.push_str(&format!("  ... and {} more\n", callers.len() - 10));
+                        }
+                    }
+                }
+            } else {
+                // Fallback to basic info
+                let file_path = indexer
+                    .get_file_path(symbol.file_id)
+                    .unwrap_or_else(|| "<unknown>".to_string());
+                result.push_str(&format!(
+                    "{:?} at {}:{}\n",
+                    symbol.kind,
+                    file_path,
+                    symbol.range.start_line + 1
+                ));
+
+                if let Some(ref doc) = symbol.doc_comment {
+                    result.push_str(&format!("Documentation:\n{doc}\n"));
+                }
+
+                if let Some(ref sig) = symbol.signature {
+                    result.push_str(&format!("Signature:\n{sig}\n"));
+                }
+            }
+        }
+
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Get information about the indexed codebase")]
