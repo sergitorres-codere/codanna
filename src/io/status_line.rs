@@ -6,7 +6,7 @@
 //! - Provide concurrency-safe spinner and progress bar helpers with exit-code aware
 //!   rendering so CLI callers can surface ✓/✗ outcomes without bespoke plumbing
 //!
-//! Original: https://github.com/pkolaczk/status-line
+//! Original: <https://github.com/pkolaczk/status-line>
 //!
 //! ## Widgets
 //! - [`ProgressBar`] renders horizontal bars with configurable glyph palettes so callers
@@ -211,11 +211,11 @@ pub enum ProgressBarStyle {
     LeftFiveEighths,
     /// Black vertical rectangle (`▮`) that aligns well with bracketed bars.
     VerticalSolid,
-    /// White vertical rectangle (`▯`) complement for [`VerticalSolid`].
+    /// White vertical rectangle (`▯`) complement for `VerticalSolid`.
     VerticalLight,
     /// Black parallelogram (`▰`) for a stylized slanted bar.
     ParallelogramSolid,
-    /// White parallelogram (`▱`) complement for [`ParallelogramSolid`].
+    /// White parallelogram (`▱`) complement for `ParallelogramSolid`.
     ParallelogramLight,
 }
 

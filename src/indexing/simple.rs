@@ -4,6 +4,8 @@
 use crate::indexing::{
     FileWalker, IndexStats, IndexTransaction, calculate_hash, get_utc_timestamp,
 };
+use crate::io::status_line::StatusLine;
+use crate::io::{ProgressBar, ProgressBarOptions, ProgressBarStyle};
 use crate::parsing::resolution::ResolutionScope;
 use crate::parsing::{LanguageId, MethodCall, ParserFactory, get_registry};
 use crate::relationship::RelationshipMetadata;
@@ -17,7 +19,6 @@ use crate::{
 };
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 /// Debug print macro that respects the debug setting
@@ -2121,7 +2122,22 @@ impl SimpleIndexer {
         let mut stats = IndexStats::new();
 
         // Process files one at a time with batched commits
-        let processed = Arc::new(AtomicUsize::new(0));
+        let progress_view = if progress && total_files > 0 {
+            let options = ProgressBarOptions::default()
+                .with_style(ProgressBarStyle::VerticalSolid)
+                .with_width(28);
+            let bar = Arc::new(ProgressBar::with_options(
+                total_files as u64,
+                "files",
+                "indexed",
+                "failed",
+                options,
+            ));
+            let status = StatusLine::new(Arc::clone(&bar));
+            Some((bar, status))
+        } else {
+            None
+        };
 
         // Start batch once before the loop
         self.start_tantivy_batch()?;
@@ -2129,7 +2145,7 @@ impl SimpleIndexer {
         let mut files_in_batch = 0;
 
         for file_path in files {
-            // Track files as they are processed
+            let mut file_success = false;
 
             {
                 match self.index_file_internal(&file_path, force) {
@@ -2147,6 +2163,7 @@ impl SimpleIndexer {
 
                         // Count all processed files (cached + newly indexed)
                         stats.files_indexed += 1;
+                        file_success = true;
 
                         // Count symbols from all files
                         let new_symbols = self
@@ -2164,14 +2181,19 @@ impl SimpleIndexer {
                 }
             }
 
-            if progress {
-                let current = processed.fetch_add(1, Ordering::SeqCst) + 1;
-                eprint!("\r{}", stats.progress_line(current, total_files));
+            if let Some((bar, _)) = progress_view.as_ref() {
+                bar.inc();
+                if file_success {
+                    bar.add_extra1(1);
+                } else {
+                    bar.add_extra2(1);
+                }
             }
         }
 
-        if progress {
-            eprintln!(); // New line after progress
+        if let Some((bar, status)) = progress_view {
+            drop(status);
+            eprintln!("{bar}");
         }
 
         // Commit any remaining files in the batch
@@ -2343,7 +2365,7 @@ impl SimpleIndexer {
         let unresolved = std::mem::take(&mut self.unresolved_relationships);
 
         eprintln!(
-            "DEBUG: resolve_cross_file_relationships: {} unresolved relationships",
+            "Resolving cross-file relationships: {} unresolved entries",
             unresolved.len()
         );
         debug_print!(
@@ -2362,8 +2384,24 @@ impl SimpleIndexer {
 
         let mut resolved_count = 0;
         let mut skipped_count = 0;
-        let mut processed_count = 0;
         let total_unresolved = unresolved.len();
+
+        let progress = if total_unresolved > 0 {
+            let options = ProgressBarOptions::default()
+                .with_style(ProgressBarStyle::VerticalSolid)
+                .with_width(28);
+            let bar = Arc::new(ProgressBar::with_options(
+                total_unresolved as u64,
+                "relationships",
+                "resolved",
+                "skipped",
+                options,
+            ));
+            let status = StatusLine::new(Arc::clone(&bar));
+            Some((bar, status))
+        } else {
+            None
+        };
 
         // Group relationships by file for efficient context building
         let mut relationships_by_file: std::collections::HashMap<
@@ -2388,14 +2426,8 @@ impl SimpleIndexer {
             let context = self.build_resolution_context(file_id)?;
 
             for rel in file_relationships {
-                processed_count += 1;
-
-                // Progress reporting every 10k relationships processed
-                if processed_count % 10000 == 0 {
-                    let progress_pct = (processed_count as f64 / total_unresolved as f64) * 100.0;
-                    eprint!(
-                        "\rProcessing relationships: {processed_count}/{total_unresolved} ({progress_pct:.1}%) - resolved: {resolved_count}, skipped: {skipped_count}"
-                    );
+                if let Some((bar, _)) = &progress {
+                    bar.inc();
                 }
 
                 debug_print!(
@@ -2601,6 +2633,9 @@ impl SimpleIndexer {
                         );
                         // Symbol not in scope - skip this relationship
                         skipped_count += 1;
+                        if let Some((bar, _)) = &progress {
+                            bar.add_extra2(1);
+                        }
                         continue;
                     }
                 };
@@ -2621,6 +2656,9 @@ impl SimpleIndexer {
                     None => {
                         debug_print!(self, "Target symbol not found in index - skipping");
                         skipped_count += 1;
+                        if let Some((bar, _)) = &progress {
+                            bar.add_extra2(1);
+                        }
                         continue;
                     }
                 };
@@ -2648,6 +2686,9 @@ impl SimpleIndexer {
                             rel.kind
                         );
                         skipped_count += 1;
+                        if let Some((bar, _)) = &progress {
+                            bar.add_extra2(1);
+                        }
                         continue;
                     }
 
@@ -2670,6 +2711,9 @@ impl SimpleIndexer {
                                 from_symbol.name
                             );
                             skipped_count += 1;
+                            if let Some((bar, _)) = &progress {
+                                bar.add_extra2(1);
+                            }
                             continue;
                         }
                     }
@@ -2696,14 +2740,8 @@ impl SimpleIndexer {
                     }
                     self.add_relationship_internal(from_symbol.id, to_symbol.id, relationship)?;
                     resolved_count += 1;
-
-                    // Progress reporting every 10k relationships
-                    if resolved_count % 10000 == 0 {
-                        let progress_pct =
-                            (resolved_count as f64 / total_unresolved as f64) * 100.0;
-                        eprintln!(
-                            "Resolving relationships: {resolved_count}/{total_unresolved} ({progress_pct:.1}%)"
-                        );
+                    if let Some((bar, _)) = &progress {
+                        bar.add_extra1(1);
                     }
                 }
             }
@@ -2712,12 +2750,9 @@ impl SimpleIndexer {
         // Commit the batch with all the relationships
         self.commit_tantivy_batch()?;
 
-        // Print final progress update to show 100% completion
-        if total_unresolved > 0 {
-            eprint!(
-                "\rProcessing relationships: {total_unresolved}/{total_unresolved} (100.0%) - resolved: {resolved_count}, skipped: {skipped_count}"
-            );
-            eprintln!(); // Move to next line after progress bar
+        if let Some((bar, status)) = progress {
+            drop(status);
+            eprintln!("{bar}");
         }
 
         debug_print!(
