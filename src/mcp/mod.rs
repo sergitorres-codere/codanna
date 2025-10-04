@@ -42,28 +42,41 @@ use crate::{IndexPersistence, Settings, SimpleIndexer, Symbol};
 /// Supports: *, **, ?, and exact matches
 fn glob_match(pattern: &str, path: &str) -> bool {
     // Normalize path separators to forward slashes
-    let path = path.replace('\\', "/");
+    let mut path = path.replace('\\', "/");
     let pattern = pattern.replace('\\', "/");
+
+    // Strip leading ./ from path for matching
+    if path.starts_with("./") {
+        path = path[2..].to_string();
+    }
 
     // Handle ** (match any number of directories)
     if pattern.contains("**") {
-        let parts: Vec<&str> = pattern.split("**").collect();
-        if parts.len() == 2 {
-            let prefix = parts[0];
-            let suffix = parts[1];
+        // For patterns like **/Processes/**, we need substring matching
+        // Remove ** wildcards and check if remaining parts exist in path
+        let pattern_parts: Vec<&str> = pattern.split("**").filter(|p| !p.is_empty()).collect();
 
-            // Match prefix at start
-            if !prefix.is_empty() && !path.starts_with(prefix) {
-                return false;
-            }
-
-            // Match suffix at end
-            if !suffix.is_empty() && !path.ends_with(suffix) {
-                return false;
-            }
-
+        if pattern_parts.is_empty() {
+            // Pattern is just "**" - match everything
             return true;
         }
+
+        // Check each non-empty part exists in order in the path
+        let mut search_from = 0;
+        for part in pattern_parts {
+            let trimmed = part.trim_matches('/');
+            if trimmed.is_empty() {
+                continue;
+            }
+
+            if let Some(pos) = path[search_from..].find(trimmed) {
+                search_from += pos + trimmed.len();
+            } else {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     // Handle * (match within a directory)
@@ -748,7 +761,9 @@ impl CodeIntelligenceServer {
         }
     }
 
-    #[tool(description = "Get detailed information about a specific symbol. Use after search_symbols with summary_only=true to get full details.")]
+    #[tool(
+        description = "Get detailed information about a specific symbol. Use after search_symbols with summary_only=true to get full details."
+    )]
     pub async fn get_symbol_details(
         &self,
         Parameters(GetSymbolDetailsRequest {
@@ -771,13 +786,15 @@ impl CodeIntelligenceServer {
 
         // Filter by file_path if provided
         let filtered_symbols: Vec<_> = if let Some(ref path) = file_path {
+            // Normalize path separators for comparison
+            let normalized_filter = path.replace('\\', "/");
             symbols
                 .into_iter()
                 .filter(|s| {
-                    let sym_path = indexer
-                        .get_file_path(s.file_id)
-                        .unwrap_or_default();
-                    sym_path.contains(path) || path.contains(&sym_path)
+                    let sym_path = indexer.get_file_path(s.file_id).unwrap_or_default();
+                    let normalized_sym_path = sym_path.replace('\\', "/");
+                    normalized_sym_path.contains(&normalized_filter)
+                        || normalized_filter.contains(&normalized_sym_path)
                 })
                 .collect()
         } else if let Some(ref mod_path) = module {
@@ -800,7 +817,11 @@ impl CodeIntelligenceServer {
             ))]));
         }
 
-        let mut result = format!("Found {} symbol(s) named '{}':\n\n", filtered_symbols.len(), symbol_name);
+        let mut result = format!(
+            "Found {} symbol(s) named '{}':\n\n",
+            filtered_symbols.len(),
+            symbol_name
+        );
 
         for (idx, symbol) in filtered_symbols.iter().enumerate() {
             if idx > 0 {
@@ -857,7 +878,8 @@ impl CodeIntelligenceServer {
                                 result.push_str(&format!("  - {}\n", method.name));
                             }
                             if methods.len() > 10 {
-                                result.push_str(&format!("  ... and {} more\n", methods.len() - 10));
+                                result
+                                    .push_str(&format!("  ... and {} more\n", methods.len() - 10));
                             }
                         }
                     }
@@ -1402,12 +1424,19 @@ impl CodeIntelligenceServer {
         // Parse the kind filter if provided
         let kind_filter = kind.as_ref().and_then(|k| match k.to_lowercase().as_str() {
             "function" => Some(crate::SymbolKind::Function),
-            "struct" => Some(crate::SymbolKind::Struct),
-            "trait" => Some(crate::SymbolKind::Trait),
             "method" => Some(crate::SymbolKind::Method),
-            "field" => Some(crate::SymbolKind::Field),
+            "struct" => Some(crate::SymbolKind::Struct),
+            "class" => Some(crate::SymbolKind::Class),
+            "enum" => Some(crate::SymbolKind::Enum),
+            "trait" => Some(crate::SymbolKind::Trait),
+            "interface" => Some(crate::SymbolKind::Interface),
             "module" => Some(crate::SymbolKind::Module),
+            "field" => Some(crate::SymbolKind::Field),
+            "variable" => Some(crate::SymbolKind::Variable),
             "constant" => Some(crate::SymbolKind::Constant),
+            "parameter" => Some(crate::SymbolKind::Parameter),
+            "typealias" | "type_alias" => Some(crate::SymbolKind::TypeAlias),
+            "macro" => Some(crate::SymbolKind::Macro),
             _ => None,
         });
 
@@ -1450,9 +1479,13 @@ impl CodeIntelligenceServer {
 
                 if total_count == 0 {
                     let suggestion = if query.len() > 5 {
-                        format!("Try a shorter/partial query (e.g., query:{})", &query[..query.len().min(5)])
+                        format!(
+                            "Try a shorter/partial query (e.g., query:{})",
+                            &query[..query.len().min(5)]
+                        )
                     } else {
-                        "Try a different query or use semantic_search_docs for natural language".to_string()
+                        "Try a different query or use semantic_search_docs for natural language"
+                            .to_string()
                     };
 
                     return Ok(CallToolResult::success(vec![Content::text(format!(
@@ -1610,7 +1643,7 @@ impl CodeIntelligenceServer {
                 Ok(CallToolResult::error(vec![Content::text(format!(
                     "{error_msg}{suggestion}"
                 ))]))
-            },
+            }
         }
     }
 }
