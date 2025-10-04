@@ -451,6 +451,7 @@ Available tools when using the MCP server. All tools support `--json` flag for s
 | `find_callers` | Show functions that call a given function | `codanna mcp find_callers init` |
 | `analyze_impact` | Analyze the impact radius of symbol changes | `codanna mcp analyze_impact Parser --json` |
 | `get_index_info` | Get index statistics and metadata | `codanna mcp get_index_info --json` |
+| `get_symbol_details` | Get detailed info for a specific symbol | `codanna mcp get_symbol_details symbol_name:Parser file_path:"src/main.rs"` |
 
 #### Complex Tools (Key:Value Arguments)
 | Tool | Description | Example |
@@ -503,6 +504,7 @@ Then use `find_symbol` or full search for specific symbols you want to explore.
 | `find_callers` | `function_name` |
 | `analyze_impact` | `symbol_name`, `max_depth` |
 | `get_index_info` | None |
+| `get_symbol_details` | `symbol_name` (required), `file_path`, `module` |
 
 
 ### Performance
