@@ -1,6 +1,7 @@
 //! C++ language parser implementation
 
 use crate::parsing::method_call::MethodCall;
+use crate::parsing::parser::check_recursion_depth;
 use crate::parsing::{Import, Language, LanguageParser, NodeTracker, NodeTrackingState};
 use crate::types::{Range, SymbolCounter};
 use crate::{FileId, Symbol, SymbolKind};
@@ -83,7 +84,13 @@ impl CppParser {
         file_id: FileId,
         symbols: &mut Vec<Symbol>,
         counter: &mut SymbolCounter,
+        depth: usize,
     ) {
+        // Guard against stack overflow
+        if !check_recursion_depth(depth, node) {
+            return;
+        }
+
         match node.kind() {
             "function_definition" => {
                 self.register_handled_node(node.kind(), node.kind_id());
@@ -184,7 +191,7 @@ impl CppParser {
         // Process children
         for i in 0..node.child_count() {
             if let Some(child) = node.child(i) {
-                self.extract_symbols_from_node(child, code, file_id, symbols, counter);
+                self.extract_symbols_from_node(child, code, file_id, symbols, counter, depth + 1);
             }
         }
     }
@@ -539,7 +546,7 @@ impl LanguageParser for CppParser {
         let root_node = tree.root_node();
         let mut symbols = Vec::new();
 
-        self.extract_symbols_from_node(root_node, code, file_id, &mut symbols, symbol_counter);
+        self.extract_symbols_from_node(root_node, code, file_id, &mut symbols, symbol_counter, 0);
 
         symbols
     }

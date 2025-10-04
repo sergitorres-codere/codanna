@@ -75,7 +75,11 @@ pub struct SimpleIndexer {
     trait_symbols_by_file:
         std::collections::HashMap<FileId, std::collections::HashMap<String, crate::SymbolKind>>,
     /// Method calls with rich receiver information for enhanced resolution
-    method_calls_by_file: std::collections::HashMap<FileId, Vec<crate::parsing::MethodCall>>,
+    /// Indexed by (caller_name, method_name) for O(1) lookup
+    method_calls_by_file: std::collections::HashMap<
+        FileId,
+        std::collections::HashMap<(String, String), crate::parsing::MethodCall>,
+    >,
     /// Optional vector search engine
     vector_engine: Option<Arc<Mutex<VectorSearchEngine>>>,
     /// Optional embedding generator
@@ -2205,10 +2209,12 @@ impl SimpleIndexer {
             method_call.receiver
         );
 
+        // Index by (caller_name, method_name) for O(1) lookup
+        let key = (method_call.caller.clone(), method_call.method_name.clone());
         self.method_calls_by_file
             .entry(file_id)
             .or_default()
-            .push(method_call.clone());
+            .insert(key, method_call.clone());
     }
 
     /// Resolves method calls using enhanced MethodCall data with fallback to legacy resolution.
@@ -2225,34 +2231,22 @@ impl SimpleIndexer {
         // Try to find corresponding MethodCall object for enhanced resolution
         if let Some(method_calls) = self.method_calls_by_file.get(&file_id) {
             // Normalize caller for language-specific matching (e.g., Python "<module>")
-            if let Ok(behavior) = self.get_behavior_for_file(file_id) {
-                let caller_normalized = behavior.normalize_caller_name(caller_name, file_id);
-                for method_call in method_calls {
-                    let mc_caller_norm =
-                        behavior.normalize_caller_name(&method_call.caller, file_id);
-                    if mc_caller_norm == caller_normalized && method_call.method_name == call_target
-                    {
-                        debug_print!(
-                            self,
-                            "Found MethodCall object for {}->{}! Using enhanced resolution",
-                            caller_name,
-                            call_target
-                        );
-                        return self.resolve_method_call(method_call, file_id, context);
-                    }
-                }
+            let caller_normalized = if let Ok(behavior) = self.get_behavior_for_file(file_id) {
+                behavior.normalize_caller_name(caller_name, file_id)
             } else {
-                for method_call in method_calls {
-                    if method_call.caller == caller_name && method_call.method_name == call_target {
-                        debug_print!(
-                            self,
-                            "Found MethodCall object for {}->{}! Using enhanced resolution",
-                            caller_name,
-                            call_target
-                        );
-                        return self.resolve_method_call(method_call, file_id, context);
-                    }
-                }
+                caller_name.to_string()
+            };
+
+            // O(1) hashmap lookup instead of O(m) linear search
+            let key = (caller_normalized, call_target.to_string());
+            if let Some(method_call) = method_calls.get(&key) {
+                debug_print!(
+                    self,
+                    "Found MethodCall object for {}->{}! Using enhanced resolution",
+                    caller_name,
+                    call_target
+                );
+                return self.resolve_method_call(method_call, file_id, context);
             }
         }
 
@@ -2390,104 +2384,10 @@ impl SimpleIndexer {
         // Start a batch for relationship updates
         self.start_tantivy_batch()?;
 
-        // Pre-create external symbols before resolution
-        // This ensures they're available in Tantivy when we look them up
-        debug_print!(
-            self,
-            "Pre-creating external symbols for {} relationships",
-            unresolved.len()
-        );
-
-        // No longer tracking external symbols since we don't create them anymore
-
-        // Track the symbol counter to ensure unique IDs
-        let symbol_counter = self.get_next_symbol_counter()?;
-
-        for rel in &unresolved {
-            debug_print!(
-                self,
-                "Checking relationship: {} -> {} (kind: {:?}, file: {:?})",
-                rel.from_name,
-                rel.to_name,
-                rel.kind,
-                rel.file_id
-            );
-            if rel.kind == RelationKind::Calls {
-                // Check if this is an external call that needs symbol creation
-                if let Some(behavior) = self.file_behaviors.get(&rel.file_id) {
-                    debug_print!(self, "Found behavior for file {:?}", rel.file_id);
-                    // First try with method call enhanced resolution
-                    if let Some(method_calls) = self.method_calls_by_file.get(&rel.file_id) {
-                        // Look for matching method call to get receiver
-                        for mc in method_calls {
-                            if mc.method_name == rel.to_name.as_ref() {
-                                let target = if let Some(recv) = &mc.receiver {
-                                    format!("{}.{}", recv, mc.method_name)
-                                } else {
-                                    mc.method_name.clone()
-                                };
-
-                                debug_print!(
-                                    self,
-                                    "Calling resolve_external_call_target for '{}' in file {:?}",
-                                    target,
-                                    rel.file_id
-                                );
-                                if let Some((module_path, symbol_name)) =
-                                    behavior.resolve_external_call_target(&target, rel.file_id)
-                                {
-                                    // Skip external symbol creation - we don't want to pollute the index
-                                    // with stub files for unresolved imports
-                                    debug_print!(
-                                        self,
-                                        "Skipping external symbol creation for: {}::{}",
-                                        module_path,
-                                        symbol_name
-                                    );
-                                }
-                                break;
-                            }
-                        }
-                    }
-
-                    // Also try direct resolution
-                    debug_print!(
-                        self,
-                        "Trying direct resolution for '{}' in file {:?}",
-                        rel.to_name,
-                        rel.file_id
-                    );
-                    if let Some((module_path, symbol_name)) =
-                        behavior.resolve_external_call_target(&rel.to_name, rel.file_id)
-                    {
-                        // Skip external symbol creation - we don't want to pollute the index
-                        // with stub files for unresolved imports
-                        debug_print!(
-                            self,
-                            "Skipping external symbol pre-creation for: {}::{}",
-                            module_path,
-                            symbol_name
-                        );
-                    }
-                }
-            }
-        }
-
-        // Update the symbol counter metadata with the final value
-        if symbol_counter.current_count() > 0 {
-            self.update_symbol_counter(&symbol_counter)?;
-        }
-
-        // No longer creating external symbols, so skip the external symbol commit
-        // External symbols are a wrong design decision - we don't want to pollute
-        // the index with stub files for unresolved imports
-
-        // Start a new batch for relationship updates
-        self.start_tantivy_batch()?;
-
         let mut resolved_count = 0;
         let mut skipped_count = 0;
-        let _total_unresolved = unresolved.len();
+        let mut processed_count = 0;
+        let total_unresolved = unresolved.len();
 
         // Group relationships by file for efficient context building
         let mut relationships_by_file: std::collections::HashMap<
@@ -2501,12 +2401,27 @@ impl SimpleIndexer {
                 .push(rel);
         }
 
+        // Symbol lookup cache to avoid millions of duplicate Tantivy queries
+        // Maps symbol_name -> Vec<Symbol>
+        let mut symbol_lookup_cache: std::collections::HashMap<String, Vec<Symbol>> =
+            std::collections::HashMap::new();
+
         // Process each file's relationships with its resolution context
         for (file_id, file_relationships) in relationships_by_file {
             // Build resolution context for this file
             let context = self.build_resolution_context(file_id)?;
 
             for rel in file_relationships {
+                processed_count += 1;
+
+                // Progress reporting every 10k relationships processed
+                if processed_count % 10000 == 0 {
+                    let progress_pct = (processed_count as f64 / total_unresolved as f64) * 100.0;
+                    eprint!(
+                        "\rProcessing relationships: {processed_count}/{total_unresolved} ({progress_pct:.1}%) - resolved: {resolved_count}, skipped: {skipped_count}"
+                    );
+                }
+
                 debug_print!(
                     self,
                     "Processing relationship: {} -> {} (kind: {:?}, file: {:?})",
@@ -2521,13 +2436,23 @@ impl SimpleIndexer {
                 let behavior_for_file = self.get_behavior_for_file(file_id)?;
                 let from_query_name =
                     behavior_for_file.normalize_caller_name(&rel.from_name, file_id);
-                let all_from_symbols = self
-                    .document_index
-                    .find_symbols_by_name(&from_query_name, None)
-                    .map_err(|e| IndexError::TantivyError {
-                        operation: "find_symbols_by_name".to_string(),
-                        cause: e.to_string(),
-                    })?;
+
+                // Check cache first to avoid duplicate Tantivy queries
+                let all_from_symbols =
+                    if let Some(cached) = symbol_lookup_cache.get(&from_query_name) {
+                        cached.clone()
+                    } else {
+                        // Cache miss - query Tantivy and cache the result
+                        let symbols = self
+                            .document_index
+                            .find_symbols_by_name(&from_query_name, None)
+                            .map_err(|e| IndexError::TantivyError {
+                                operation: "find_symbols_by_name".to_string(),
+                                cause: e.to_string(),
+                            })?;
+                        symbol_lookup_cache.insert(from_query_name.clone(), symbols.clone());
+                        symbols
+                    };
 
                 debug_print!(
                     self,
@@ -2595,13 +2520,11 @@ impl SimpleIndexer {
                             let to_key = if let Some(method_calls) =
                                 self.method_calls_by_file.get(&file_id)
                             {
-                                // Try to find the matching MethodCall by caller and method name
+                                // O(1) hashmap lookup by caller and method name
                                 let caller_name =
                                     from_symbols.first().map(|s| s.name.as_ref()).unwrap_or("");
-                                if let Some(mc) = method_calls.iter().find(|mc| {
-                                    mc.caller == caller_name
-                                        && mc.method_name == rel.to_name.as_ref()
-                                }) {
+                                let key = (caller_name.to_string(), rel.to_name.to_string());
+                                if let Some(mc) = method_calls.get(&key) {
                                     if let Some(recv) = &mc.receiver {
                                         format!("{recv}.{}", mc.method_name)
                                     } else {
@@ -2797,6 +2720,15 @@ impl SimpleIndexer {
                     }
                     self.add_relationship_internal(from_symbol.id, to_symbol.id, relationship)?;
                     resolved_count += 1;
+
+                    // Progress reporting every 10k relationships
+                    if resolved_count % 10000 == 0 {
+                        let progress_pct =
+                            (resolved_count as f64 / total_unresolved as f64) * 100.0;
+                        eprintln!(
+                            "Resolving relationships: {resolved_count}/{total_unresolved} ({progress_pct:.1}%)"
+                        );
+                    }
                 }
             }
         }
@@ -2804,12 +2736,20 @@ impl SimpleIndexer {
         // Commit the batch with all the relationships
         self.commit_tantivy_batch()?;
 
+        // Print final progress update to show 100% completion
+        if total_unresolved > 0 {
+            eprint!(
+                "\rProcessing relationships: {total_unresolved}/{total_unresolved} (100.0%) - resolved: {resolved_count}, skipped: {skipped_count}"
+            );
+            eprintln!(); // Move to next line after progress bar
+        }
+
         debug_print!(
             self,
             "Relationship resolution complete - resolved: {}, skipped: {}, total: {}",
             resolved_count,
             skipped_count,
-            _total_unresolved
+            total_unresolved
         );
 
         Ok(())

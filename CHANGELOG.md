@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.21] - 2025-10-03
+
+### Added
+- Recursion depth guards across all language parsers
+  - `check_recursion_depth()` prevents stack overflow on deeply nested AST structures
+  - All parsers (TypeScript, Python, Rust, Go, PHP, C++, C#) now track depth in `extract_symbols_from_node()`
+  - Safely handles pathological code with excessive nesting (tested on Qt keyboard at depth 3521)
+
+### Changed
+- **PERFORMANCE**: Optimized resolution pipeline for large codebases
+  - Indexed method calls as HashMap for O(1) lookup instead of linear search
+  - Added symbol lookup cache to eliminate duplicate Tantivy queries
+  - Qt qtbase (8,508 files, 413K symbols): 7m38s total, relationship resolution processes 4.68M relationships with 4,778 resolved, 4.39M skipped
+  - Skipped relationships: external symbols not in index (Qt framework dependencies, system libraries)
+- Parser method signatures updated to accept depth parameter
+- Audit reports and grammar analysis regenerated for all languages
+
 ## [0.5.20] - 2025-10-02
 
 ### Added

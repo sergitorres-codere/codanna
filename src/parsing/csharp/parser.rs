@@ -25,6 +25,7 @@
 //! - External framework references (e.g., System.Console) require special handling
 
 use crate::parsing::Import;
+use crate::parsing::parser::check_recursion_depth;
 use crate::parsing::{
     HandledNode, LanguageParser, MethodCall, NodeTracker, NodeTrackingState, ParserContext,
     ScopeType,
@@ -116,6 +117,7 @@ impl CSharpParser {
                     symbol_counter,
                     &mut symbols,
                     "", // Module path will be determined by behavior
+                    0,
                 );
             }
             None => {
@@ -150,7 +152,12 @@ impl CSharpParser {
         counter: &mut SymbolCounter,
         symbols: &mut Vec<Symbol>,
         module_path: &str,
+        depth: usize,
     ) {
+        // Guard against stack overflow
+        if !check_recursion_depth(depth, node) {
+            return;
+        }
         match node.kind() {
             // Namespace declarations
             "namespace_declaration" | "file_scoped_namespace_declaration" => {
@@ -166,6 +173,7 @@ impl CSharpParser {
                             counter,
                             symbols,
                             &namespace_path,
+                            depth + 1,
                         );
                     }
                 }
@@ -188,7 +196,15 @@ impl CSharpParser {
                     self.context.set_current_class(class_name.clone());
 
                     // Extract class members
-                    self.extract_class_members(node, code, file_id, counter, symbols, module_path);
+                    self.extract_class_members(
+                        node,
+                        code,
+                        file_id,
+                        counter,
+                        symbols,
+                        module_path,
+                        depth + 1,
+                    );
 
                     self.context.exit_scope();
                     self.context.set_current_class(saved_class);
@@ -214,6 +230,7 @@ impl CSharpParser {
                         counter,
                         symbols,
                         module_path,
+                        depth + 1,
                     );
                     self.context.exit_scope();
                 }
@@ -230,7 +247,15 @@ impl CSharpParser {
 
                     // Process struct members
                     self.context.enter_scope(ScopeType::Class);
-                    self.extract_class_members(node, code, file_id, counter, symbols, module_path);
+                    self.extract_class_members(
+                        node,
+                        code,
+                        file_id,
+                        counter,
+                        symbols,
+                        module_path,
+                        depth + 1,
+                    );
                     self.context.exit_scope();
                 }
             }
@@ -259,7 +284,15 @@ impl CSharpParser {
 
                     // Process record members
                     self.context.enter_scope(ScopeType::Class);
-                    self.extract_class_members(node, code, file_id, counter, symbols, module_path);
+                    self.extract_class_members(
+                        node,
+                        code,
+                        file_id,
+                        counter,
+                        symbols,
+                        module_path,
+                        depth + 1,
+                    );
                     self.context.exit_scope();
                 }
             }
@@ -365,6 +398,7 @@ impl CSharpParser {
                         counter,
                         symbols,
                         module_path,
+                        depth + 1,
                     );
                 }
             }
@@ -1247,6 +1281,7 @@ impl CSharpParser {
         counter: &mut SymbolCounter,
         symbols: &mut Vec<Symbol>,
         module_path: &str,
+        depth: usize,
     ) {
         // Find the class body
         if let Some(body_node) = class_node.child_by_field_name("body") {
@@ -1303,6 +1338,7 @@ impl CSharpParser {
                             counter,
                             symbols,
                             module_path,
+                            depth + 1,
                         );
                     }
                     _ => {
@@ -1314,6 +1350,7 @@ impl CSharpParser {
                             counter,
                             symbols,
                             module_path,
+                            depth + 1,
                         );
                     }
                 }
@@ -1329,6 +1366,7 @@ impl CSharpParser {
         counter: &mut SymbolCounter,
         symbols: &mut Vec<Symbol>,
         module_path: &str,
+        depth: usize,
     ) {
         // Find the interface body
         if let Some(body_node) = interface_node.child_by_field_name("body") {
@@ -1365,6 +1403,7 @@ impl CSharpParser {
                             counter,
                             symbols,
                             module_path,
+                            depth + 1,
                         );
                     }
                 }

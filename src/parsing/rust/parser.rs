@@ -32,6 +32,7 @@
 
 use crate::parsing::Import;
 use crate::parsing::method_call::MethodCall;
+use crate::parsing::parser::check_recursion_depth;
 use crate::parsing::{
     HandledNode, Language, LanguageParser, NodeTracker, NodeTrackingState, ParserContext, ScopeType,
 };
@@ -292,7 +293,7 @@ impl RustParser {
         let mut symbols = Vec::new();
 
         // Walk the tree manually to find symbols
-        self.extract_symbols_from_node(root_node, code, file_id, &mut symbols, symbol_counter);
+        self.extract_symbols_from_node(root_node, code, file_id, &mut symbols, symbol_counter, 0);
 
         symbols
     }
@@ -304,7 +305,13 @@ impl RustParser {
         file_id: FileId,
         symbols: &mut Vec<Symbol>,
         counter: &mut SymbolCounter,
+        depth: usize,
     ) {
+        // Guard against stack overflow
+        if !check_recursion_depth(depth, node) {
+            return;
+        }
+
         // Debug: print node types that contain "type" or "const"
         if (node.kind().contains("type") || node.kind().contains("const")) && self.debug {
             eprintln!("DEBUG: Found node kind: {}", node.kind());
@@ -363,7 +370,14 @@ impl RustParser {
                 // Process children for nested functions/types
                 for child in node.children(&mut node.walk()) {
                     if child.kind() != "identifier" && child.kind() != "parameters" {
-                        self.extract_symbols_from_node(child, code, file_id, symbols, counter);
+                        self.extract_symbols_from_node(
+                            child,
+                            code,
+                            file_id,
+                            symbols,
+                            counter,
+                            depth + 1,
+                        );
                     }
                 }
 
@@ -436,7 +450,14 @@ impl RustParser {
                 // Process children for potential nested items
                 for child in node.children(&mut node.walk()) {
                     if child.kind() != "identifier" && child.kind() != "field_declaration_list" {
-                        self.extract_symbols_from_node(child, code, file_id, symbols, counter);
+                        self.extract_symbols_from_node(
+                            child,
+                            code,
+                            file_id,
+                            symbols,
+                            counter,
+                            depth + 1,
+                        );
                     }
                 }
 
@@ -622,7 +643,14 @@ impl RustParser {
 
                 // Process children
                 for child in node.children(&mut node.walk()) {
-                    self.extract_symbols_from_node(child, code, file_id, symbols, counter);
+                    self.extract_symbols_from_node(
+                        child,
+                        code,
+                        file_id,
+                        symbols,
+                        counter,
+                        depth + 1,
+                    );
                 }
 
                 // CRITICAL: Exit scope first (this clears the current context)
@@ -654,7 +682,14 @@ impl RustParser {
                 // Process children for nested items within the module
                 for child in node.children(&mut node.walk()) {
                     if child.kind() != "identifier" {
-                        self.extract_symbols_from_node(child, code, file_id, symbols, counter);
+                        self.extract_symbols_from_node(
+                            child,
+                            code,
+                            file_id,
+                            symbols,
+                            counter,
+                            depth + 1,
+                        );
                     }
                 }
                 return; // Skip default traversal since we handled children
@@ -681,7 +716,7 @@ impl RustParser {
 
         // Recurse into children (except for impl_item which returns early)
         for child in node.children(&mut node.walk()) {
-            self.extract_symbols_from_node(child, code, file_id, symbols, counter);
+            self.extract_symbols_from_node(child, code, file_id, symbols, counter, depth + 1);
         }
     }
 
