@@ -99,7 +99,9 @@ rcgen = ["dep:rcgen"]
 # See clippy.toml for behavior configuration (thresholds, etc.)
 uninlined_format_args = "warn"
 
-
+[[example]]
+name = "simple_progress_demo"
+path = "examples/simple_progress_demo.rs"
 
 [[bench]]
 name = "unified_output_bench"
