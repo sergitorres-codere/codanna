@@ -2221,35 +2221,609 @@ translation_unit [219] = '/**'
         number_literal [158] = '0'
         ; [42] = ';'
       } [66] = '}'
+  comment [177] = '/**'
+  enum_specifier [301] = 'enum Color {'
+    enum [97] = 'enum'
+    name: type_identifier [542] = 'Color'
+    body: enumerator_list [302] = '{'
+      { [65] = '{'
+      enumerator [309] = 'RED'
+        name: identifier [1] = 'RED'
+      , [7] = ','
+      enumerator [309] = 'GREEN'
+        name: identifier [1] = 'GREEN'
+      , [7] = ','
+      enumerator [309] = 'BLUE'
+        name: identifier [1] = 'BLUE'
+      } [66] = '}'
+  ; [42] = ';'
+  comment [177] = '/**'
+  struct_specifier [303] = 'struct Point {'
+    struct [99] = 'struct'
+    name: type_identifier [542] = 'Point'
+    body: field_declaration_list [305] = '{'
+      { [65] = '{'
+      field_declaration [307] = 'int x;'
+        type: primitive_type [96] = 'int'
+        declarator: field_identifier [538] = 'x'
+        ; [42] = ';'
+      field_declaration [307] = 'int y;'
+        type: primitive_type [96] = 'int'
+        declarator: field_identifier [538] = 'y'
+        ; [42] = ';'
+      } [66] = '}'
+  ; [42] = ';'
+  comment [177] = '/**'
+  enum_specifier [301] = 'enum class Status {'
+    enum [97] = 'enum'
+    class [98] = 'class'
+    name: type_identifier [542] = 'Status'
+    body: enumerator_list [302] = '{'
+      { [65] = '{'
+      enumerator [309] = 'SUCCESS'
+        name: identifier [1] = 'SUCCESS'
+      , [7] = ','
+      enumerator [309] = 'FAILURE'
+        name: identifier [1] = 'FAILURE'
+      , [7] = ','
+      enumerator [309] = 'PENDING'
+        name: identifier [1] = 'PENDING'
+      } [66] = '}'
+  ; [42] = ';'
+  comment [177] = '/**'
+  union_specifier [304] = 'union Data {'
+    union [100] = 'union'
+    name: type_identifier [542] = 'Data'
+    body: field_declaration_list [305] = '{'
+      { [65] = '{'
+      field_declaration [307] = 'int integer;'
+        type: primitive_type [96] = 'int'
+        declarator: field_identifier [538] = 'integer'
+        ; [42] = ';'
+      field_declaration [307] = 'float floating;'
+        type: primitive_type [96] = 'float'
+        declarator: field_identifier [538] = 'floating'
+        ; [42] = ';'
+      field_declaration [307] = 'char character;'
+        type: primitive_type [96] = 'char'
+        declarator: field_identifier [538] = 'character'
+        ; [42] = ';'
+      } [66] = '}'
+  ; [42] = ';'
+  comment [177] = '/**'
+  type_definition [256] = 'typedef unsigned long ulong;'
+    typedef [44] = 'typedef'
+    type: sized_type_specifier [300] = 'unsigned long'
+      unsigned [68] = 'unsigned'
+      long [69] = 'long'
+    declarator: type_identifier [542] = 'ulong'
+    ; [42] = ';'
+  type_definition [256] = 'typedef Point* PointPtr;'
+    typedef [44] = 'typedef'
+    type: type_identifier [542] = 'Point'
+    declarator: pointer_declarator [282] = '* PointPtr'
+      * [26] = '*'
+      declarator: type_identifier [542] = 'PointPtr'
+    ; [42] = ';'
+  comment [177] = '/**'
+  using_declaration [434] = 'using std::cout;'
+    using [197] = 'using'
+    qualified_identifier [485] = 'std::cout'
+      scope: namespace_identifier [539] = 'std'
+      :: [49] = '::'
+      name: identifier [1] = 'cout'
+    ; [42] = ';'
+  using_declaration [434] = 'using std::endl;'
+    using [197] = 'using'
+    qualified_identifier [485] = 'std::endl'
+      scope: namespace_identifier [539] = 'std'
+      :: [49] = '::'
+      name: identifier [1] = 'endl'
+    ; [42] = ';'
+  using_declaration [434] = 'using std::vector;'
+    using [197] = 'using'
+    qualified_identifier [485] = 'std::vector'
+      scope: namespace_identifier [539] = 'std'
+      :: [49] = '::'
+      name: identifier [1] = 'vector'
+    ; [42] = ';'
+  comment [177] = '/**'
+  alias_declaration [435]
+    using [197] = 'using'
+    name: type_identifier [542] = 'StringVector'
+    = [74] = '='
+    type: type_descriptor [344] = 'std::vector<std::string>'
+      type: qualified_identifier [485] = 'std::vector<std::string>'
+        scope: namespace_identifier [539] = 'std'
+        :: [49] = '::'
+        name: template_type [426] = 'vector<std::string>'
+          name: type_identifier [542] = 'vector'
+          arguments: template_argument_list [429] = '<std::string>'
+            < [39] = '<'
+            type_descriptor [344] = 'std::string'
+              type: qualified_identifier [485] = 'std::string'
+                scope: namespace_identifier [539] = 'std'
+                :: [49] = '::'
+                name: type_identifier [542] = 'string'
+            > [36] = '>'
+    ; [42] = ';'
+  alias_declaration [435] = 'using IntPtr = std::unique_ptr<int>;'
+    using [197] = 'using'
+    name: type_identifier [542] = 'IntPtr'
+    = [74] = '='
+    type: type_descriptor [344] = 'std::unique_ptr<int>'
+      type: qualified_identifier [485] = 'std::unique_ptr<int>'
+        scope: namespace_identifier [539] = 'std'
+        :: [49] = '::'
+        name: template_type [426] = 'unique_ptr<int>'
+          name: type_identifier [542] = 'unique_ptr'
+          arguments: template_argument_list [429] = '<int>'
+            < [39] = '<'
+            type_descriptor [344] = 'int'
+              type: primitive_type [96] = 'int'
+            > [36] = '>'
+    ; [42] = ';'
+  comment [177] = '/**'
+  class_specifier [379] = 'class OperatorExample {'
+    class [98] = 'class'
+    name: type_identifier [542] = 'OperatorExample'
+    body: field_declaration_list [305] = '{'
+      { [65] = '{'
+      access_specifier [411] = 'private'
+        private [192] = 'private'
+      : [101] = ':'
+      field_declaration [307] = 'int value_;'
+        type: primitive_type [96] = 'int'
+        declarator: field_identifier [538] = 'value_'
+        ; [42] = ';'
+      access_specifier [411] = 'public'
+        public [191] = 'public'
+      : [101] = ':'
+      comment [177] = '/**'
+      function_definition [254]
+        explicit_function_specifier [382] = 'explicit'
+          explicit [182] = 'explicit'
+        declarator: function_declarator [286] = 'OperatorExample(int val)'
+          declarator: identifier [1] = 'OperatorExample'
+          parameters: parameter_list [310] = '(int val)'
+            ( [5] = '('
+            parameter_declaration [311] = 'int val'
+              type: primitive_type [96] = 'int'
+              declarator: identifier [1] = 'val'
+            ) [8] = ')'
+        field_initializer_list [398] = ': value_(val)'
+          : [101] = ':'
+          field_initializer [399] = 'value_(val)'
+            field_identifier [538] = 'value_'
+            argument_list [360] = '(val)'
+              ( [5] = '('
+              identifier [1] = 'val'
+              ) [8] = ')'
+        body: compound_statement [295] = '{}'
+          { [65] = '{'
+          } [66] = '}'
+      comment [177] = '/**'
+      function_definition [254]
+        declarator: function_declarator [286]
+          declarator: identifier [1] = 'OperatorExample'
+          parameters: parameter_list [310] = '(const OperatorExample& other)'
+            ( [5] = '('
+            parameter_declaration [311] = 'const OperatorExample& other'
+              type_qualifier [297] = 'const'
+                const [82] = 'const'
+              type: type_identifier [542] = 'OperatorExample'
+              declarator: reference_declarator [412] = '& other'
+                & [33] = '&'
+                identifier [1] = 'other'
+            ) [8] = ')'
+        field_initializer_list [398] = ': value_(other.value_)'
+          : [101] = ':'
+          field_initializer [399] = 'value_(other.value_)'
+            field_identifier [538] = 'value_'
+            argument_list [360] = '(other.value_)'
+              ( [5] = '('
+              field_expression [361] = 'other.value_'
+                argument: identifier [1] = 'other'
+                operator: . [155] = '.'
+                field: field_identifier [538] = 'value_'
+              ) [8] = ')'
+        body: compound_statement [295] = '{}'
+          { [65] = '{'
+          } [66] = '}'
+      comment [177] = '/**'
+      function_definition [254] = '~OperatorExample() {'
+        declarator: function_declarator [286] = '~OperatorExample()'
+          declarator: destructor_name [479] = '~OperatorExample'
+            ~ [23] = '~'
+            identifier [1] = 'OperatorExample'
+          parameters: parameter_list [310] = '()'
+            ( [5] = '('
+            ) [8] = ')'
+        body: compound_statement [295] = '{'
+          { [65] = '{'
+          comment [177] = '// Cleanup'
+          } [66] = '}'
+      comment [177] = '/**'
+      function_definition [254]
+        type: type_identifier [542] = 'OperatorExample'
+        declarator: function_declarator [286]
+          declarator: operator_name [489] = 'operator+'
+            operator [186] = 'operator'
+            + [25] = '+'
+          parameters: parameter_list [310] = '(const OperatorExample& other)'
+            ( [5] = '('
+            parameter_declaration [311] = 'const OperatorExample& other'
+              type_qualifier [297] = 'const'
+                const [82] = 'const'
+              type: type_identifier [542] = 'OperatorExample'
+              declarator: reference_declarator [412] = '& other'
+                & [33] = '&'
+                identifier [1] = 'other'
+            ) [8] = ')'
+          type_qualifier [297] = 'const'
+            const [82] = 'const'
+        body: compound_statement [295] = '{'
+          { [65] = '{'
+          return_statement [326]
+            return [110] = 'return'
+            call_expression [350] = 'OperatorExample(value_ + other.value_)'
+              function: identifier [1] = 'OperatorExample'
+              arguments: argument_list [360] = '(value_ + other.value_)'
+                ( [5] = '('
+                binary_expression [341] = 'value_ + other.value_'
+                  left: identifier [1] = 'value_'
+                  operator: + [25] = '+'
+                  right: field_expression [361] = 'other.value_'
+                    argument: identifier [1] = 'other'
+                    operator: . [155] = '.'
+                    field: field_identifier [538] = 'value_'
+                ) [8] = ')'
+            ; [42] = ';'
+          } [66] = '}'
+      comment [177] = '/**'
+      function_definition [254]
+        type: type_identifier [542] = 'OperatorExample'
+        declarator: reference_declarator [412]
+          & [33] = '&'
+          function_declarator [286] = 'operator=(const OperatorExample& other)'
+            declarator: operator_name [489] = 'operator='
+              operator [186] = 'operator'
+              = [74] = '='
+            parameters: parameter_list [310] = '(const OperatorExample& other)'
+              ( [5] = '('
+              parameter_declaration [311] = 'const OperatorExample& other'
+                type_qualifier [297] = 'const'
+                  const [82] = 'const'
+                type: type_identifier [542] = 'OperatorExample'
+                declarator: reference_declarator [412] = '& other'
+                  & [33] = '&'
+                  identifier [1] = 'other'
+              ) [8] = ')'
+        body: compound_statement [295] = '{'
+          { [65] = '{'
+          if_statement [318] = 'if (this != &other) {'
+            if [102] = 'if'
+            condition: condition_clause [441] = '(this != &other)'
+              ( [5] = '('
+              value: binary_expression [341] = 'this != &other'
+                left: this [215] = 'this'
+                operator: != [35] = '!='
+                right: pointer_expression [339] = '&other'
+                  operator: & [33] = '&'
+                  argument: identifier [1] = 'other'
+              ) [8] = ')'
+            consequence: compound_statement [295] = '{'
+              { [65] = '{'
+              expression_statement [317] = 'value_ = other.value_;'
+                assignment_expression [338] = 'value_ = other.value_'
+                  left: identifier [1] = 'value_'
+                  operator: = [74] = '='
+                  right: field_expression [361] = 'other.value_'
+                    argument: identifier [1] = 'other'
+                    operator: . [155] = '.'
+                    field: field_identifier [538] = 'value_'
+                ; [42] = ';'
+              } [66] = '}'
+          return_statement [326] = 'return *this;'
+            return [110] = 'return'
+            pointer_expression [339] = '*this'
+              operator: * [26] = '*'
+              argument: this [215] = 'this'
+            ; [42] = ';'
+          } [66] = '}'
+      comment [177] = '/**'
+      function_definition [254]
+        type: primitive_type [96] = 'bool'
+        declarator: function_declarator [286]
+          declarator: operator_name [489] = 'operator=='
+            operator [186] = 'operator'
+            == [34] = '=='
+          parameters: parameter_list [310] = '(const OperatorExample& other)'
+            ( [5] = '('
+            parameter_declaration [311] = 'const OperatorExample& other'
+              type_qualifier [297] = 'const'
+                const [82] = 'const'
+              type: type_identifier [542] = 'OperatorExample'
+              declarator: reference_declarator [412] = '& other'
+                & [33] = '&'
+                identifier [1] = 'other'
+            ) [8] = ')'
+          type_qualifier [297] = 'const'
+            const [82] = 'const'
+        body: compound_statement [295] = '{'
+          { [65] = '{'
+          return_statement [326] = 'return value_ == other.value_;'
+            return [110] = 'return'
+            binary_expression [341] = 'value_ == other.value_'
+              left: identifier [1] = 'value_'
+              operator: == [34] = '=='
+              right: field_expression [361] = 'other.value_'
+                argument: identifier [1] = 'other'
+                operator: . [155] = '.'
+                field: field_identifier [538] = 'value_'
+            ; [42] = ';'
+          } [66] = '}'
+      comment [177] = '/**'
+      friend_declaration [410]
+        friend [190] = 'friend'
+        function_definition [254]
+          type: qualified_identifier [485] = 'std::ostream'
+            scope: namespace_identifier [539] = 'std'
+            :: [49] = '::'
+            name: type_identifier [542] = 'ostream'
+          declarator: reference_declarator [412]
+            & [33] = '&'
+            function_declarator [286]
+              declarator: operator_name [489] = 'operator<<'
+                operator [186] = 'operator'
+                << [40] = '<<'
+              parameters: parameter_list [310]
+                ( [5] = '('
+                parameter_declaration [311] = 'std::ostream& os'
+                  type: qualified_identifier [485] = 'std::ostream'
+                    scope: namespace_identifier [539] = 'std'
+                    :: [49] = '::'
+                    name: type_identifier [542] = 'ostream'
+                  declarator: reference_declarator [412] = '& os'
+                    & [33] = '&'
+                    identifier [1] = 'os'
+                , [7] = ','
+                parameter_declaration [311] = 'const OperatorExample& obj'
+                  type_qualifier [297] = 'const'
+                    const [82] = 'const'
+                  type: type_identifier [542] = 'OperatorExample'
+                  declarator: reference_declarator [412] = '& obj'
+                    & [33] = '&'
+                    identifier [1] = 'obj'
+                ) [8] = ')'
+          body: compound_statement [295] = '{'
+            { [65] = '{'
+            expression_statement [317] = 'os << obj.value_;'
+              binary_expression [341] = 'os << obj.value_'
+                left: identifier [1] = 'os'
+                operator: << [40] = '<<'
+                right: field_expression [361] = 'obj.value_'
+                  argument: identifier [1] = 'obj'
+                  operator: . [155] = '.'
+                  field: field_identifier [538] = 'value_'
+              ; [42] = ';'
+            return_statement [326] = 'return os;'
+              return [110] = 'return'
+              identifier [1] = 'os'
+              ; [42] = ';'
+            } [66] = '}'
+      function_definition [254] = 'int getValue() const { return value_; }'
+        type: primitive_type [96] = 'int'
+        declarator: function_declarator [286] = 'getValue() const'
+          declarator: field_identifier [538] = 'getValue'
+          parameters: parameter_list [310] = '()'
+            ( [5] = '('
+            ) [8] = ')'
+          type_qualifier [297] = 'const'
+            const [82] = 'const'
+        body: compound_statement [295] = '{ return value_; }'
+          { [65] = '{'
+          return_statement [326] = 'return value_;'
+            return [110] = 'return'
+            identifier [1] = 'value_'
+            ; [42] = ';'
+          } [66] = '}'
+      } [66] = '}'
+  ; [42] = ';'
+  comment [177] = '/**'
+  function_definition [254] = 'void template_instantiation_examples() {'
+    type: primitive_type [96] = 'void'
+    declarator: function_declarator [286] = 'template_instantiation_examples()'
+      declarator: identifier [1] = 'template_instantiation_examples'
+      parameters: parameter_list [310] = '()'
+        ( [5] = '('
+        ) [8] = ')'
+    body: compound_statement [295] = '{'
+      { [65] = '{'
+      comment [177] = '// Explicit template instantiation'
+      declaration [255] = 'std::vector<int> int_vector;'
+        type: qualified_identifier [485] = 'std::vector<int>'
+          scope: namespace_identifier [539] = 'std'
+          :: [49] = '::'
+          name: template_type [426] = 'vector<int>'
+            name: type_identifier [542] = 'vector'
+            arguments: template_argument_list [429] = '<int>'
+              < [39] = '<'
+              type_descriptor [344] = 'int'
+                type: primitive_type [96] = 'int'
+              > [36] = '>'
+        declarator: identifier [1] = 'int_vector'
+        ; [42] = ';'
+      declaration [255] = 'std::vector<std::string> string_vector;'
+        type: qualified_identifier [485] = 'std::vector<std::string>'
+          scope: namespace_identifier [539] = 'std'
+          :: [49] = '::'
+          name: template_type [426] = 'vector<std::string>'
+            name: type_identifier [542] = 'vector'
+            arguments: template_argument_list [429] = '<std::string>'
+              < [39] = '<'
+              type_descriptor [344] = 'std::string'
+                type: qualified_identifier [485] = 'std::string'
+                  scope: namespace_identifier [539] = 'std'
+                  :: [49] = '::'
+                  name: type_identifier [542] = 'string'
+              > [36] = '>'
+        declarator: identifier [1] = 'string_vector'
+        ; [42] = ';'
+      comment [177] = '// Template class instantiation'
+      declaration [255]
+        type: qualified_identifier [485] = 'std::unique_ptr<geometry::Circle>'
+          scope: namespace_identifier [539] = 'std'
+          :: [49] = '::'
+          name: template_type [426] = 'unique_ptr<geometry::Circle>'
+            name: type_identifier [542] = 'unique_ptr'
+            arguments: template_argument_list [429] = '<geometry::Circle>'
+              < [39] = '<'
+              type_descriptor [344] = 'geometry::Circle'
+                type: qualified_identifier [485] = 'geometry::Circle'
+                  scope: namespace_identifier [539] = 'geometry'
+                  :: [49] = '::'
+                  name: type_identifier [542] = 'Circle'
+              > [36] = '>'
+        declarator: init_declarator [294]
+          declarator: identifier [1] = 'circle_ptr'
+          = [74] = '='
+          value: call_expression [350] = 'std::make_unique<geometry::Circle>(10.0)'
+            function: qualified_identifier [485] = 'std::make_unique<geometry::Circle>'
+              scope: namespace_identifier [539] = 'std'
+              :: [49] = '::'
+              name: template_function [428] = 'make_unique<geometry::Circle>'
+                name: identifier [1] = 'make_unique'
+                arguments: template_argument_list [429] = '<geometry::Circle>'
+                  < [39] = '<'
+                  type_descriptor [344] = 'geometry::Circle'
+                    type: qualified_identifier [485] = 'geometry::Circle'
+                      scope: namespace_identifier [539] = 'geometry'
+                      :: [49] = '::'
+                      name: type_identifier [542] = 'Circle'
+                  > [36] = '>'
+            arguments: argument_list [360] = '(10.0)'
+              ( [5] = '('
+              number_literal [158] = '10.0'
+              ) [8] = ')'
+        ; [42] = ';'
+      declaration [255]
+        type: qualified_identifier [485] = 'std::unique_ptr<geometry::Rectangle>'
+          scope: namespace_identifier [539] = 'std'
+          :: [49] = '::'
+          name: template_type [426] = 'unique_ptr<geometry::Rectangle>'
+            name: type_identifier [542] = 'unique_ptr'
+            arguments: template_argument_list [429] = '<geometry::Rectangle>'
+              < [39] = '<'
+              type_descriptor [344] = 'geometry::Rectangle'
+                type: qualified_identifier [485] = 'geometry::Rectangle'
+                  scope: namespace_identifier [539] = 'geometry'
+                  :: [49] = '::'
+                  name: type_identifier [542] = 'Rectangle'
+              > [36] = '>'
+        declarator: init_declarator [294]
+          declarator: identifier [1] = 'rect_ptr'
+          = [74] = '='
+          value: call_expression [350]
+            function: qualified_identifier [485] = 'std::make_unique<geometry::Rectangle>'
+              scope: namespace_identifier [539] = 'std'
+              :: [49] = '::'
+              name: template_function [428] = 'make_unique<geometry::Rectangle>'
+                name: identifier [1] = 'make_unique'
+                arguments: template_argument_list [429] = '<geometry::Rectangle>'
+                  < [39] = '<'
+                  type_descriptor [344] = 'geometry::Rectangle'
+                    type: qualified_identifier [485] = 'geometry::Rectangle'
+                      scope: namespace_identifier [539] = 'geometry'
+                      :: [49] = '::'
+                      name: type_identifier [542] = 'Rectangle'
+                  > [36] = '>'
+            arguments: argument_list [360] = '(5.0, 10.0)'
+              ( [5] = '('
+              number_literal [158] = '5.0'
+              , [7] = ','
+              number_literal [158] = '10.0'
+              ) [8] = ')'
+        ; [42] = ';'
+      comment [177] = '// Template function instantiation'
+      declaration [255] = 'auto max_int = utils::max<int>(10, 20);'
+        type: placeholder_type_specifier [374] = 'auto'
+          auto [178] = 'auto'
+        declarator: init_declarator [294] = 'max_int = utils::max<int>(10, 20)'
+          declarator: identifier [1] = 'max_int'
+          = [74] = '='
+          value: call_expression [350] = 'utils::max<int>(10, 20)'
+            function: qualified_identifier [485] = 'utils::max<int>'
+              scope: namespace_identifier [539] = 'utils'
+              :: [49] = '::'
+              name: template_function [428] = 'max<int>'
+                name: identifier [1] = 'max'
+                arguments: template_argument_list [429] = '<int>'
+                  < [39] = '<'
+                  type_descriptor [344] = 'int'
+                    type: primitive_type [96] = 'int'
+                  > [36] = '>'
+            arguments: argument_list [360] = '(10, 20)'
+              ( [5] = '('
+              number_literal [158] = '10'
+              , [7] = ','
+              number_literal [158] = '20'
+              ) [8] = ')'
+        ; [42] = ';'
+      declaration [255]
+        type: placeholder_type_specifier [374] = 'auto'
+          auto [178] = 'auto'
+        declarator: init_declarator [294]
+          declarator: identifier [1] = 'max_double'
+          = [74] = '='
+          value: call_expression [350] = 'utils::max<double>(3.14, 2.71)'
+            function: qualified_identifier [485] = 'utils::max<double>'
+              scope: namespace_identifier [539] = 'utils'
+              :: [49] = '::'
+              name: template_function [428] = 'max<double>'
+                name: identifier [1] = 'max'
+                arguments: template_argument_list [429] = '<double>'
+                  < [39] = '<'
+                  type_descriptor [344] = 'double'
+                    type: primitive_type [96] = 'double'
+                  > [36] = '>'
+            arguments: argument_list [360] = '(3.14, 2.71)'
+              ( [5] = '('
+              number_literal [158] = '3.14'
+              , [7] = ','
+              number_literal [158] = '2.71'
+              ) [8] = ')'
+        ; [42] = ';'
+      } [66] = '}'
 ```
 
 ## Node Type Statistics
 
 | Node Type | Count | Max Depth |
 |-----------|-------|----------|
-| != | 1 | 8 |
+| != | 2 | 8 |
 | " | 50 | 13 |
 | #include | 7 | 2 |
 | % | 1 | 12 |
-| & | 19 | 10 |
+| & | 28 | 10 |
 | && | 4 | 11 |
-| ( | 98 | 17 |
-| ) | 98 | 17 |
-| * | 10 | 12 |
-| + | 1 | 11 |
+| ( | 115 | 17 |
+| ) | 115 | 17 |
+| * | 12 | 12 |
+| + | 3 | 11 |
 | ++ | 1 | 7 |
 | += | 1 | 9 |
-| , | 41 | 9 |
+| , | 49 | 9 |
 | -> | 2 | 8 |
-| . | 20 | 12 |
-| : | 22 | 8 |
-| :: | 68 | 14 |
-| ; | 90 | 10 |
-| < | 20 | 15 |
-| << | 48 | 12 |
-| = | 25 | 9 |
-| == | 1 | 11 |
-| > | 22 | 15 |
+| . | 25 | 12 |
+| : | 26 | 8 |
+| :: | 89 | 14 |
+| ; | 121 | 10 |
+| < | 30 | 15 |
+| << | 50 | 12 |
+| = | 33 | 9 |
+| == | 3 | 11 |
+| > | 32 | 15 |
 | ? | 2 | 8 |
 | [ | 10 | 13 |
 | [] | 2 | 7 |
@@ -2257,24 +2831,25 @@ translation_unit [219] = '/**'
 | abstract_array_declarator | 2 | 12 |
 | abstract_function_declarator | 5 | 8 |
 | abstract_reference_declarator | 2 | 8 |
-| access_specifier | 12 | 5 |
-| argument_list | 51 | 12 |
-| assignment_expression | 6 | 8 |
-| auto | 13 | 11 |
+| access_specifier | 14 | 5 |
+| alias_declaration | 2 | 1 |
+| argument_list | 58 | 12 |
+| assignment_expression | 7 | 8 |
+| auto | 15 | 11 |
 | base_class_clause | 3 | 4 |
-| binary_expression | 64 | 11 |
-| call_expression | 42 | 11 |
+| binary_expression | 68 | 11 |
+| call_expression | 47 | 11 |
 | catch | 2 | 5 |
 | catch_clause | 2 | 4 |
-| class | 7 | 6 |
-| class_specifier | 5 | 3 |
-| comment | 53 | 5 |
-| compound_statement | 40 | 8 |
-| condition_clause | 3 | 6 |
+| class | 9 | 6 |
+| class_specifier | 6 | 3 |
+| comment | 73 | 5 |
+| compound_statement | 50 | 8 |
+| condition_clause | 4 | 6 |
 | conditional_expression | 2 | 7 |
-| const | 26 | 10 |
+| const | 34 | 10 |
 | constexpr | 2 | 6 |
-| declaration | 18 | 6 |
+| declaration | 24 | 6 |
 | declaration_list | 2 | 2 |
 | decltype | 2 | 17 |
 | default | 1 | 7 |
@@ -2282,64 +2857,74 @@ translation_unit [219] = '/**'
 | delete | 2 | 5 |
 | delete_method_clause | 2 | 4 |
 | dependent_type | 2 | 12 |
-| destructor_name | 2 | 7 |
+| destructor_name | 3 | 7 |
+| enum | 2 | 2 |
+| enum_specifier | 2 | 1 |
+| enumerator | 6 | 3 |
+| enumerator_list | 2 | 2 |
 | escape_sequence | 2 | 10 |
-| explicit | 3 | 7 |
-| explicit_function_specifier | 3 | 6 |
-| expression_statement | 39 | 8 |
+| explicit | 4 | 7 |
+| explicit_function_specifier | 4 | 6 |
+| expression_statement | 41 | 8 |
 | false | 1 | 6 |
-| field_declaration | 6 | 5 |
-| field_declaration_list | 5 | 4 |
-| field_expression | 21 | 11 |
-| field_identifier | 45 | 12 |
-| field_initializer | 8 | 7 |
-| field_initializer_list | 5 | 6 |
+| field_declaration | 12 | 5 |
+| field_declaration_list | 8 | 4 |
+| field_expression | 26 | 11 |
+| field_identifier | 59 | 12 |
+| field_initializer | 10 | 7 |
+| field_initializer_list | 7 | 6 |
 | for | 4 | 6 |
 | for_range_loop | 3 | 3 |
 | for_statement | 1 | 5 |
-| function_declarator | 29 | 6 |
-| function_definition | 28 | 5 |
-| identifier | 209 | 17 |
-| if | 3 | 6 |
-| if_statement | 3 | 5 |
-| init_declarator | 15 | 7 |
+| friend | 1 | 4 |
+| friend_declaration | 1 | 3 |
+| function_declarator | 38 | 6 |
+| function_definition | 37 | 5 |
+| identifier | 253 | 17 |
+| if | 4 | 6 |
+| if_statement | 4 | 5 |
+| init_declarator | 19 | 7 |
 | initializer_list | 2 | 5 |
 | lambda_capture_specifier | 5 | 8 |
 | lambda_expression | 5 | 7 |
+| long | 1 | 3 |
 | namespace | 2 | 2 |
 | namespace_definition | 2 | 1 |
-| namespace_identifier | 70 | 14 |
+| namespace_identifier | 91 | 14 |
 | noexcept | 10 | 8 |
-| number_literal | 45 | 12 |
-| operator | 4 | 7 |
-| operator_name | 4 | 6 |
+| number_literal | 52 | 12 |
+| operator | 8 | 8 |
+| operator_name | 8 | 7 |
 | override | 5 | 8 |
-| parameter_declaration | 26 | 10 |
-| parameter_list | 36 | 9 |
+| parameter_declaration | 33 | 10 |
+| parameter_list | 45 | 9 |
 | parenthesized_expression | 3 | 9 |
-| placeholder_type_specifier | 13 | 10 |
-| pointer_declarator | 1 | 4 |
-| pointer_expression | 2 | 8 |
+| placeholder_type_specifier | 15 | 10 |
+| pointer_declarator | 2 | 4 |
+| pointer_expression | 4 | 8 |
 | preproc_include | 7 | 1 |
-| primitive_type | 43 | 13 |
-| private | 4 | 6 |
-| public | 8 | 6 |
-| qualified_identifier | 68 | 13 |
-| reference_declarator | 19 | 10 |
-| return | 17 | 10 |
-| return_statement | 17 | 9 |
+| primitive_type | 57 | 13 |
+| private | 5 | 6 |
+| public | 9 | 6 |
+| qualified_identifier | 89 | 13 |
+| reference_declarator | 27 | 10 |
+| return | 22 | 10 |
+| return_statement | 22 | 9 |
+| sized_type_specifier | 1 | 2 |
 | string_content | 25 | 13 |
 | string_literal | 25 | 12 |
+| struct | 1 | 2 |
+| struct_specifier | 1 | 1 |
 | subscript_argument_list | 3 | 10 |
 | subscript_expression | 3 | 9 |
 | system_lib_string | 7 | 2 |
 | template | 4 | 4 |
-| template_argument_list | 15 | 14 |
+| template_argument_list | 25 | 14 |
 | template_declaration | 4 | 3 |
-| template_function | 7 | 13 |
+| template_function | 11 | 13 |
 | template_parameter_list | 4 | 4 |
-| template_type | 8 | 9 |
-| this | 2 | 8 |
+| template_type | 14 | 9 |
+| this | 4 | 8 |
 | throw | 1 | 8 |
 | throw_statement | 1 | 7 |
 | trailing_return_type | 1 | 6 |
@@ -2347,16 +2932,23 @@ translation_unit [219] = '/**'
 | true | 1 | 6 |
 | try | 1 | 4 |
 | try_statement | 1 | 3 |
-| type_descriptor | 16 | 15 |
-| type_identifier | 44 | 14 |
+| type_definition | 2 | 1 |
+| type_descriptor | 28 | 15 |
+| type_identifier | 75 | 14 |
 | type_parameter_declaration | 4 | 5 |
-| type_qualifier | 28 | 9 |
+| type_qualifier | 36 | 9 |
+| typedef | 2 | 2 |
 | typename | 4 | 13 |
+| union | 1 | 2 |
+| union_specifier | 1 | 1 |
+| unsigned | 1 | 3 |
 | update_expression | 1 | 6 |
+| using | 5 | 2 |
+| using_declaration | 3 | 1 |
 | virtual | 3 | 6 |
 | virtual_specifier | 5 | 7 |
-| { | 49 | 9 |
-| } | 49 | 9 |
-| ~ | 2 | 8 |
+| { | 64 | 9 |
+| } | 64 | 9 |
+| ~ | 3 | 8 |
 
-**Total unique node types**: 131
+**Total unique node types**: 149

@@ -119,28 +119,42 @@ impl CppParserAudit {
         report.push_str("|-----------|-----|--------|\n");
 
         // Key nodes we care about for symbol extraction
+        // NOTE: These are ACTUAL tree-sitter node names only.
+        // Constructors/destructors are function_definition nodes with special children:
+        // - Constructors: have field_initializer_list child
+        // - Destructors: have destructor_name declarator child
+        // - Operators: have operator_name declarator child
         let key_nodes = vec![
+            // Core structure
             "translation_unit",
+            // Symbol-level declarations
             "function_definition",
             "class_specifier",
             "struct_specifier",
             "union_specifier",
             "enum_specifier",
             "namespace_definition",
+            // Templates
             "template_declaration",
-            "template_instantiation",
+            "template_function",
+            "template_type",
+            // Declarations and specifiers
             "function_declarator",
             "init_declarator",
             "parameter_declaration",
             "field_declaration",
+            "type_definition",   // typedef keyword
+            "alias_declaration", // using Type = OtherType;
+            // Access and inheritance
             "access_specifier",
             "base_class_clause",
-            "constructor_definition",
-            "destructor_definition",
-            "operator_overload",
+            // Special member identifiers (within function_definition)
+            "destructor_name",
+            "operator_name",
+            "field_initializer_list", // Indicates constructor
+            // Modern C++ features
             "lambda_expression",
-            "using_declaration",
-            "typedef_declaration",
+            "using_declaration", // using std::vector;
         ];
 
         let mut gaps = Vec::new();

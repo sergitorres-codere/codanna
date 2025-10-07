@@ -666,10 +666,16 @@ impl CodeIntelligenceServer {
             *kind_counts.entry(symbol.kind).or_insert(0) += 1;
         }
 
-        let functions = kind_counts.get(&crate::SymbolKind::Function).unwrap_or(&0);
-        let methods = kind_counts.get(&crate::SymbolKind::Method).unwrap_or(&0);
-        let structs = kind_counts.get(&crate::SymbolKind::Struct).unwrap_or(&0);
-        let traits = kind_counts.get(&crate::SymbolKind::Trait).unwrap_or(&0);
+        // Build symbol kinds display dynamically
+        let mut kinds_display = String::new();
+
+        // Sort by kind name for consistent output
+        let mut sorted_kinds: Vec<_> = kind_counts.iter().collect();
+        sorted_kinds.sort_by_key(|(kind, _)| format!("{kind:?}"));
+
+        for (kind, count) in sorted_kinds {
+            kinds_display.push_str(&format!("\n  - {kind:?}s: {count}"));
+        }
 
         // Get semantic search info
         let semantic_info = if let Some(metadata) = indexer.get_semantic_metadata() {
@@ -686,7 +692,7 @@ impl CodeIntelligenceServer {
         };
 
         let result = format!(
-            "Index contains {symbol_count} symbols across {file_count} files.\n\nBreakdown:\n  - Symbols: {symbol_count}\n  - Relationships: {relationship_count}\n\nSymbol Kinds:\n  - Functions: {functions}\n  - Methods: {methods}\n  - Structs: {structs}\n  - Traits: {traits}{semantic_info}"
+            "Index contains {symbol_count} symbols across {file_count} files.\n\nBreakdown:\n  - Symbols: {symbol_count}\n  - Relationships: {relationship_count}\n\nSymbol Kinds:{kinds_display}{semantic_info}"
         );
 
         Ok(CallToolResult::success(vec![Content::text(result)]))

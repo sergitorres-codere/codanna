@@ -380,6 +380,138 @@ int main() {
         std::cout << num << " ";
     }
     std::cout << std::endl;
-    
+
     return 0;
+}
+
+/**
+ * @brief Color enumeration for testing enum extraction
+ */
+enum Color {
+    RED,
+    GREEN,
+    BLUE
+};
+
+/**
+ * @brief Point structure for testing struct extraction
+ */
+struct Point {
+    int x;
+    int y;
+};
+
+/**
+ * @brief Status enum class for scoped enums
+ */
+enum class Status {
+    SUCCESS,
+    FAILURE,
+    PENDING
+};
+
+/**
+ * @brief Union for testing union_specifier
+ */
+union Data {
+    int integer;
+    float floating;
+    char character;
+};
+
+/**
+ * @brief Type alias using typedef
+ */
+typedef unsigned long ulong;
+typedef Point* PointPtr;
+
+/**
+ * @brief Using declarations to bring symbols into scope
+ */
+using std::cout;
+using std::endl;
+using std::vector;
+
+/**
+ * @brief Modern type alias using alias declaration
+ */
+using StringVector = std::vector<std::string>;
+using IntPtr = std::unique_ptr<int>;
+
+/**
+ * @class OperatorExample
+ * @brief Demonstrates operator overloading
+ */
+class OperatorExample {
+private:
+    int value_;
+
+public:
+    /**
+     * @brief Constructor with parameter
+     */
+    explicit OperatorExample(int val) : value_(val) {}
+
+    /**
+     * @brief Copy constructor
+     */
+    OperatorExample(const OperatorExample& other) : value_(other.value_) {}
+
+    /**
+     * @brief Destructor
+     */
+    ~OperatorExample() {
+        // Cleanup
+    }
+
+    /**
+     * @brief Operator overload: addition
+     */
+    OperatorExample operator+(const OperatorExample& other) const {
+        return OperatorExample(value_ + other.value_);
+    }
+
+    /**
+     * @brief Operator overload: assignment
+     */
+    OperatorExample& operator=(const OperatorExample& other) {
+        if (this != &other) {
+            value_ = other.value_;
+        }
+        return *this;
+    }
+
+    /**
+     * @brief Operator overload: equality
+     */
+    bool operator==(const OperatorExample& other) const {
+        return value_ == other.value_;
+    }
+
+    /**
+     * @brief Operator overload: stream output
+     */
+    friend std::ostream& operator<<(std::ostream& os, const OperatorExample& obj) {
+        os << obj.value_;
+        return os;
+    }
+
+    int getValue() const { return value_; }
+};
+
+/**
+ * @brief Template instantiation examples
+ */
+void template_instantiation_examples() {
+    // Explicit template instantiation
+    std::vector<int> int_vector;
+    std::vector<std::string> string_vector;
+
+    // Template class instantiation
+    std::unique_ptr<geometry::Circle> circle_ptr = std::make_unique<geometry::Circle>(10.0);
+    std::unique_ptr<geometry::Rectangle> rect_ptr = std::make_unique<geometry::Rectangle>(5.0, 10.0);
+
+    // Template function instantiation
+    auto max_int = utils::max<int>(10, 20);
+    auto max_double = utils::max<double>(3.14, 2.71);
 }
