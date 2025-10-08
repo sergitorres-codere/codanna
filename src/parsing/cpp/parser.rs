@@ -130,8 +130,37 @@ impl CppParser {
             "function_definition" => {
                 self.register_handled_node(node.kind(), node.kind_id());
                 if let Some(declarator) = node.child_by_field_name("declarator") {
-                    if let Some(name_node) = declarator.child_by_field_name("declarator") {
-                        let name = &code[name_node.byte_range()];
+                    // Check for qualified_identifier (ClassName::methodName)
+                    let mut is_method = self.context.current_class().is_some();
+                    let mut method_name = String::new();
+
+                    for i in 0..declarator.child_count() {
+                        if let Some(child) = declarator.child(i) {
+                            if child.kind() == "qualified_identifier" {
+                                // This is a method implementation (Class::method)
+                                is_method = true;
+                                // Extract method name from qualified_identifier
+                                for j in 0..child.child_count() {
+                                    if let Some(id_node) = child.child(j) {
+                                        if id_node.kind() == "identifier" {
+                                            method_name = code[id_node.byte_range()].to_string();
+                                            break;
+                                        }
+                                    }
+                                }
+                                break;
+                            }
+                        }
+                    }
+
+                    // Fallback: try to get declarator field
+                    if method_name.is_empty() {
+                        if let Some(name_node) = declarator.child_by_field_name("declarator") {
+                            method_name = code[name_node.byte_range()].to_string();
+                        }
+                    }
+
+                    if !method_name.is_empty() {
                         let symbol_id = counter.next_id();
                         let doc_comment = self.extract_doc_comment(&node, code);
                         let range = Range::new(
@@ -141,10 +170,16 @@ impl CppParser {
                             node.end_position().column as u16,
                         );
 
+                        let kind = if is_method {
+                            SymbolKind::Method
+                        } else {
+                            SymbolKind::Function
+                        };
+
                         let symbol = self.create_symbol(
                             symbol_id,
-                            name.to_string(),
-                            SymbolKind::Function,
+                            method_name,
+                            kind,
                             file_id,
                             range,
                             None, // signature
@@ -160,7 +195,7 @@ impl CppParser {
             "class_specifier" => {
                 self.register_handled_node(node.kind(), node.kind_id());
                 if let Some(name_node) = node.child_by_field_name("name") {
-                    let name = &code[name_node.byte_range()];
+                    let class_name = &code[name_node.byte_range()];
                     let symbol_id = counter.next_id();
                     let doc_comment = self.extract_doc_comment(&node, code);
                     let range = Range::new(
@@ -172,7 +207,7 @@ impl CppParser {
 
                     let symbol = self.create_symbol(
                         symbol_id,
-                        name.to_string(),
+                        class_name.to_string(),
                         SymbolKind::Class,
                         file_id,
                         range,
@@ -183,6 +218,41 @@ impl CppParser {
                     );
 
                     symbols.push(symbol);
+
+                    // Enter class scope to track methods
+                    self.context
+                        .enter_scope(crate::parsing::context::ScopeType::Class);
+
+                    // Save current context
+                    let saved_function = self.context.current_function().map(|s| s.to_string());
+                    let saved_class = self.context.current_class().map(|s| s.to_string());
+
+                    // Set current class for method tracking
+                    self.context.set_current_class(Some(class_name.to_string()));
+
+                    // Process children to extract methods
+                    for i in 0..node.child_count() {
+                        if let Some(child) = node.child(i) {
+                            self.extract_symbols_from_node(
+                                child,
+                                code,
+                                file_id,
+                                symbols,
+                                counter,
+                                depth + 1,
+                            );
+                        }
+                    }
+
+                    // Exit scope first
+                    self.context.exit_scope();
+
+                    // Restore previous context
+                    self.context.set_current_function(saved_function);
+                    self.context.set_current_class(saved_class);
+
+                    // Return early since we already processed children
+                    return;
                 }
             }
             "struct_specifier" => {
@@ -239,6 +309,51 @@ impl CppParser {
                     );
 
                     symbols.push(symbol);
+                }
+            }
+            "field_declaration" => {
+                self.register_handled_node(node.kind(), node.kind_id());
+                // Check if this is a method declaration (has function_declarator child)
+                if self.context.current_class().is_some() {
+                    for i in 0..node.child_count() {
+                        if let Some(child) = node.child(i) {
+                            if child.kind() == "function_declarator" {
+                                // This is a method declaration
+                                // Look for field_identifier child
+                                for j in 0..child.child_count() {
+                                    if let Some(name_node) = child.child(j) {
+                                        if name_node.kind() == "field_identifier" {
+                                            let method_name = &code[name_node.byte_range()];
+                                            let symbol_id = counter.next_id();
+                                            let doc_comment = self.extract_doc_comment(&node, code);
+                                            let range = Range::new(
+                                                node.start_position().row as u32,
+                                                node.start_position().column as u16,
+                                                node.end_position().row as u32,
+                                                node.end_position().column as u16,
+                                            );
+
+                                            let symbol = self.create_symbol(
+                                                symbol_id,
+                                                method_name.to_string(),
+                                                SymbolKind::Method,
+                                                file_id,
+                                                range,
+                                                None, // signature
+                                                doc_comment,
+                                                "", // module_path
+                                                Visibility::Public,
+                                            );
+
+                                            symbols.push(symbol);
+                                            break;
+                                        }
+                                    }
+                                }
+                                break;
+                            }
+                        }
+                    }
                 }
             }
             _ => {

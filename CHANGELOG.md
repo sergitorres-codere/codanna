@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.24] - 2025-10-07
+
+### Fixed
+- C++ parser: Extract class methods from declarations and implementations
+  - Method declarations inside classes now extracted as SymbolKind::Method
+  - Out-of-class implementations (Class::method) identified as methods
+  - Qualified_identifier pattern (Class::method) detection in function_definition
+  - Class_specifier enters class scope and processes children recursively
+  - Field_declaration extracts methods from function_declarator nodes
+  - Tested with Qt QWindow: 144 methods extracted (was 0 before)
+
 ## [0.5.23] - 2025-10-07
 
 ### Changed
