@@ -373,7 +373,21 @@ impl CppParser {
     fn extract_calls_from_node(node: Node, code: &str, calls: &mut Vec<MethodCall>) {
         if node.kind() == "call_expression" {
             if let Some(function_node) = node.child_by_field_name("function") {
-                let function_name = &code[function_node.byte_range()];
+                // Extract the actual function name from different call patterns
+                let function_name = match function_node.kind() {
+                    // Member function call: obj->method() or obj.method()
+                    "field_expression" => {
+                        // Get the field identifier (the actual method name)
+                        if let Some(field_node) = function_node.child_by_field_name("field") {
+                            &code[field_node.byte_range()]
+                        } else {
+                            &code[function_node.byte_range()]
+                        }
+                    }
+                    // Simple function call: function()
+                    _ => &code[function_node.byte_range()],
+                };
+
                 calls.push(MethodCall::new(
                     "", // caller will be set by the indexer
                     function_name,
@@ -908,7 +922,29 @@ impl CppParser {
         let function_context = if node.kind() == "function_definition" {
             // Extract function name
             if let Some(declarator) = node.child_by_field_name("declarator") {
-                if let Some(name_node) = declarator.child_by_field_name("declarator") {
+                // Handle function_declarator (for both regular functions and methods)
+                if declarator.kind() == "function_declarator" {
+                    if let Some(inner_declarator) = declarator.child_by_field_name("declarator") {
+                        match inner_declarator.kind() {
+                            // Method: QWindow::setX
+                            "qualified_identifier" => {
+                                // Extract just the method name (after ::)
+                                if let Some(name_node) =
+                                    inner_declarator.child_by_field_name("name")
+                                {
+                                    Some(&code[name_node.byte_range()])
+                                } else {
+                                    Some(&code[inner_declarator.byte_range()])
+                                }
+                            }
+                            // Regular function or simple identifier
+                            _ => Some(&code[inner_declarator.byte_range()]),
+                        }
+                    } else {
+                        current_function
+                    }
+                } else if let Some(name_node) = declarator.child_by_field_name("declarator") {
+                    // Fallback for other declarator types
                     Some(&code[name_node.byte_range()])
                 } else {
                     current_function
@@ -924,7 +960,21 @@ impl CppParser {
         // Check if this is a call expression
         if node.kind() == "call_expression" {
             if let Some(function_node) = node.child_by_field_name("function") {
-                let target_name = &code[function_node.byte_range()];
+                // Extract the actual function name from different call patterns
+                let target_name = match function_node.kind() {
+                    // Member function call: obj->method() or obj.method()
+                    "field_expression" => {
+                        // Get the field identifier (the actual method name)
+                        if let Some(field_node) = function_node.child_by_field_name("field") {
+                            &code[field_node.byte_range()]
+                        } else {
+                            &code[function_node.byte_range()]
+                        }
+                    }
+                    // Simple function call: function()
+                    _ => &code[function_node.byte_range()],
+                };
+
                 let range = Range::new(
                     node.start_position().row as u32,
                     node.start_position().column as u16,

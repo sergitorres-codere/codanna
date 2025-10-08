@@ -515,3 +515,68 @@ void template_instantiation_examples() {
     auto max_int = utils::max<int>(10, 20);
     auto max_double = utils::max<double>(3.14, 2.71);
 }
+
+/**
+ * @brief Call expression examples for parser testing
+ */
+void call_expression_examples() {
+    // Simple call_expression
+    demonstrate_lambdas();
+    demonstrate_exceptions(true);
+
+    // Member function calls (field_expression)
+    geometry::Circle circle(5.0);
+    double area = circle.area();
+    double perimeter = circle.perimeter();
+    circle.display();
+
+    // Pointer member calls (field_expression with ->)
+    geometry::Circle* circle_ptr = new geometry::Circle(3.0);
+    double ptr_area = circle_ptr->area();
+    circle_ptr->display();
+    delete circle_ptr;
+
+    // Scoped function calls (scoped_identifier)
+    int max_val = utils::max(10, 20);
+    int specialized = utils::max<int>(30, 40);
+
+    // More scoped_identifier examples
+    std::string str = "test";
+    std::vector<int> vec;
+    std::cout << "Using scoped_identifier" << std::endl;
+    std::make_unique<int>(42);
+    geometry::Circle::radius();  // scoped static member access
+
+    // Nested member calls (multiple field_expressions)
+    std::unique_ptr<geometry::Shape> shape = std::make_unique<geometry::Circle>(7.0);
+    shape->display();
+
+    // Static member function calls (qualified_identifier in call context)
+    std::cout << "Test output" << std::endl;
+}
+
+/**
+ * @class TestClass
+ * @brief Class with external method definitions for qualified_identifier testing
+ */
+class TestClass {
+public:
+    void methodA();
+    void methodB() const;
+    static void staticMethod();
+};
+
+// Method implementation with qualified_identifier
+void TestClass::methodA() {
+    std::cout << "TestClass::methodA implementation" << std::endl;
+}
+
+// Const method with qualified_identifier
+void TestClass::methodB() const {
+    std::cout << "TestClass::methodB const implementation" << std::endl;
+}
+
+// Static method with qualified_identifier
+void TestClass::staticMethod() {
+    std::cout << "TestClass::staticMethod implementation" << std::endl;
+}

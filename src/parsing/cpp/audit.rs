@@ -155,6 +155,10 @@ impl CppParserAudit {
             // Modern C++ features
             "lambda_expression",
             "using_declaration", // using std::vector;
+            // Call expressions and member access
+            "call_expression",      // Function/method calls
+            "field_expression",     // Member access (obj->member, obj.member)
+            "qualified_identifier", // Qualified names (namespace::function, Class::method)
         ];
 
         let mut gaps = Vec::new();

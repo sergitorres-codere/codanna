@@ -1,5 +1,5 @@
 === C# Language ABI-15 COMPREHENSIVE NODE MAPPING ===
-  Generated: 2025-10-07 02:04:11 UTC
+  Generated: 2025-10-08 21:30:53 UTC
   ABI Version: 14
   Node kind count: 108
 

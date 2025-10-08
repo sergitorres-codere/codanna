@@ -1,12 +1,12 @@
 # C++ Grammar Analysis
 
-*Generated: 2025-10-07 02:04:11 UTC*
+*Generated: 2025-10-08 21:30:53 UTC*
 
 ## Statistics
 - Total nodes in grammar JSON: 223
-- Nodes found in comprehensive.cpp: 149
-- Nodes handled by parser: 149
-- Symbol kinds extracted: 4
+- Nodes found in comprehensive.cpp: 154
+- Nodes handled by parser: 154
+- Symbol kinds extracted: 5
 
 ## ✅ Successfully Handled Nodes
 These nodes are in examples and handled by parser:
@@ -64,6 +64,7 @@ These nodes are in examples and handled by parser:
 - default
 - default_method_clause
 - delete
+- delete_expression
 - delete_method_clause
 - dependent_type
 - destructor_name
@@ -100,6 +101,8 @@ These nodes are in examples and handled by parser:
 - namespace
 - namespace_definition
 - namespace_identifier
+- new
+- new_expression
 - noexcept
 - number_literal
 - operator
@@ -120,6 +123,8 @@ These nodes are in examples and handled by parser:
 - return
 - return_statement
 - sized_type_specifier
+- static
+- storage_class_specifier
 - string_content
 - string_literal
 - struct
@@ -193,7 +198,6 @@ These grammar nodes aren't in comprehensive.cpp:
 - constraint_conjunction
 - constraint_disjunction
 - continue_statement
-- delete_expression
 - dependent_name
 - do_statement
 - else_clause
@@ -238,7 +242,6 @@ These grammar nodes aren't in comprehensive.cpp:
 - namespace_alias_definition
 - nested_namespace_specifier
 - new_declarator
-- new_expression
 - null
 - offsetof_expression
 - operator_cast
@@ -277,7 +280,6 @@ These grammar nodes aren't in comprehensive.cpp:
 - statement
 - statement_identifier
 - static_assert_declaration
-- storage_class_specifier
 - structured_binding_declarator
 - subscript_designator
 - subscript_range_designator
@@ -299,5 +301,6 @@ These grammar nodes aren't in comprehensive.cpp:
 - Class
 - Enum
 - Function
+- Method
 - Struct
 

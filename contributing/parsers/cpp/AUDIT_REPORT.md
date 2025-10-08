@@ -1,11 +1,11 @@
 # C++ Parser Coverage Report
 
-*Generated: 2025-10-07 02:04:11 UTC*
+*Generated: 2025-10-08 21:30:53 UTC*
 
 ## Summary
-- Nodes in file: 149
-- Nodes handled by parser: 149
-- Symbol kinds extracted: 4
+- Nodes in file: 154
+- Nodes handled by parser: 154
+- Symbol kinds extracted: 5
 
 ## Coverage Table
 
@@ -34,6 +34,9 @@
 | field_initializer_list | 398 | ✅ implemented |
 | lambda_expression | 464 | ✅ implemented |
 | using_declaration | 434 | ✅ implemented |
+| call_expression | 350 | ✅ implemented |
+| field_expression | 361 | ✅ implemented |
+| qualified_identifier | 485 | ✅ implemented |
 
 ## Legend
 

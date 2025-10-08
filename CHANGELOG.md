@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.25] - 2025-10-08
+
+### Fixed
+- C++ parser: Member function call detection for method invocations
+  - Extract method names from field_expression nodes (obj->method, obj.method)
+  - Extract method names from qualified_identifier in function context (Class::method)
+  - Function context tracking now handles qualified method implementations
+  - Register call_expression, field_expression, qualified_identifier in audit system
+- MCP analyze_impact: Handle all symbols with same name instead of first match only
+  - Changed from find_symbol (single) to find_symbols_by_name (all matches)
+  - Aggregate impact across all symbols with same name
+  - Show locations and direct caller counts for each symbol variant
+
 ## [0.5.24] - 2025-10-07
 
 ### Fixed

@@ -2795,6 +2795,455 @@ translation_unit [219] = '/**'
               ) [8] = ')'
         ; [42] = ';'
       } [66] = '}'
+  comment [177] = '/**'
+  function_definition [254] = 'void call_expression_examples() {'
+    type: primitive_type [96] = 'void'
+    declarator: function_declarator [286] = 'call_expression_examples()'
+      declarator: identifier [1] = 'call_expression_examples'
+      parameters: parameter_list [310] = '()'
+        ( [5] = '('
+        ) [8] = ')'
+    body: compound_statement [295] = '{'
+      { [65] = '{'
+      comment [177] = '// Simple call_expression'
+      expression_statement [317] = 'demonstrate_lambdas();'
+        call_expression [350] = 'demonstrate_lambdas()'
+          function: identifier [1] = 'demonstrate_lambdas'
+          arguments: argument_list [360] = '()'
+            ( [5] = '('
+            ) [8] = ')'
+        ; [42] = ';'
+      expression_statement [317] = 'demonstrate_exceptions(true);'
+        call_expression [350] = 'demonstrate_exceptions(true)'
+          function: identifier [1] = 'demonstrate_exceptions'
+          arguments: argument_list [360] = '(true)'
+            ( [5] = '('
+            true [173] = 'true'
+            ) [8] = ')'
+        ; [42] = ';'
+      comment [177] = '// Member function calls (field_expression)'
+      declaration [255] = 'geometry::Circle circle(5.0);'
+        type: qualified_identifier [485] = 'geometry::Circle'
+          scope: namespace_identifier [539] = 'geometry'
+          :: [49] = '::'
+          name: type_identifier [542] = 'Circle'
+        declarator: init_declarator [294] = 'circle(5.0)'
+          declarator: identifier [1] = 'circle'
+          value: argument_list [360] = '(5.0)'
+            ( [5] = '('
+            number_literal [158] = '5.0'
+            ) [8] = ')'
+        ; [42] = ';'
+      declaration [255] = 'double area = circle.area();'
+        type: primitive_type [96] = 'double'
+        declarator: init_declarator [294] = 'area = circle.area()'
+          declarator: identifier [1] = 'area'
+          = [74] = '='
+          value: call_expression [350] = 'circle.area()'
+            function: field_expression [361] = 'circle.area'
+              argument: identifier [1] = 'circle'
+              operator: . [155] = '.'
+              field: field_identifier [538] = 'area'
+            arguments: argument_list [360] = '()'
+              ( [5] = '('
+              ) [8] = ')'
+        ; [42] = ';'
+      declaration [255] = 'double perimeter = circle.perimeter();'
+        type: primitive_type [96] = 'double'
+        declarator: init_declarator [294] = 'perimeter = circle.perimeter()'
+          declarator: identifier [1] = 'perimeter'
+          = [74] = '='
+          value: call_expression [350] = 'circle.perimeter()'
+            function: field_expression [361] = 'circle.perimeter'
+              argument: identifier [1] = 'circle'
+              operator: . [155] = '.'
+              field: field_identifier [538] = 'perimeter'
+            arguments: argument_list [360] = '()'
+              ( [5] = '('
+              ) [8] = ')'
+        ; [42] = ';'
+      expression_statement [317] = 'circle.display();'
+        call_expression [350] = 'circle.display()'
+          function: field_expression [361] = 'circle.display'
+            argument: identifier [1] = 'circle'
+            operator: . [155] = '.'
+            field: field_identifier [538] = 'display'
+          arguments: argument_list [360] = '()'
+            ( [5] = '('
+            ) [8] = ')'
+        ; [42] = ';'
+      comment [177] = '// Pointer member calls (field_expression with ->)'
+      declaration [255]
+        type: qualified_identifier [485] = 'geometry::Circle'
+          scope: namespace_identifier [539] = 'geometry'
+          :: [49] = '::'
+          name: type_identifier [542] = 'Circle'
+        declarator: init_declarator [294] = '* circle_ptr = new geometry::Circle(3.0)'
+          declarator: pointer_declarator [282] = '* circle_ptr'
+            * [26] = '*'
+            declarator: identifier [1] = 'circle_ptr'
+          = [74] = '='
+          value: new_expression [451] = 'new geometry::Circle(3.0)'
+            new [209] = 'new'
+            type: qualified_identifier [485] = 'geometry::Circle'
+              scope: namespace_identifier [539] = 'geometry'
+              :: [49] = '::'
+              name: type_identifier [542] = 'Circle'
+            arguments: argument_list [360] = '(3.0)'
+              ( [5] = '('
+              number_literal [158] = '3.0'
+              ) [8] = ')'
+        ; [42] = ';'
+      declaration [255] = 'double ptr_area = circle_ptr->area();'
+        type: primitive_type [96] = 'double'
+        declarator: init_declarator [294] = 'ptr_area = circle_ptr->area()'
+          declarator: identifier [1] = 'ptr_area'
+          = [74] = '='
+          value: call_expression [350] = 'circle_ptr->area()'
+            function: field_expression [361] = 'circle_ptr->area'
+              argument: identifier [1] = 'circle_ptr'
+              operator: -> [157] = '->'
+              field: field_identifier [538] = 'area'
+            arguments: argument_list [360] = '()'
+              ( [5] = '('
+              ) [8] = ')'
+        ; [42] = ';'
+      expression_statement [317] = 'circle_ptr->display();'
+        call_expression [350] = 'circle_ptr->display()'
+          function: field_expression [361] = 'circle_ptr->display'
+            argument: identifier [1] = 'circle_ptr'
+            operator: -> [157] = '->'
+            field: field_identifier [538] = 'display'
+          arguments: argument_list [360] = '()'
+            ( [5] = '('
+            ) [8] = ')'
+        ; [42] = ';'
+      expression_statement [317] = 'delete circle_ptr;'
+        delete_expression [453] = 'delete circle_ptr'
+          delete [188] = 'delete'
+          identifier [1] = 'circle_ptr'
+        ; [42] = ';'
+      comment [177] = '// Scoped function calls (scoped_identifier)'
+      declaration [255] = 'int max_val = utils::max(10, 20);'
+        type: primitive_type [96] = 'int'
+        declarator: init_declarator [294] = 'max_val = utils::max(10, 20)'
+          declarator: identifier [1] = 'max_val'
+          = [74] = '='
+          value: call_expression [350] = 'utils::max(10, 20)'
+            function: qualified_identifier [485] = 'utils::max'
+              scope: namespace_identifier [539] = 'utils'
+              :: [49] = '::'
+              name: identifier [1] = 'max'
+            arguments: argument_list [360] = '(10, 20)'
+              ( [5] = '('
+              number_literal [158] = '10'
+              , [7] = ','
+              number_literal [158] = '20'
+              ) [8] = ')'
+        ; [42] = ';'
+      declaration [255]
+        type: primitive_type [96] = 'int'
+        declarator: init_declarator [294] = 'specialized = utils::max<int>(30, 40)'
+          declarator: identifier [1] = 'specialized'
+          = [74] = '='
+          value: call_expression [350] = 'utils::max<int>(30, 40)'
+            function: qualified_identifier [485] = 'utils::max<int>'
+              scope: namespace_identifier [539] = 'utils'
+              :: [49] = '::'
+              name: template_function [428] = 'max<int>'
+                name: identifier [1] = 'max'
+                arguments: template_argument_list [429] = '<int>'
+                  < [39] = '<'
+                  type_descriptor [344] = 'int'
+                    type: primitive_type [96] = 'int'
+                  > [36] = '>'
+            arguments: argument_list [360] = '(30, 40)'
+              ( [5] = '('
+              number_literal [158] = '30'
+              , [7] = ','
+              number_literal [158] = '40'
+              ) [8] = ')'
+        ; [42] = ';'
+      comment [177] = '// More scoped_identifier examples'
+      declaration [255] = 'std::string str = "test";'
+        type: qualified_identifier [485] = 'std::string'
+          scope: namespace_identifier [539] = 'std'
+          :: [49] = '::'
+          name: type_identifier [542] = 'string'
+        declarator: init_declarator [294] = 'str = "test"'
+          declarator: identifier [1] = 'str'
+          = [74] = '='
+          value: string_literal [371] = '"test"'
+            " [169] = '"'
+            string_content [170] = 'test'
+            " [169] = '"'
+        ; [42] = ';'
+      declaration [255] = 'std::vector<int> vec;'
+        type: qualified_identifier [485] = 'std::vector<int>'
+          scope: namespace_identifier [539] = 'std'
+          :: [49] = '::'
+          name: template_type [426] = 'vector<int>'
+            name: type_identifier [542] = 'vector'
+            arguments: template_argument_list [429] = '<int>'
+              < [39] = '<'
+              type_descriptor [344] = 'int'
+                type: primitive_type [96] = 'int'
+              > [36] = '>'
+        declarator: identifier [1] = 'vec'
+        ; [42] = ';'
+      expression_statement [317]
+        binary_expression [341]
+          left: binary_expression [341] = 'std::cout << "Using scoped_identifier"'
+            left: qualified_identifier [485] = 'std::cout'
+              scope: namespace_identifier [539] = 'std'
+              :: [49] = '::'
+              name: identifier [1] = 'cout'
+            operator: << [40] = '<<'
+            right: string_literal [371] = '"Using scoped_identifier"'
+              " [169] = '"'
+              string_content [170] = 'Using scoped_identifier'
+              " [169] = '"'
+          operator: << [40] = '<<'
+          right: qualified_identifier [485] = 'std::endl'
+            scope: namespace_identifier [539] = 'std'
+            :: [49] = '::'
+            name: identifier [1] = 'endl'
+        ; [42] = ';'
+      expression_statement [317] = 'std::make_unique<int>(42);'
+        call_expression [350] = 'std::make_unique<int>(42)'
+          function: qualified_identifier [485] = 'std::make_unique<int>'
+            scope: namespace_identifier [539] = 'std'
+            :: [49] = '::'
+            name: template_function [428] = 'make_unique<int>'
+              name: identifier [1] = 'make_unique'
+              arguments: template_argument_list [429] = '<int>'
+                < [39] = '<'
+                type_descriptor [344] = 'int'
+                  type: primitive_type [96] = 'int'
+                > [36] = '>'
+          arguments: argument_list [360] = '(42)'
+            ( [5] = '('
+            number_literal [158] = '42'
+            ) [8] = ')'
+        ; [42] = ';'
+      expression_statement [317] = 'geometry::Circle::radius();'
+        call_expression [350] = 'geometry::Circle::radius()'
+          function: qualified_identifier [485] = 'geometry::Circle::radius'
+            scope: namespace_identifier [539] = 'geometry'
+            :: [49] = '::'
+            name: qualified_identifier [485] = 'Circle::radius'
+              scope: namespace_identifier [539] = 'Circle'
+              :: [49] = '::'
+              name: identifier [1] = 'radius'
+          arguments: argument_list [360] = '()'
+            ( [5] = '('
+            ) [8] = ')'
+        ; [42] = ';'
+      comment [177] = '// scoped static member access'
+      comment [177] = '// Nested member calls (multiple field_expressions)'
+      declaration [255]
+        type: qualified_identifier [485] = 'std::unique_ptr<geometry::Shape>'
+          scope: namespace_identifier [539] = 'std'
+          :: [49] = '::'
+          name: template_type [426] = 'unique_ptr<geometry::Shape>'
+            name: type_identifier [542] = 'unique_ptr'
+            arguments: template_argument_list [429] = '<geometry::Shape>'
+              < [39] = '<'
+              type_descriptor [344] = 'geometry::Shape'
+                type: qualified_identifier [485] = 'geometry::Shape'
+                  scope: namespace_identifier [539] = 'geometry'
+                  :: [49] = '::'
+                  name: type_identifier [542] = 'Shape'
+              > [36] = '>'
+        declarator: init_declarator [294]
+          declarator: identifier [1] = 'shape'
+          = [74] = '='
+          value: call_expression [350] = 'std::make_unique<geometry::Circle>(7.0)'
+            function: qualified_identifier [485] = 'std::make_unique<geometry::Circle>'
+              scope: namespace_identifier [539] = 'std'
+              :: [49] = '::'
+              name: template_function [428] = 'make_unique<geometry::Circle>'
+                name: identifier [1] = 'make_unique'
+                arguments: template_argument_list [429] = '<geometry::Circle>'
+                  < [39] = '<'
+                  type_descriptor [344] = 'geometry::Circle'
+                    type: qualified_identifier [485] = 'geometry::Circle'
+                      scope: namespace_identifier [539] = 'geometry'
+                      :: [49] = '::'
+                      name: type_identifier [542] = 'Circle'
+                  > [36] = '>'
+            arguments: argument_list [360] = '(7.0)'
+              ( [5] = '('
+              number_literal [158] = '7.0'
+              ) [8] = ')'
+        ; [42] = ';'
+      expression_statement [317] = 'shape->display();'
+        call_expression [350] = 'shape->display()'
+          function: field_expression [361] = 'shape->display'
+            argument: identifier [1] = 'shape'
+            operator: -> [157] = '->'
+            field: field_identifier [538] = 'display'
+          arguments: argument_list [360] = '()'
+            ( [5] = '('
+            ) [8] = ')'
+        ; [42] = ';'
+      comment [177] = '// Static member function calls (qualified_identifier in call context)'
+      expression_statement [317] = 'std::cout << "Test output" << std::endl;'
+        binary_expression [341] = 'std::cout << "Test output" << std::endl'
+          left: binary_expression [341] = 'std::cout << "Test output"'
+            left: qualified_identifier [485] = 'std::cout'
+              scope: namespace_identifier [539] = 'std'
+              :: [49] = '::'
+              name: identifier [1] = 'cout'
+            operator: << [40] = '<<'
+            right: string_literal [371] = '"Test output"'
+              " [169] = '"'
+              string_content [170] = 'Test output'
+              " [169] = '"'
+          operator: << [40] = '<<'
+          right: qualified_identifier [485] = 'std::endl'
+            scope: namespace_identifier [539] = 'std'
+            :: [49] = '::'
+            name: identifier [1] = 'endl'
+        ; [42] = ';'
+      } [66] = '}'
+  comment [177] = '/**'
+  class_specifier [379] = 'class TestClass {'
+    class [98] = 'class'
+    name: type_identifier [542] = 'TestClass'
+    body: field_declaration_list [305] = '{'
+      { [65] = '{'
+      access_specifier [411] = 'public'
+        public [191] = 'public'
+      : [101] = ':'
+      field_declaration [307] = 'void methodA();'
+        type: primitive_type [96] = 'void'
+        declarator: function_declarator [286] = 'methodA()'
+          declarator: field_identifier [538] = 'methodA'
+          parameters: parameter_list [310] = '()'
+            ( [5] = '('
+            ) [8] = ')'
+        ; [42] = ';'
+      field_declaration [307] = 'void methodB() const;'
+        type: primitive_type [96] = 'void'
+        declarator: function_declarator [286] = 'methodB() const'
+          declarator: field_identifier [538] = 'methodB'
+          parameters: parameter_list [310] = '()'
+            ( [5] = '('
+            ) [8] = ')'
+          type_qualifier [297] = 'const'
+            const [82] = 'const'
+        ; [42] = ';'
+      field_declaration [307] = 'static void staticMethod();'
+        storage_class_specifier [296] = 'static'
+          static [72] = 'static'
+        type: primitive_type [96] = 'void'
+        declarator: function_declarator [286] = 'staticMethod()'
+          declarator: field_identifier [538] = 'staticMethod'
+          parameters: parameter_list [310] = '()'
+            ( [5] = '('
+            ) [8] = ')'
+        ; [42] = ';'
+      } [66] = '}'
+  ; [42] = ';'
+  comment [177] = '// Method implementation with qualified_identifier'
+  function_definition [254] = 'void TestClass::methodA() {'
+    type: primitive_type [96] = 'void'
+    declarator: function_declarator [286] = 'TestClass::methodA()'
+      declarator: qualified_identifier [485] = 'TestClass::methodA'
+        scope: namespace_identifier [539] = 'TestClass'
+        :: [49] = '::'
+        name: identifier [1] = 'methodA'
+      parameters: parameter_list [310] = '()'
+        ( [5] = '('
+        ) [8] = ')'
+    body: compound_statement [295] = '{'
+      { [65] = '{'
+      expression_statement [317]
+        binary_expression [341]
+          left: binary_expression [341]
+            left: qualified_identifier [485] = 'std::cout'
+              scope: namespace_identifier [539] = 'std'
+              :: [49] = '::'
+              name: identifier [1] = 'cout'
+            operator: << [40] = '<<'
+            right: string_literal [371] = '"TestClass::methodA implementation"'
+              " [169] = '"'
+              string_content [170] = 'TestClass::methodA implementation'
+              " [169] = '"'
+          operator: << [40] = '<<'
+          right: qualified_identifier [485] = 'std::endl'
+            scope: namespace_identifier [539] = 'std'
+            :: [49] = '::'
+            name: identifier [1] = 'endl'
+        ; [42] = ';'
+      } [66] = '}'
+  comment [177] = '// Const method with qualified_identifier'
+  function_definition [254] = 'void TestClass::methodB() const {'
+    type: primitive_type [96] = 'void'
+    declarator: function_declarator [286] = 'TestClass::methodB() const'
+      declarator: qualified_identifier [485] = 'TestClass::methodB'
+        scope: namespace_identifier [539] = 'TestClass'
+        :: [49] = '::'
+        name: identifier [1] = 'methodB'
+      parameters: parameter_list [310] = '()'
+        ( [5] = '('
+        ) [8] = ')'
+      type_qualifier [297] = 'const'
+        const [82] = 'const'
+    body: compound_statement [295] = '{'
+      { [65] = '{'
+      expression_statement [317]
+        binary_expression [341]
+          left: binary_expression [341]
+            left: qualified_identifier [485] = 'std::cout'
+              scope: namespace_identifier [539] = 'std'
+              :: [49] = '::'
+              name: identifier [1] = 'cout'
+            operator: << [40] = '<<'
+            right: string_literal [371]
+              " [169] = '"'
+              string_content [170] = 'TestClass::methodB const implementation'
+              " [169] = '"'
+          operator: << [40] = '<<'
+          right: qualified_identifier [485] = 'std::endl'
+            scope: namespace_identifier [539] = 'std'
+            :: [49] = '::'
+            name: identifier [1] = 'endl'
+        ; [42] = ';'
+      } [66] = '}'
+  comment [177] = '// Static method with qualified_identifier'
+  function_definition [254] = 'void TestClass::staticMethod() {'
+    type: primitive_type [96] = 'void'
+    declarator: function_declarator [286] = 'TestClass::staticMethod()'
+      declarator: qualified_identifier [485] = 'TestClass::staticMethod'
+        scope: namespace_identifier [539] = 'TestClass'
+        :: [49] = '::'
+        name: identifier [1] = 'staticMethod'
+      parameters: parameter_list [310] = '()'
+        ( [5] = '('
+        ) [8] = ')'
+    body: compound_statement [295] = '{'
+      { [65] = '{'
+      expression_statement [317]
+        binary_expression [341]
+          left: binary_expression [341]
+            left: qualified_identifier [485] = 'std::cout'
+              scope: namespace_identifier [539] = 'std'
+              :: [49] = '::'
+              name: identifier [1] = 'cout'
+            operator: << [40] = '<<'
+            right: string_literal [371] = '"TestClass::staticMethod implementation"'
+              " [169] = '"'
+              string_content [170] = 'TestClass::staticMethod implementation'
+              " [169] = '"'
+          operator: << [40] = '<<'
+          right: qualified_identifier [485] = 'std::endl'
+            scope: namespace_identifier [539] = 'std'
+            :: [49] = '::'
+            name: identifier [1] = 'endl'
+        ; [42] = ';'
+      } [66] = '}'
 ```
 
 ## Node Type Statistics
@@ -2802,28 +3251,28 @@ translation_unit [219] = '/**'
 | Node Type | Count | Max Depth |
 |-----------|-------|----------|
 | != | 2 | 8 |
-| " | 50 | 13 |
+| " | 62 | 13 |
 | #include | 7 | 2 |
 | % | 1 | 12 |
 | & | 28 | 10 |
 | && | 4 | 11 |
-| ( | 115 | 17 |
-| ) | 115 | 17 |
-| * | 12 | 12 |
+| ( | 137 | 17 |
+| ) | 137 | 17 |
+| * | 13 | 12 |
 | + | 3 | 11 |
 | ++ | 1 | 7 |
 | += | 1 | 9 |
-| , | 49 | 9 |
-| -> | 2 | 8 |
-| . | 25 | 12 |
-| : | 26 | 8 |
-| :: | 89 | 14 |
-| ; | 121 | 10 |
-| < | 30 | 15 |
-| << | 50 | 12 |
-| = | 33 | 9 |
+| , | 51 | 9 |
+| -> | 5 | 8 |
+| . | 28 | 12 |
+| : | 27 | 8 |
+| :: | 116 | 14 |
+| ; | 148 | 10 |
+| < | 35 | 15 |
+| << | 60 | 12 |
+| = | 41 | 9 |
 | == | 3 | 11 |
-| > | 32 | 15 |
+| > | 37 | 15 |
 | ? | 2 | 8 |
 | [ | 10 | 13 |
 | [] | 2 | 7 |
@@ -2831,30 +3280,31 @@ translation_unit [219] = '/**'
 | abstract_array_declarator | 2 | 12 |
 | abstract_function_declarator | 5 | 8 |
 | abstract_reference_declarator | 2 | 8 |
-| access_specifier | 14 | 5 |
+| access_specifier | 15 | 5 |
 | alias_declaration | 2 | 1 |
-| argument_list | 58 | 12 |
+| argument_list | 73 | 12 |
 | assignment_expression | 7 | 8 |
 | auto | 15 | 11 |
 | base_class_clause | 3 | 4 |
-| binary_expression | 68 | 11 |
-| call_expression | 47 | 11 |
+| binary_expression | 78 | 11 |
+| call_expression | 60 | 11 |
 | catch | 2 | 5 |
 | catch_clause | 2 | 4 |
-| class | 9 | 6 |
-| class_specifier | 6 | 3 |
-| comment | 73 | 5 |
-| compound_statement | 50 | 8 |
+| class | 10 | 6 |
+| class_specifier | 7 | 3 |
+| comment | 86 | 5 |
+| compound_statement | 54 | 8 |
 | condition_clause | 4 | 6 |
 | conditional_expression | 2 | 7 |
-| const | 34 | 10 |
+| const | 36 | 10 |
 | constexpr | 2 | 6 |
-| declaration | 24 | 6 |
+| declaration | 34 | 6 |
 | declaration_list | 2 | 2 |
 | decltype | 2 | 17 |
 | default | 1 | 7 |
 | default_method_clause | 1 | 6 |
-| delete | 2 | 5 |
+| delete | 3 | 5 |
+| delete_expression | 1 | 4 |
 | delete_method_clause | 2 | 4 |
 | dependent_type | 2 | 12 |
 | destructor_name | 3 | 7 |
@@ -2865,12 +3315,12 @@ translation_unit [219] = '/**'
 | escape_sequence | 2 | 10 |
 | explicit | 4 | 7 |
 | explicit_function_specifier | 4 | 6 |
-| expression_statement | 41 | 8 |
+| expression_statement | 54 | 8 |
 | false | 1 | 6 |
-| field_declaration | 12 | 5 |
-| field_declaration_list | 8 | 4 |
-| field_expression | 26 | 11 |
-| field_identifier | 59 | 12 |
+| field_declaration | 15 | 5 |
+| field_declaration_list | 9 | 4 |
+| field_expression | 32 | 11 |
+| field_identifier | 68 | 12 |
 | field_initializer | 10 | 7 |
 | field_initializer_list | 7 | 6 |
 | for | 4 | 6 |
@@ -2878,65 +3328,69 @@ translation_unit [219] = '/**'
 | for_statement | 1 | 5 |
 | friend | 1 | 4 |
 | friend_declaration | 1 | 3 |
-| function_declarator | 38 | 6 |
-| function_definition | 37 | 5 |
-| identifier | 253 | 17 |
+| function_declarator | 45 | 6 |
+| function_definition | 41 | 5 |
+| identifier | 291 | 17 |
 | if | 4 | 6 |
 | if_statement | 4 | 5 |
-| init_declarator | 19 | 7 |
+| init_declarator | 28 | 7 |
 | initializer_list | 2 | 5 |
 | lambda_capture_specifier | 5 | 8 |
 | lambda_expression | 5 | 7 |
 | long | 1 | 3 |
 | namespace | 2 | 2 |
 | namespace_definition | 2 | 1 |
-| namespace_identifier | 91 | 14 |
+| namespace_identifier | 118 | 14 |
+| new | 1 | 6 |
+| new_expression | 1 | 5 |
 | noexcept | 10 | 8 |
-| number_literal | 52 | 12 |
+| number_literal | 60 | 12 |
 | operator | 8 | 8 |
 | operator_name | 8 | 7 |
 | override | 5 | 8 |
 | parameter_declaration | 33 | 10 |
-| parameter_list | 45 | 9 |
+| parameter_list | 52 | 9 |
 | parenthesized_expression | 3 | 9 |
 | placeholder_type_specifier | 15 | 10 |
-| pointer_declarator | 2 | 4 |
+| pointer_declarator | 3 | 5 |
 | pointer_expression | 4 | 8 |
 | preproc_include | 7 | 1 |
-| primitive_type | 57 | 13 |
+| primitive_type | 72 | 13 |
 | private | 5 | 6 |
-| public | 9 | 6 |
-| qualified_identifier | 89 | 13 |
+| public | 10 | 6 |
+| qualified_identifier | 116 | 13 |
 | reference_declarator | 27 | 10 |
 | return | 22 | 10 |
 | return_statement | 22 | 9 |
 | sized_type_specifier | 1 | 2 |
-| string_content | 25 | 13 |
-| string_literal | 25 | 12 |
+| static | 1 | 5 |
+| storage_class_specifier | 1 | 4 |
+| string_content | 31 | 13 |
+| string_literal | 31 | 12 |
 | struct | 1 | 2 |
 | struct_specifier | 1 | 1 |
 | subscript_argument_list | 3 | 10 |
 | subscript_expression | 3 | 9 |
 | system_lib_string | 7 | 2 |
 | template | 4 | 4 |
-| template_argument_list | 25 | 14 |
+| template_argument_list | 30 | 14 |
 | template_declaration | 4 | 3 |
-| template_function | 11 | 13 |
+| template_function | 14 | 13 |
 | template_parameter_list | 4 | 4 |
-| template_type | 14 | 9 |
+| template_type | 16 | 9 |
 | this | 4 | 8 |
 | throw | 1 | 8 |
 | throw_statement | 1 | 7 |
 | trailing_return_type | 1 | 6 |
 | translation_unit | 1 | 0 |
-| true | 1 | 6 |
+| true | 2 | 6 |
 | try | 1 | 4 |
 | try_statement | 1 | 3 |
 | type_definition | 2 | 1 |
-| type_descriptor | 28 | 15 |
-| type_identifier | 75 | 14 |
+| type_descriptor | 33 | 15 |
+| type_identifier | 84 | 14 |
 | type_parameter_declaration | 4 | 5 |
-| type_qualifier | 36 | 9 |
+| type_qualifier | 38 | 9 |
 | typedef | 2 | 2 |
 | typename | 4 | 13 |
 | union | 1 | 2 |
@@ -2947,8 +3401,8 @@ translation_unit [219] = '/**'
 | using_declaration | 3 | 1 |
 | virtual | 3 | 6 |
 | virtual_specifier | 5 | 7 |
-| { | 64 | 9 |
-| } | 64 | 9 |
+| { | 69 | 9 |
+| } | 69 | 9 |
 | ~ | 3 | 8 |
 
-**Total unique node types**: 149
+**Total unique node types**: 154

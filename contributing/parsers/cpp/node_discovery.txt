@@ -1,7 +1,7 @@
 === C++ Language ABI-15 COMPREHENSIVE NODE MAPPING ===
-  Generated: 2025-10-07 02:04:11 UTC
+  Generated: 2025-10-08 21:30:53 UTC
   ABI Version: 14
-  Node kind count: 149
+  Node kind count: 154
 
 === PREPROCESSOR AND INCLUDE NODES ===
   ✓ translation_unit                    -> ID: 219
@@ -93,7 +93,7 @@
   ✓ type_definition                     -> ID: 256
   ✗ declarator                          NOT FOUND
   ✓ init_declarator                     -> ID: 294
-  ✗ storage_class_specifier             NOT FOUND
+  ✓ storage_class_specifier             -> ID: 296
   ✓ type_qualifier                      -> ID: 297
   ✓ pointer_declarator                  -> ID: 282
   ✗ array_declarator                    NOT FOUND
@@ -122,8 +122,8 @@
   ✗ sizeof_expression                   NOT FOUND
   ✗ alignof_expression                  NOT FOUND
   ✗ typeid_expression                   NOT FOUND
-  ✗ new_expression                      NOT FOUND
-  ✗ delete_expression                   NOT FOUND
+  ✓ new_expression                      -> ID: 451
+  ✓ delete_expression                   -> ID: 453
   ✓ subscript_expression                -> ID: 349
   ✓ field_expression                    -> ID: 361
   ✗ comma_expression                    NOT FOUND
@@ -210,6 +210,7 @@
   ✓ if                                  -> ID: 102
   ✓ long                                -> ID: 69
   ✓ namespace                           -> ID: 196
+  ✓ new                                 -> ID: 209
   ✓ noexcept                            -> ID: 194
   ✓ number_literal                      -> ID: 158
   ✓ operator                            -> ID: 186
@@ -219,6 +220,7 @@
   ✓ private                             -> ID: 192
   ✓ public                              -> ID: 191
   ✓ return                              -> ID: 110
+  ✓ static                              -> ID: 72
   ✓ string_content                      -> ID: 170
   ✓ struct                              -> ID: 99
   ✓ subscript_argument_list             -> ID: 449
