@@ -814,9 +814,18 @@ impl DocumentIndex {
                             attempts += 1;
 
                             // Check if this is a permission/IO error that might be transient
-                            let is_transient = e.to_string().contains("Permission")
-                                || e.to_string().contains("Access is denied")
-                                || e.to_string().contains("Acceso denegado");
+                            // Use error source chain to find IO errors, then check ErrorKind
+                            let is_transient = std::error::Error::source(&e)
+                                .and_then(|source| source.downcast_ref::<std::io::Error>())
+                                .map(|io_err| {
+                                    matches!(
+                                        io_err.kind(),
+                                        std::io::ErrorKind::PermissionDenied
+                                            | std::io::ErrorKind::TimedOut
+                                            | std::io::ErrorKind::WouldBlock
+                                    )
+                                })
+                                .unwrap_or(false);
 
                             if is_transient && attempts < MAX_ATTEMPTS {
                                 eprintln!(
