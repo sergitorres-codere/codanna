@@ -820,8 +820,7 @@ impl DocumentIndex {
 
                             if is_transient && attempts < MAX_ATTEMPTS {
                                 eprintln!(
-                                    "Attempt {}/{}: Failed to create index writer ({}), retrying after delay...",
-                                    attempts, MAX_ATTEMPTS, e
+                                    "Attempt {attempts}/{MAX_ATTEMPTS}: Failed to create index writer ({e}), retrying after delay..."
                                 );
 
                                 // Exponential backoff: 100ms, 200ms, 400ms, 800ms
@@ -976,12 +975,11 @@ impl DocumentIndex {
                             1. Antivirus software is scanning the index directory\n\
                             2. Another process has locked the files\n\
                             3. Insufficient file system permissions\n\
-                            \nOriginal error: {}\n\
+                            \nOriginal error: {e}\n\
                             \nTry:\n\
                             - Temporarily disabling antivirus for the project directory\n\
                             - Ensuring no other codanna processes are running\n\
-                            - Running with administrator privileges if on Windows",
-                            e
+                            - Running with administrator privileges if on Windows"
                         )));
                     }
                     return Err(e.into());
