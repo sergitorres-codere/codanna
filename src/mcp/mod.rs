@@ -692,73 +692,90 @@ impl CodeIntelligenceServer {
 
         let indexer = self.indexer.read().await;
 
-        match indexer.find_symbol(&symbol_name) {
-            Some(symbol_id) => {
-                // First get context for the symbol being analyzed
-                let symbol_ctx = indexer.get_symbol_context(symbol_id, ContextIncludes::CALLERS);
+        // Find ALL symbols with this name (like find_callers does)
+        let symbols = indexer.find_symbols_by_name(&symbol_name, None);
 
-                let impacted = indexer.get_impact_radius(symbol_id, Some(max_depth as usize));
-
-                if impacted.is_empty() {
-                    return Ok(CallToolResult::success(vec![Content::text(format!(
-                        "No symbols would be impacted by changing {symbol_name}"
-                    ))]));
-                }
-
-                let mut result = format!("Analyzing impact of changing: {symbol_name}\n");
-
-                // Add location of the symbol being analyzed
-                if let Some(ctx) = symbol_ctx {
-                    result.push_str(&format!("Location: {}\n", ctx.format_location()));
-
-                    // Show direct callers count if available
-                    if let Some(callers) = &ctx.relationships.called_by {
-                        if !callers.is_empty() {
-                            result.push_str(&format!("Direct callers: {}\n", callers.len()));
-                        }
-                    }
-                }
-
-                result.push_str(&format!(
-                    "\nTotal impact: {} symbol(s) would be affected (max depth: {})\n",
-                    impacted.len(),
-                    max_depth
-                ));
-
-                // Group by symbol kind with locations
-                let mut by_kind: std::collections::HashMap<
-                    crate::SymbolKind,
-                    Vec<(Symbol, String)>,
-                > = std::collections::HashMap::new();
-
-                for id in impacted {
-                    if let Some(sym) = indexer.get_symbol(id) {
-                        let file_path = indexer
-                            .get_file_path(sym.file_id)
-                            .unwrap_or_else(|| "<unknown>".to_string());
-                        by_kind.entry(sym.kind).or_default().push((sym, file_path));
-                    }
-                }
-
-                // Display grouped by kind with locations
-                for (kind, symbols) in by_kind {
-                    result.push_str(&format!("\n{kind:?} ({}): \n", symbols.len()));
-                    for (sym, file_path) in symbols {
-                        result.push_str(&format!(
-                            "  - {} at {}:{}\n",
-                            sym.name,
-                            file_path,
-                            sym.range.start_line + 1
-                        ));
-                    }
-                }
-
-                Ok(CallToolResult::success(vec![Content::text(result)]))
-            }
-            None => Ok(CallToolResult::success(vec![Content::text(format!(
+        if symbols.is_empty() {
+            return Ok(CallToolResult::success(vec![Content::text(format!(
                 "Symbol not found: {symbol_name}"
-            ))])),
+            ))]));
         }
+
+        // Collect impact from all symbols with this name and their locations
+        let mut all_impacted = std::collections::HashSet::new();
+        let mut symbol_locations = Vec::new();
+
+        for symbol in &symbols {
+            // Get context for each symbol to show its location
+            if let Some(ctx) = indexer.get_symbol_context(symbol.id, ContextIncludes::CALLERS) {
+                let location = ctx.format_location();
+                let direct_callers = ctx
+                    .relationships
+                    .called_by
+                    .as_ref()
+                    .map(|c| c.len())
+                    .unwrap_or(0);
+                symbol_locations.push((symbol.kind, location, direct_callers));
+            }
+
+            let impacted = indexer.get_impact_radius(symbol.id, Some(max_depth as usize));
+            all_impacted.extend(impacted);
+        }
+
+        if all_impacted.is_empty() {
+            return Ok(CallToolResult::success(vec![Content::text(format!(
+                "No symbols would be impacted by changing {symbol_name} (checked {} symbol(s) with this name)",
+                symbols.len()
+            ))]));
+        }
+
+        let mut result = format!("Analyzing impact of changing: {symbol_name}\n");
+        result.push_str(&format!(
+            "Found {} symbol(s) with this name:\n",
+            symbols.len()
+        ));
+
+        // Show locations of all symbols being analyzed
+        for (kind, location, direct_callers) in &symbol_locations {
+            result.push_str(&format!(
+                "  - {kind:?} at {location} (direct callers: {direct_callers})\n"
+            ));
+        }
+        result.push('\n');
+
+        result.push_str(&format!(
+            "\nTotal impact: {} symbol(s) would be affected (max depth: {})\n",
+            all_impacted.len(),
+            max_depth
+        ));
+
+        // Group by symbol kind with locations
+        let mut by_kind: std::collections::HashMap<crate::SymbolKind, Vec<(Symbol, String)>> =
+            std::collections::HashMap::new();
+
+        for id in all_impacted {
+            if let Some(sym) = indexer.get_symbol(id) {
+                let file_path = indexer
+                    .get_file_path(sym.file_id)
+                    .unwrap_or_else(|| "<unknown>".to_string());
+                by_kind.entry(sym.kind).or_default().push((sym, file_path));
+            }
+        }
+
+        // Display grouped by kind with locations
+        for (kind, symbols) in by_kind {
+            result.push_str(&format!("\n{kind:?} ({}): \n", symbols.len()));
+            for (sym, file_path) in symbols {
+                result.push_str(&format!(
+                    "  - {} at {}:{}\n",
+                    sym.name,
+                    file_path,
+                    sym.range.start_line + 1
+                ));
+            }
+        }
+
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(
@@ -945,10 +962,16 @@ impl CodeIntelligenceServer {
             *kind_counts.entry(symbol.kind).or_insert(0) += 1;
         }
 
-        let functions = kind_counts.get(&crate::SymbolKind::Function).unwrap_or(&0);
-        let methods = kind_counts.get(&crate::SymbolKind::Method).unwrap_or(&0);
-        let structs = kind_counts.get(&crate::SymbolKind::Struct).unwrap_or(&0);
-        let traits = kind_counts.get(&crate::SymbolKind::Trait).unwrap_or(&0);
+        // Build symbol kinds display dynamically
+        let mut kinds_display = String::new();
+
+        // Sort by kind name for consistent output
+        let mut sorted_kinds: Vec<_> = kind_counts.iter().collect();
+        sorted_kinds.sort_by_key(|(kind, _)| format!("{kind:?}"));
+
+        for (kind, count) in sorted_kinds {
+            kinds_display.push_str(&format!("\n  - {kind:?}s: {count}"));
+        }
 
         // Get semantic search info
         let semantic_info = if let Some(metadata) = indexer.get_semantic_metadata() {
@@ -965,7 +988,7 @@ impl CodeIntelligenceServer {
         };
 
         let result = format!(
-            "Index contains {symbol_count} symbols across {file_count} files.\n\nBreakdown:\n  - Symbols: {symbol_count}\n  - Relationships: {relationship_count}\n\nSymbol Kinds:\n  - Functions: {functions}\n  - Methods: {methods}\n  - Structs: {structs}\n  - Traits: {traits}{semantic_info}"
+            "Index contains {symbol_count} symbols across {file_count} files.\n\nBreakdown:\n  - Symbols: {symbol_count}\n  - Relationships: {relationship_count}\n\nSymbol Kinds:{kinds_display}{semantic_info}"
         );
 
         Ok(CallToolResult::success(vec![Content::text(result)]))

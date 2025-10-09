@@ -1,6 +1,6 @@
 [package]
 name = "codanna"
-version = "0.5.21"
+version = "0.5.25"
 authors = ["Angel Bartolli <bartolli@gmail.com>"]
 edition = "2024"
 description = "Code Intelligence for Large Language Models"
@@ -36,7 +36,7 @@ num_cpus = "1.17.0"
 parking_lot = "0.12.4"
 rayon = "1.10.0"
 rkyv = { version = "0.8.10", features = ["bytecheck", "std"] }
-rmcp = { version = "0.7.0", features = ["server", "client", "transport-io", "transport-child-process", "transport-streamable-http-server", "transport-sse-server", "transport-worker"] }
+rmcp = { version = "0.8.0", features = ["server", "client", "transport-io", "transport-child-process", "transport-streamable-http-server", "transport-sse-server", "transport-worker"] }
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.141"
 sha2 = "0.10"
@@ -99,7 +99,9 @@ rcgen = ["dep:rcgen"]
 # See clippy.toml for behavior configuration (thresholds, etc.)
 uninlined_format_args = "warn"
 
-
+[[example]]
+name = "simple_progress_demo"
+path = "examples/simple_progress_demo.rs"
 
 [[bench]]
 name = "unified_output_bench"

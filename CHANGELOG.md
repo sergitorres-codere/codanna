@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.25] - 2025-10-08
+
+### Fixed
+- C++ parser: Member function call detection for method invocations
+  - Extract method names from field_expression nodes (obj->method, obj.method)
+  - Extract method names from qualified_identifier in function context (Class::method)
+  - Function context tracking now handles qualified method implementations
+  - Register call_expression, field_expression, qualified_identifier in audit system
+- MCP analyze_impact: Handle all symbols with same name instead of first match only
+  - Changed from find_symbol (single) to find_symbols_by_name (all matches)
+  - Aggregate impact across all symbols with same name
+  - Show locations and direct caller counts for each symbol variant
+
+## [0.5.24] - 2025-10-07
+
+### Fixed
+- C++ parser: Extract class methods from declarations and implementations
+  - Method declarations inside classes now extracted as SymbolKind::Method
+  - Out-of-class implementations (Class::method) identified as methods
+  - Qualified_identifier pattern (Class::method) detection in function_definition
+  - Class_specifier enters class scope and processes children recursively
+  - Field_declaration extracts methods from function_declarator nodes
+  - Tested with Qt QWindow: 144 methods extracted (was 0 before)
+
+## [0.5.23] - 2025-10-07
+
+### Changed
+- Bump rmcp from 0.7.0 to 0.8.0
+
+## [0.5.22] - 2025-10-07
+
+### Added
+- C++ parser: Doxygen doc comment extraction (/** */ and ///)
+- C++ parser: Recursive call tracking with function context
+- C++ parser: Scope context tracking via ParserContext
+
+### Fixed
+- MCP get_index_info now displays all symbol kinds dynamically
+- C++ Audit system uses proper tree-sitter node names to generate the report
+
 ## [0.5.21] - 2025-10-03
 
 ### Added
