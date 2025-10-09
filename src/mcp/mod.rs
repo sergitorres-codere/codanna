@@ -1302,9 +1302,13 @@ impl CodeIntelligenceServer {
 
                 if total_count == 0 {
                     let suggestion = if query.len() > 5 {
-                        format!("Try a shorter/partial query (e.g., query:{})", &query[..query.len().min(5)])
+                        format!(
+                            "Try a shorter/partial query (e.g., query:{})",
+                            &query[..query.len().min(5)]
+                        )
                     } else {
-                        "Try a different query or use semantic_search_docs for natural language".to_string()
+                        "Try a different query or use semantic_search_docs for natural language"
+                            .to_string()
                     };
 
                     return Ok(CallToolResult::success(vec![Content::text(format!(
@@ -1462,7 +1466,7 @@ impl CodeIntelligenceServer {
                 Ok(CallToolResult::error(vec![Content::text(format!(
                     "{error_msg}{suggestion}"
                 ))]))
-            },
+            }
         }
     }
 }
