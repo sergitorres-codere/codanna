@@ -793,7 +793,49 @@ impl DocumentIndex {
     pub fn start_batch(&self) -> StorageResult<()> {
         let mut writer_lock = self.writer.lock().map_err(|_| StorageError::LockPoisoned)?;
         if writer_lock.is_none() {
-            let writer = self.index.writer::<Document>(100_000_000)?; // 100MB buffer
+            // On Windows, retry writer creation if we hit permission errors
+            // This handles cases where antivirus or filesystem delays affect file access
+            let writer = {
+                let mut attempts = 0;
+                const MAX_ATTEMPTS: u32 = 5;
+
+                loop {
+                    // Use smaller heap size on Windows to reduce memory-mapped file pressure
+                    // This helps avoid permission errors from antivirus software
+                    #[cfg(windows)]
+                    let heap_size = 15_000_000; // 15MB on Windows
+
+                    #[cfg(not(windows))]
+                    let heap_size = 100_000_000; // 100MB on other platforms
+
+                    match self.index.writer::<Document>(heap_size) {
+                        Ok(w) => break w,
+                        Err(e) => {
+                            attempts += 1;
+
+                            // Check if this is a permission/IO error that might be transient
+                            let is_transient = e.to_string().contains("Permission")
+                                || e.to_string().contains("Access is denied")
+                                || e.to_string().contains("Acceso denegado");
+
+                            if is_transient && attempts < MAX_ATTEMPTS {
+                                eprintln!(
+                                    "Attempt {}/{}: Failed to create index writer ({}), retrying after delay...",
+                                    attempts, MAX_ATTEMPTS, e
+                                );
+
+                                // Exponential backoff: 100ms, 200ms, 400ms, 800ms
+                                let delay_ms = 100 * (1 << (attempts - 1));
+                                std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+                                continue;
+                            }
+
+                            // Non-transient error or exhausted retries
+                            return Err(e.into());
+                        }
+                    }
+                }
+            };
             *writer_lock = Some(writer);
 
             // Initialize the pending symbol counter for this batch
@@ -914,7 +956,38 @@ impl DocumentIndex {
             }
         };
         if let Some(mut writer) = writer_lock.take() {
-            writer.commit()?;
+            // Try to commit with better error context
+            match writer.commit() {
+                Ok(_opstamp) => {
+                    // Successful commit
+                }
+                Err(e) => {
+                    // Provide helpful context for permission errors
+                    let error_msg = e.to_string();
+                    if error_msg.contains("Permission")
+                        || error_msg.contains("PermissionDenied")
+                        || error_msg.contains("Access is denied")
+                        || error_msg.contains("Acceso denegado")
+                        || error_msg.contains("code: 5")
+                    {
+                        return Err(StorageError::General(format!(
+                            "Failed to commit index due to file permission error. \
+                            This can happen when:\n\
+                            1. Antivirus software is scanning the index directory\n\
+                            2. Another process has locked the files\n\
+                            3. Insufficient file system permissions\n\
+                            \nOriginal error: {}\n\
+                            \nTry:\n\
+                            - Temporarily disabling antivirus for the project directory\n\
+                            - Ensuring no other codanna processes are running\n\
+                            - Running with administrator privileges if on Windows",
+                            e
+                        )));
+                    }
+                    return Err(e.into());
+                }
+            }
+
             // Reload the reader to see new documents
             self.reader.reload()?;
 

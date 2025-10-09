@@ -28,7 +28,7 @@ impl LanguageDefinition for CppLanguage {
     }
 
     fn extensions(&self) -> &'static [&'static str] {
-        &["cpp", "hpp", "cc", "cxx", "hxx"]
+        &["cpp", "hpp", "cc", "cxx", "hxx", "h"]
     }
 
     fn create_parser(&self, _settings: &Settings) -> IndexResult<Box<dyn LanguageParser>> {
