@@ -646,7 +646,14 @@ impl Settings {
 
         // Initialize global directories and symlink
         crate::init::init_global_dirs()?;
-        crate::init::create_fastembed_symlink()?;
+
+        // Try to create symlink, but don't fail if it doesn't work (Windows privileges)
+        // The symlink is optional since we use with_cache_dir() API in fastembed 5.0+
+        if let Err(e) = crate::init::create_fastembed_symlink() {
+            eprintln!("Note: Could not create model cache symlink: {}", e);
+            eprintln!("      This is normal on Windows without Developer Mode enabled.");
+            eprintln!("      Models will be managed via cache directory API instead.");
+        }
 
         // Create index directory structure (including tantivy subdirectory)
         let index_path = PathBuf::from(crate::init::local_dir_name()).join("index");
