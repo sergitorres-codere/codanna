@@ -76,6 +76,16 @@ pub struct IndexingConfig {
     #[serde(default = "default_parallel_threads")]
     pub parallel_threads: usize,
 
+    /// Tantivy heap size in megabytes
+    /// Controls memory usage before flushing to disk
+    #[serde(default = "default_tantivy_heap_mb")]
+    pub tantivy_heap_mb: usize,
+
+    /// Maximum retry attempts for transient file system errors
+    /// Handles permission delays from antivirus, SELinux, etc.
+    #[serde(default = "default_max_retry_attempts")]
+    pub max_retry_attempts: u32,
+
     /// Project root directory (defaults to workspace root)
     /// Used for gitignore resolution and module path calculation
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -214,6 +224,12 @@ fn default_index_path() -> PathBuf {
 fn default_parallel_threads() -> usize {
     num_cpus::get()
 }
+fn default_tantivy_heap_mb() -> usize {
+    50 // Universal default that balances performance and permissions
+}
+fn default_max_retry_attempts() -> u32 {
+    3 // Exponential backoff: 100ms, 200ms, 400ms
+}
 fn default_true() -> bool {
     true
 }
@@ -264,6 +280,8 @@ impl Default for IndexingConfig {
     fn default() -> Self {
         Self {
             parallel_threads: default_parallel_threads(),
+            tantivy_heap_mb: default_tantivy_heap_mb(),
+            max_retry_attempts: default_max_retry_attempts(),
             project_root: None,
             ignore_patterns: vec![
                 "target/**".to_string(),
@@ -723,6 +741,15 @@ impl Settings {
                 result.push_str(
                     "# Number of parallel threads for indexing (defaults to CPU count)\n",
                 );
+            } else if line.starts_with("tantivy_heap_mb = ") {
+                result.push_str("\n# Tantivy heap size in megabytes\n");
+                result.push_str("# Reduce to 15-25MB if you have permission issues (antivirus, SELinux, containers)\n");
+                result.push_str(
+                    "# Increase to 100-200MB if you have plenty of RAM and no restrictions\n",
+                );
+            } else if line.starts_with("max_retry_attempts = ") {
+                result.push_str("\n# Retry attempts for transient file system errors\n");
+                result.push_str("# Exponential backoff: 100ms, 200ms, 400ms delays\n");
             } else if line.starts_with("ignore_patterns = ") {
                 result.push_str("\n# Additional patterns to ignore during indexing\n");
             } else if line == "[mcp]" {

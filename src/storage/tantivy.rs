@@ -377,6 +377,10 @@ pub struct DocumentIndex {
     schema: IndexSchema,
     index_path: PathBuf,
     pub(crate) writer: Mutex<Option<IndexWriter<Document>>>,
+    /// Tantivy heap size in bytes
+    heap_size: usize,
+    /// Maximum retry attempts for transient errors
+    max_retry_attempts: u32,
     /// Optional path for vector storage files
     vector_storage_path: Option<PathBuf>,
     /// Optional vector search engine for semantic search
@@ -418,9 +422,18 @@ impl std::fmt::Debug for DocumentIndex {
 
 impl DocumentIndex {
     /// Create a new document index
-    pub fn new(index_path: impl AsRef<Path>) -> StorageResult<Self> {
+    pub fn new(
+        index_path: impl AsRef<Path>,
+        settings: &crate::config::Settings,
+    ) -> StorageResult<Self> {
         let index_path = index_path.as_ref().to_path_buf();
         std::fs::create_dir_all(&index_path)?;
+
+        // Extract and validate heap size
+        let heap_size = settings.indexing.tantivy_heap_mb * 1_000_000;
+        let heap_size = heap_size.clamp(10_000_000, 1_000_000_000); // 10MB-1GB
+
+        let max_retry_attempts = settings.indexing.max_retry_attempts;
 
         let (schema, index_schema) = IndexSchema::build();
 
@@ -454,6 +467,8 @@ impl DocumentIndex {
             schema: index_schema,
             index_path,
             writer: Mutex::new(None),
+            heap_size,
+            max_retry_attempts,
             vector_storage_path: None,
             vector_engine: None,
             cluster_cache: Arc::new(RwLock::new(None)),
@@ -462,6 +477,43 @@ impl DocumentIndex {
             pending_symbol_counter: Mutex::new(None),
             pending_file_counter: Mutex::new(None),
         })
+    }
+
+    /// Create index writer with retry logic for transient errors
+    fn create_writer_with_retry(&self) -> Result<IndexWriter<Document>, tantivy::TantivyError> {
+        for attempt in 0..self.max_retry_attempts {
+            match self.index.writer::<Document>(self.heap_size) {
+                Ok(writer) => return Ok(writer),
+                Err(e) => {
+                    // Check for transient I/O errors using ErrorKind
+                    let is_transient = std::error::Error::source(&e)
+                        .and_then(|s| s.downcast_ref::<std::io::Error>())
+                        .map(|io_err| {
+                            matches!(
+                                io_err.kind(),
+                                std::io::ErrorKind::PermissionDenied
+                                    | std::io::ErrorKind::TimedOut
+                                    | std::io::ErrorKind::WouldBlock
+                            )
+                        })
+                        .unwrap_or(false);
+
+                    if is_transient && attempt < self.max_retry_attempts - 1 {
+                        let delay = 100 * (1 << attempt);
+                        eprintln!(
+                            "Attempt {}/{}: Transient permission error, retrying after {}ms",
+                            attempt + 1,
+                            self.max_retry_attempts,
+                            delay
+                        );
+                        std::thread::sleep(std::time::Duration::from_millis(delay));
+                    } else {
+                        return Err(e);
+                    }
+                }
+            }
+        }
+        unreachable!()
     }
 
     /// Enable vector search support with the given engine and storage path
@@ -793,57 +845,7 @@ impl DocumentIndex {
     pub fn start_batch(&self) -> StorageResult<()> {
         let mut writer_lock = self.writer.lock().map_err(|_| StorageError::LockPoisoned)?;
         if writer_lock.is_none() {
-            // On Windows, retry writer creation if we hit permission errors
-            // This handles cases where antivirus or filesystem delays affect file access
-            let writer = {
-                let mut attempts = 0;
-                const MAX_ATTEMPTS: u32 = 5;
-
-                loop {
-                    // Use smaller heap size on Windows to reduce memory-mapped file pressure
-                    // This helps avoid permission errors from antivirus software
-                    #[cfg(windows)]
-                    let heap_size = 15_000_000; // 15MB on Windows
-
-                    #[cfg(not(windows))]
-                    let heap_size = 100_000_000; // 100MB on other platforms
-
-                    match self.index.writer::<Document>(heap_size) {
-                        Ok(w) => break w,
-                        Err(e) => {
-                            attempts += 1;
-
-                            // Check if this is a permission/IO error that might be transient
-                            // Use error source chain to find IO errors, then check ErrorKind
-                            let is_transient = std::error::Error::source(&e)
-                                .and_then(|source| source.downcast_ref::<std::io::Error>())
-                                .map(|io_err| {
-                                    matches!(
-                                        io_err.kind(),
-                                        std::io::ErrorKind::PermissionDenied
-                                            | std::io::ErrorKind::TimedOut
-                                            | std::io::ErrorKind::WouldBlock
-                                    )
-                                })
-                                .unwrap_or(false);
-
-                            if is_transient && attempts < MAX_ATTEMPTS {
-                                eprintln!(
-                                    "Attempt {attempts}/{MAX_ATTEMPTS}: Failed to create index writer ({e}), retrying after delay..."
-                                );
-
-                                // Exponential backoff: 100ms, 200ms, 400ms, 800ms
-                                let delay_ms = 100 * (1 << (attempts - 1));
-                                std::thread::sleep(std::time::Duration::from_millis(delay_ms));
-                                continue;
-                            }
-
-                            // Non-transient error or exhausted retries
-                            return Err(e.into());
-                        }
-                    }
-                }
-            };
+            let writer = self.create_writer_with_retry()?;
             *writer_lock = Some(writer);
 
             // Initialize the pending symbol counter for this batch
@@ -970,25 +972,24 @@ impl DocumentIndex {
                     // Successful commit
                 }
                 Err(e) => {
-                    // Provide helpful context for permission errors
-                    let error_msg = e.to_string();
-                    if error_msg.contains("Permission")
-                        || error_msg.contains("PermissionDenied")
-                        || error_msg.contains("Access is denied")
-                        || error_msg.contains("Acceso denegado")
-                        || error_msg.contains("code: 5")
-                    {
+                    // Check for permission errors using ErrorKind
+                    let is_permission_error = std::error::Error::source(&e)
+                        .and_then(|s| s.downcast_ref::<std::io::Error>())
+                        .map(|io_err| matches!(io_err.kind(), std::io::ErrorKind::PermissionDenied))
+                        .unwrap_or(false);
+
+                    if is_permission_error {
                         return Err(StorageError::General(format!(
-                            "Failed to commit index due to file permission error. \
+                            "Failed to commit index due to permission error.\n\
                             This can happen when:\n\
-                            1. Antivirus software is scanning the index directory\n\
+                            1. Security software is scanning the index directory\n\
                             2. Another process has locked the files\n\
                             3. Insufficient file system permissions\n\
                             \nOriginal error: {e}\n\
                             \nTry:\n\
-                            - Temporarily disabling antivirus for the project directory\n\
-                            - Ensuring no other codanna processes are running\n\
-                            - Running with administrator privileges if on Windows"
+                            - Reducing tantivy_heap_mb in settings (15-25MB)\n\
+                            - Adding .codanna to security software exclusions\n\
+                            - Ensuring no other codanna processes are running"
                         )));
                     }
                     return Err(e.into());
@@ -2414,7 +2415,8 @@ mod tests {
     #[test]
     fn test_document_index_creation() {
         let temp_dir = TempDir::new().unwrap();
-        let index = DocumentIndex::new(temp_dir.path()).unwrap();
+        let settings = crate::config::Settings::default();
+        let index = DocumentIndex::new(temp_dir.path(), &settings).unwrap();
 
         assert_eq!(index.document_count().unwrap(), 0);
         assert!(!index.has_vector_support());
@@ -2443,7 +2445,8 @@ mod tests {
     #[test]
     fn test_add_and_search_document() {
         let temp_dir = TempDir::new().unwrap();
-        let index = DocumentIndex::new(temp_dir.path()).unwrap();
+        let settings = crate::config::Settings::default();
+        let index = DocumentIndex::new(temp_dir.path(), &settings).unwrap();
 
         // Start batch
         index.start_batch().unwrap();
@@ -2490,7 +2493,8 @@ mod tests {
         use crate::parsing::registry::LanguageId;
 
         let temp_dir = TempDir::new().unwrap();
-        let index = DocumentIndex::new(temp_dir.path()).unwrap();
+        let settings = crate::config::Settings::default();
+        let index = DocumentIndex::new(temp_dir.path(), &settings).unwrap();
 
         // Start batch
         index.start_batch().unwrap();
@@ -2528,7 +2532,8 @@ mod tests {
     #[test]
     fn test_fuzzy_search() {
         let temp_dir = TempDir::new().unwrap();
-        let index = DocumentIndex::new(temp_dir.path()).unwrap();
+        let settings = crate::config::Settings::default();
+        let index = DocumentIndex::new(temp_dir.path(), &settings).unwrap();
 
         // Start batch
         index.start_batch().unwrap();
@@ -2571,7 +2576,8 @@ mod tests {
     #[test]
     fn test_relationship_storage() {
         let temp_dir = TempDir::new().unwrap();
-        let index = DocumentIndex::new(temp_dir.path()).unwrap();
+        let settings = crate::config::Settings::default();
+        let index = DocumentIndex::new(temp_dir.path(), &settings).unwrap();
 
         // Start batch
         index.start_batch().unwrap();
@@ -2599,7 +2605,8 @@ mod tests {
     #[test]
     fn test_file_info_storage() {
         let temp_dir = TempDir::new().unwrap();
-        let index = DocumentIndex::new(temp_dir.path()).unwrap();
+        let settings = crate::config::Settings::default();
+        let index = DocumentIndex::new(temp_dir.path(), &settings).unwrap();
 
         // Start batch
         index.start_batch().unwrap();
@@ -2628,7 +2635,8 @@ mod tests {
         println!("=== TEST: get_all_indexed_paths() ===");
 
         let temp_dir = TempDir::new().unwrap();
-        let index = DocumentIndex::new(temp_dir.path()).unwrap();
+        let settings = crate::config::Settings::default();
+        let index = DocumentIndex::new(temp_dir.path(), &settings).unwrap();
 
         // Initially should have no paths
         println!("Step 1: Testing empty index...");
@@ -2728,7 +2736,8 @@ mod tests {
     #[test]
     fn test_metadata_storage() {
         let temp_dir = TempDir::new().unwrap();
-        let index = DocumentIndex::new(temp_dir.path()).unwrap();
+        let settings = crate::config::Settings::default();
+        let index = DocumentIndex::new(temp_dir.path(), &settings).unwrap();
 
         // Start batch
         index.start_batch().unwrap();
@@ -2861,7 +2870,8 @@ mod tests {
         let vector_engine_arc = Arc::new(Mutex::new(vector_engine));
 
         // Create index with vector support
-        let index = DocumentIndex::new(temp_dir.path())
+        let settings = crate::config::Settings::default();
+        let index = DocumentIndex::new(temp_dir.path(), &settings)
             .unwrap()
             .with_vector_support(vector_engine_arc.clone(), &vector_dir);
 
@@ -2880,7 +2890,9 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
 
         // Test 1: Create index without vector support
-        let index_no_vectors = DocumentIndex::new(temp_dir.path().join("no_vectors")).unwrap();
+        let settings = crate::config::Settings::default();
+        let index_no_vectors =
+            DocumentIndex::new(temp_dir.path().join("no_vectors"), &settings).unwrap();
 
         // Basic operations should work
         index_no_vectors.start_batch().unwrap();
@@ -2920,9 +2932,11 @@ mod tests {
             VectorSearchEngine::new(&vector_dir, VectorDimension::new(384).unwrap()).unwrap();
         let vector_engine_arc = Arc::new(Mutex::new(vector_engine));
 
-        let index_with_vectors = DocumentIndex::new(temp_dir.path().join("with_vectors"))
-            .unwrap()
-            .with_vector_support(vector_engine_arc, &vector_dir);
+        let settings = crate::config::Settings::default();
+        let index_with_vectors =
+            DocumentIndex::new(temp_dir.path().join("with_vectors"), &settings)
+                .unwrap()
+                .with_vector_support(vector_engine_arc, &vector_dir);
 
         // Same operations should work with vector support
         index_with_vectors.start_batch().unwrap();
@@ -2962,7 +2976,8 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
 
         // Test Debug without vector support
-        let index = DocumentIndex::new(temp_dir.path()).unwrap();
+        let settings = crate::config::Settings::default();
+        let index = DocumentIndex::new(temp_dir.path(), &settings).unwrap();
         let debug_str = format!("{index:?}");
         assert!(debug_str.contains("DocumentIndex"));
         assert!(debug_str.contains("index_path"));
@@ -2975,7 +2990,8 @@ mod tests {
             VectorSearchEngine::new(&vector_dir, VectorDimension::new(384).unwrap()).unwrap();
         let vector_engine_arc = Arc::new(Mutex::new(vector_engine));
 
-        let index_with_vectors = DocumentIndex::new(temp_dir.path())
+        let settings = crate::config::Settings::default();
+        let index_with_vectors = DocumentIndex::new(temp_dir.path(), &settings)
             .unwrap()
             .with_vector_support(vector_engine_arc, &vector_dir);
 
@@ -3002,7 +3018,8 @@ mod tests {
         let vector_engine_arc = Arc::new(Mutex::new(vector_engine));
 
         // Create index with vector support
-        let index = DocumentIndex::new(temp_dir.path())
+        let settings = crate::config::Settings::default();
+        let index = DocumentIndex::new(temp_dir.path(), &settings)
             .unwrap()
             .with_vector_support(vector_engine_arc, &vector_dir);
 
@@ -3226,7 +3243,8 @@ mod tests {
     #[test]
     fn test_find_symbols_by_name_with_language_filter() {
         let temp_dir = TempDir::new().unwrap();
-        let index = DocumentIndex::new(temp_dir.path()).unwrap();
+        let settings = crate::config::Settings::default();
+        let index = DocumentIndex::new(temp_dir.path(), &settings).unwrap();
 
         // Start batch
         index.start_batch().unwrap();
@@ -3381,7 +3399,8 @@ mod tests {
     #[test]
     fn test_search_with_language_filter() {
         let temp_dir = TempDir::new().unwrap();
-        let index = DocumentIndex::new(temp_dir.path()).unwrap();
+        let settings = crate::config::Settings::default();
+        let index = DocumentIndex::new(temp_dir.path(), &settings).unwrap();
 
         // Start batch
         index.start_batch().unwrap();
@@ -3540,7 +3559,8 @@ mod tests {
     #[test]
     fn test_language_filter_with_module_filter() {
         let temp_dir = TempDir::new().unwrap();
-        let index = DocumentIndex::new(temp_dir.path()).unwrap();
+        let settings = crate::config::Settings::default();
+        let index = DocumentIndex::new(temp_dir.path(), &settings).unwrap();
 
         // Start batch
         index.start_batch().unwrap();
@@ -3642,7 +3662,8 @@ mod tests {
         println!("\n=== NGRAM TOKENIZER TEST ===\n");
 
         let temp_dir = TempDir::new().unwrap();
-        let index = DocumentIndex::new(temp_dir.path()).unwrap();
+        let settings = crate::config::Settings::default();
+        let index = DocumentIndex::new(temp_dir.path(), &settings).unwrap();
 
         index.start_batch().unwrap();
 
@@ -3774,7 +3795,8 @@ mod tests {
         println!("\n=== FUZZY SEARCH TEST (Typo Tolerance) ===\n");
 
         let temp_dir = TempDir::new().unwrap();
-        let index = DocumentIndex::new(temp_dir.path()).unwrap();
+        let settings = crate::config::Settings::default();
+        let index = DocumentIndex::new(temp_dir.path(), &settings).unwrap();
 
         index.start_batch().unwrap();
 
@@ -3851,7 +3873,8 @@ mod tests {
         println!("\n=== UNDERSTANDING NGRAM + FUZZY INTERACTION ===\n");
 
         let temp_dir = TempDir::new().unwrap();
-        let index = DocumentIndex::new(temp_dir.path()).unwrap();
+        let settings = crate::config::Settings::default();
+        let index = DocumentIndex::new(temp_dir.path(), &settings).unwrap();
 
         index.start_batch().unwrap();
 
