@@ -739,7 +739,8 @@ mod tests {
         behavior.register_file_with_state(test_file.clone(), file_id, "src".to_string());
 
         // Create a mock document index
-        let doc_index = DocumentIndex::new(temp_dir.path().join("index")).unwrap();
+        let settings = crate::config::Settings::default();
+        let doc_index = DocumentIndex::new(temp_dir.path().join("index"), &settings).unwrap();
 
         // Test get_project_root_for_file
         let root = behavior.get_project_root_for_file(file_id, &doc_index);

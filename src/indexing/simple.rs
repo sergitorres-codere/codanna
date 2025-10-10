@@ -121,7 +121,7 @@ impl SimpleIndexer {
         let tantivy_path = index_base.join("tantivy");
 
         let document_index =
-            DocumentIndex::new(tantivy_path).expect("Failed to create Tantivy index");
+            DocumentIndex::new(tantivy_path, &settings).expect("Failed to create Tantivy index");
 
         #[allow(unused_variables)]
         let debug = settings.debug;
@@ -167,7 +167,7 @@ impl SimpleIndexer {
         let tantivy_path = index_base.join("tantivy");
 
         let document_index =
-            DocumentIndex::new(tantivy_path).expect("Failed to create Tantivy index");
+            DocumentIndex::new(tantivy_path, &settings).expect("Failed to create Tantivy index");
 
         #[allow(unused_variables)]
         let debug = settings.debug;

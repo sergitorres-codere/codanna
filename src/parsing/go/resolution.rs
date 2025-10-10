@@ -1574,7 +1574,8 @@ mod tests {
         // Create a minimal DocumentIndex for testing
         let temp_dir = std::env::temp_dir().join("codanna_test_go_resolution");
         std::fs::create_dir_all(&temp_dir).unwrap();
-        let document_index = DocumentIndex::new(&temp_dir).unwrap();
+        let settings = crate::config::Settings::default();
+        let document_index = DocumentIndex::new(&temp_dir, &settings).unwrap();
 
         // Test standard library path handling
         let stdlib_result = context.handle_go_module_paths("fmt", &document_index);
@@ -1606,7 +1607,8 @@ mod tests {
         // Create a minimal DocumentIndex for testing
         let temp_dir = std::env::temp_dir().join("codanna_test_go_resolution_2");
         std::fs::create_dir_all(&temp_dir).unwrap();
-        let document_index = DocumentIndex::new(&temp_dir).unwrap();
+        let settings = crate::config::Settings::default();
+        let document_index = DocumentIndex::new(&temp_dir, &settings).unwrap();
 
         // The actual resolution would require symbols in the index
         // For now, test that the method handles the imports correctly
@@ -2077,7 +2079,8 @@ replace github.com/another/module => github.com/fork/module v1.2.3
         use tempfile::TempDir;
 
         let temp_dir = TempDir::new().unwrap();
-        let document_index = DocumentIndex::new(temp_dir.path()).unwrap();
+        let settings = crate::config::Settings::default();
+        let document_index = DocumentIndex::new(temp_dir.path(), &settings).unwrap();
         let context = GoResolutionContext::new(FileId::new(1).unwrap());
 
         // Test with empty index - should return None
@@ -2094,7 +2097,8 @@ replace github.com/another/module => github.com/fork/module v1.2.3
         use tempfile::TempDir;
 
         let temp_dir = TempDir::new().unwrap();
-        let document_index = DocumentIndex::new(temp_dir.path()).unwrap();
+        let settings = crate::config::Settings::default();
+        let document_index = DocumentIndex::new(temp_dir.path(), &settings).unwrap();
         let context = GoResolutionContext::new(FileId::new(1).unwrap());
 
         // Test with empty index - should return None
