@@ -1,7 +1,9 @@
 //! File system operations for plugin installation
 
 use super::error::{PluginError, PluginResult};
+use std::io;
 use std::path::{Path, PathBuf};
+use walkdir::WalkDir;
 
 /// Copy plugin files to destination with conflict detection
 pub fn copy_plugin_files(
@@ -34,7 +36,54 @@ pub fn copy_plugin_files(
 
         // Copy file
         std::fs::copy(&source_path, &dest_path)?;
-        copied_files.push(dest_path.to_string_lossy().to_string());
+        let dest_str = dest_path.to_string_lossy().replace('\\', "/");
+        copied_files.push(dest_str);
+    }
+
+    Ok(copied_files)
+}
+
+/// Copy entire plugin payload into the namespaced plugin directory
+pub fn copy_plugin_payload(
+    source_dir: &Path,
+    dest_dir: &Path,
+    plugin_name: &str,
+    force: bool,
+) -> PluginResult<Vec<String>> {
+    let mut copied_files = Vec::new();
+    let plugin_dest_root = dest_dir.join(".claude/plugins").join(plugin_name);
+
+    for entry in WalkDir::new(source_dir).into_iter() {
+        let entry = entry.map_err(|e| PluginError::IoError(io::Error::other(e)))?;
+        if entry.file_type().is_dir() {
+            continue;
+        }
+
+        let relative = entry
+            .path()
+            .strip_prefix(source_dir)
+            .expect("walkdir entry should be under source");
+
+        if relative.components().any(|c| c.as_os_str() == ".git") {
+            continue;
+        }
+
+        let dest_path = plugin_dest_root.join(relative);
+
+        if dest_path.exists() && !force {
+            return Err(PluginError::FileConflict {
+                path: dest_path,
+                owner: "unknown".to_string(),
+            });
+        }
+
+        if let Some(parent) = dest_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        std::fs::copy(entry.path(), &dest_path)?;
+        let dest_str = dest_path.to_string_lossy().replace('\\', "/");
+        copied_files.push(dest_str);
     }
 
     Ok(copied_files)
@@ -59,30 +108,32 @@ pub fn remove_plugin_files(file_list: &[String]) -> PluginResult<()> {
 
 /// Calculate destination path for a plugin file
 fn calculate_dest_path(dest_dir: &Path, plugin_name: &str, file_path: &str) -> PathBuf {
-    let path = Path::new(file_path);
+    let trimmed = file_path.trim_start_matches("./");
+    let path = Path::new(trimmed);
 
-    // Determine component type from path
-    if file_path.starts_with("commands/") || file_path.starts_with("./commands/") {
+    if path.starts_with("commands") {
+        let relative = path.strip_prefix("commands").unwrap_or(Path::new(""));
         dest_dir
             .join(".claude/commands")
             .join(plugin_name)
-            .join(path.file_name().unwrap())
-    } else if file_path.starts_with("agents/") || file_path.starts_with("./agents/") {
+            .join(relative)
+    } else if path.starts_with("agents") {
+        let relative = path.strip_prefix("agents").unwrap_or(Path::new(""));
         dest_dir
             .join(".claude/agents")
             .join(plugin_name)
-            .join(path.file_name().unwrap())
-    } else if file_path.starts_with("hooks/") || file_path.starts_with("./hooks/") {
+            .join(relative)
+    } else if path.starts_with("hooks") {
+        let relative = path.strip_prefix("hooks").unwrap_or(Path::new(""));
         dest_dir
             .join(".claude/hooks")
             .join(plugin_name)
-            .join(path.file_name().unwrap())
+            .join(relative)
     } else {
-        // Default to plugin-specific directory
         dest_dir
             .join(".claude/plugins")
             .join(plugin_name)
-            .join(file_path)
+            .join(path)
     }
 }
 
@@ -139,6 +190,13 @@ mod tests {
         assert_eq!(
             agent_path,
             PathBuf::from("/project/.claude/agents/test-plugin/helper.md")
+        );
+
+        let nested_cmd_path =
+            calculate_dest_path(dest_dir, plugin_name, "commands/utils/run/report.md");
+        assert_eq!(
+            nested_cmd_path,
+            PathBuf::from("/project/.claude/commands/test-plugin/utils/run/report.md")
         );
     }
 

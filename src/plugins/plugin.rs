@@ -146,19 +146,11 @@ impl PluginManifest {
         }
 
         if let Some(HookSpec::Path(ref path)) = self.hooks {
-            if path.is_empty() {
-                return Err(PluginError::InvalidPluginManifest {
-                    reason: "Hooks path cannot be empty".to_string(),
-                });
-            }
+            Self::validate_relative_path(path, "hooks")?;
         }
 
         if let Some(McpServerSpec::Path(ref path)) = self.mcp_servers {
-            if path.is_empty() {
-                return Err(PluginError::InvalidPluginManifest {
-                    reason: "MCP servers path cannot be empty".to_string(),
-                });
-            }
+            Self::validate_relative_path(path, "mcpServers")?;
         }
 
         Ok(())
@@ -167,18 +159,7 @@ impl PluginManifest {
     /// Validate a path specification
     fn validate_path_spec(spec: &PathSpec, field: &str) -> PluginResult<()> {
         match spec {
-            PathSpec::Single(path) => {
-                if path.is_empty() {
-                    return Err(PluginError::InvalidPluginManifest {
-                        reason: format!("{field} path cannot be empty"),
-                    });
-                }
-                if path.contains("..") {
-                    return Err(PluginError::InvalidPluginManifest {
-                        reason: format!("{field} path cannot contain '..'"),
-                    });
-                }
-            }
+            PathSpec::Single(path) => Self::validate_relative_path(path, field)?,
             PathSpec::Multiple(paths) => {
                 if paths.is_empty() {
                     return Err(PluginError::InvalidPluginManifest {
@@ -186,19 +167,38 @@ impl PluginManifest {
                     });
                 }
                 for path in paths {
-                    if path.is_empty() {
-                        return Err(PluginError::InvalidPluginManifest {
-                            reason: format!("{field} path cannot be empty"),
-                        });
-                    }
-                    if path.contains("..") {
-                        return Err(PluginError::InvalidPluginManifest {
-                            reason: format!("{field} path cannot contain '..'"),
-                        });
-                    }
+                    Self::validate_relative_path(path, field)?;
                 }
             }
         }
+        Ok(())
+    }
+
+    fn validate_relative_path(path: &str, field: &str) -> PluginResult<()> {
+        if path.is_empty() {
+            return Err(PluginError::InvalidPluginManifest {
+                reason: format!("{field} path cannot be empty"),
+            });
+        }
+
+        if std::path::Path::new(path).is_absolute() {
+            return Err(PluginError::InvalidPluginManifest {
+                reason: format!("{field} path must be relative to plugin root"),
+            });
+        }
+
+        if !path.starts_with("./") {
+            return Err(PluginError::InvalidPluginManifest {
+                reason: format!("{field} paths must start with './'"),
+            });
+        }
+
+        if path.contains("..") {
+            return Err(PluginError::InvalidPluginManifest {
+                reason: format!("{field} path cannot contain '..'"),
+            });
+        }
+
         Ok(())
     }
 
@@ -266,8 +266,8 @@ mod tests {
             "author": {
                 "name": "Test Author"
             },
-            "commands": "custom-commands",
-            "agents": ["agent1", "agent2"]
+            "commands": "./custom-commands",
+            "agents": ["./agent1", "./agent2"]
         }"#;
 
         let manifest = PluginManifest::from_json(json).unwrap();
@@ -284,15 +284,15 @@ mod tests {
             "author": {
                 "name": "Test Author"
             },
-            "commands": ["extra-commands", "more-commands"]
+            "commands": ["./extra-commands", "./more-commands"]
         }"#;
 
         let manifest = PluginManifest::from_json(json).unwrap();
         let paths = manifest.get_command_paths();
         assert_eq!(paths.len(), 3);
         assert!(paths.contains(&"commands".to_string()));
-        assert!(paths.contains(&"extra-commands".to_string()));
-        assert!(paths.contains(&"more-commands".to_string()));
+        assert!(paths.contains(&"./extra-commands".to_string()));
+        assert!(paths.contains(&"./more-commands".to_string()));
     }
 
     #[test]
@@ -322,7 +322,26 @@ mod tests {
             "author": {
                 "name": "Test Author"
             },
-            "commands": "../escape"
+            "commands": "./../escape"
+        }"#;
+
+        let result = PluginManifest::from_json(json);
+        assert!(matches!(
+            result,
+            Err(PluginError::InvalidPluginManifest { .. })
+        ));
+    }
+
+    #[test]
+    fn test_reject_paths_without_prefix() {
+        let json = r#"{
+            "name": "test-plugin",
+            "version": "1.0.0",
+            "description": "A test plugin",
+            "author": {
+                "name": "Test Author"
+            },
+            "commands": "custom-commands"
         }"#;
 
         let result = PluginManifest::from_json(json);

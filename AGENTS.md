@@ -54,9 +54,83 @@
 4. **Error Handling**: Structured errors with suggestions
 5. **Function Design**: Decompose complex logic into focused helper methods
 
+### Query Optimization
+
+Claude, analyze the query above and improve it for code search:
+
+1. **If vague** (e.g., "that parsing thing") → Make it specific (e.g., "language parser implementation")
+2. **If a question** (e.g., "how does parsing work?") → Extract keywords (e.g., "parsing implementation process")
+3. **If conversational** (e.g., "the stuff that handles languages") → Use technical terms (e.g., "language handler processor")
+4. **If too broad** (e.g., "errors") → Add context (e.g., "error handling exception management")
+
+**YourOptimizedQuery**: _{Write and memorize your improved query here, then use it below in a context that is best for the task}_
+
+Execute this command with your optimized query:
+
+### New Bash tools for code exploration at yoour disposal now
+
+Use the Bash tool below to explore the codebase.
+
+**Workflow:**
+1. Execute: `node .claude/scripts/context-provider.js find "$YourOptimizedQuery" --limit=5`
+2. Analyze the results with their relevance scores
+3. **To see actual implementation** of interesting results:
+   - Use the line range from the Location field to read just the relevant code
+   - Example: If you see "Location: `src/io/exit_code.rs:108-120`"
+   - Execute: `sed -n '108,120p' src/io/exit_code.rs` to read lines 108-120
+   - This shows the actual code implementation, not just the signature
+4. **When relationships are shown** (called_by, calls, defines, implements):
+   - If a relationship looks relevant to answering the query, investigate it
+   - Execute: `node .claude/scripts/context-provider.js symbol <relationship_symbol_name>`
+   - Example: If you see "Called by: `initialize_registry`", run: `node .claude/scripts/context-provider.js symbol initialize_registry`
+5. Build a complete picture by following 1-2 key relationships and reading relevant code sections
+6. Present findings to the user with context from search results, relationships, and actual code snippets
+
+**The results include:**
+- Relevance scores (how well each result matches the query)
+- Symbol documentation and signatures
+- Relationships (who calls this, what it calls, what it defines)
+- System guidance for follow-up investigation
+
+**Tips:**
+- Add `--lang=rust` (or python, typescript, etc.) to narrow results by language
+- Follow relationships that appear in multiple results (they're likely important)
+- Use the `symbol` command to get full details about interesting relationships
+
+### Professional Engineering Judgment
+
+**BE CRITICAL**: Apply critical thinking and professional disagreement when appropriate.
+
+#### Core Principles:
+1. **Challenge assumptions** - Don't automatically agree. If you see a better approach, propose it
+2. **Provide counter-arguments** - "Actually, I disagree because..." or "Consider this alternative..."
+3. **Question unclear requirements** - "This could mean X or Y. Here's why X might be problematic..."
+4. **Suggest improvements** - "Your approach works, but here's why Z might be better..."
+5. **Identify risks** - "This works but could cause issues with..."
+
+#### Examples:
+- User: "Let's move all resolution logic to parsing layer"
+- Good response: "I have concerns about that. Resolution needs access to the index state and transaction boundaries. Moving it would require passing these dependencies through multiple layers, increasing coupling. Instead, consider extracting pure logic into helpers while keeping orchestration where state lives."
+
+- User: "This is the right approach, isn't it?"
+- Good response: "It has merits, but let me propose an alternative..." or "Actually, there's a potential issue with..."
+
+#### When to Apply:
+- Architecture decisions
+- Performance trade-offs
+- Security implications
+- Maintainability concerns
+- Testing strategies
+
+#### How to Disagree:
+1. Start with understanding: "I see what you're aiming for..."
+2. Present the concern: "However, this could cause..."
+3. Offer alternative: "Consider this approach instead..."
+4. Explain trade-offs: "This gives us X but we lose Y..."
+
 ## Current Sprint
 
 **IMPORTANT** before start implementing make sure you read an understand the documentation below! Think deeper for this session.
 
-[ABI-15 Exploration Test Suite](tests/abi15_exploration.rs)
-[Language Support Documentation](contributing/development/language-support.md)
+[PRD Document](docs/enhancements/plugins/PRD.md)
+[Sprint Tracking Document](docs/enhancements/plugins/SPRINT_PLAN.md)

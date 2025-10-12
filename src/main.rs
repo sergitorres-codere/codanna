@@ -2792,6 +2792,7 @@ async fn main() {
                     force,
                     dry_run,
                 } => plugins::add_plugin(
+                    &config,
                     &marketplace,
                     &plugin_name,
                     r#ref.as_deref(),
@@ -2802,24 +2803,28 @@ async fn main() {
                     plugin_name,
                     force,
                     dry_run,
-                } => plugins::remove_plugin(&plugin_name, force, dry_run),
+                } => plugins::remove_plugin(&config, &plugin_name, force, dry_run),
                 PluginAction::Update {
                     plugin_name,
                     r#ref,
                     force,
                     dry_run,
-                } => plugins::update_plugin(&plugin_name, r#ref.as_deref(), force, dry_run),
-                PluginAction::List { verbose, json } => plugins::list_plugins(verbose, json),
+                } => {
+                    plugins::update_plugin(&config, &plugin_name, r#ref.as_deref(), force, dry_run)
+                }
+                PluginAction::List { verbose, json } => {
+                    plugins::list_plugins(&config, verbose, json)
+                }
                 PluginAction::Verify {
                     plugin_name,
                     all,
                     verbose,
                 } => {
                     if all {
-                        plugins::verify_all_plugins(verbose)
+                        plugins::verify_all_plugins(&config, verbose)
                     } else {
                         match plugin_name {
-                            Some(name) => plugins::verify_plugin(&name, verbose),
+                            Some(name) => plugins::verify_plugin(&config, &name, verbose),
                             None => {
                                 eprintln!(
                                     "Error: plugin_name is required when --all is not specified"
@@ -2829,13 +2834,67 @@ async fn main() {
                         }
                     }
                 }
-                PluginAction::DryRun { action: _ } => {
-                    // TODO: Implement recursive dry-run handling
-                    // This should extract the nested action and execute it with dry_run=true
-                    // Example: codanna plugin dry-run add <marketplace> <plugin>
-                    // Currently dead code - action intentionally ignored with _
-                    eprintln!("Dry-run subcommand not yet implemented");
-                    std::process::exit(1);
+                PluginAction::DryRun { action } => {
+                    // Execute the nested action with dry_run semantics where applicable
+                    match action.as_ref() {
+                        PluginAction::Add {
+                            marketplace,
+                            plugin_name,
+                            r#ref,
+                            force,
+                            ..
+                        } => plugins::add_plugin(
+                            &config,
+                            marketplace,
+                            plugin_name,
+                            r#ref.as_deref(),
+                            *force,
+                            true,
+                        ),
+                        PluginAction::Remove {
+                            plugin_name, force, ..
+                        } => plugins::remove_plugin(&config, plugin_name, *force, true),
+                        PluginAction::Update {
+                            plugin_name,
+                            r#ref,
+                            force,
+                            ..
+                        } => plugins::update_plugin(
+                            &config,
+                            plugin_name,
+                            r#ref.as_deref(),
+                            *force,
+                            true,
+                        ),
+                        PluginAction::List { verbose, json } => {
+                            eprintln!("Dry run note: 'list' is read-only; executing command.");
+                            plugins::list_plugins(&config, *verbose, *json)
+                        }
+                        PluginAction::Verify {
+                            plugin_name,
+                            all,
+                            verbose,
+                        } => {
+                            eprintln!("Dry run note: 'verify' is read-only; executing command.");
+                            if *all {
+                                plugins::verify_all_plugins(&config, *verbose)
+                            } else {
+                                match plugin_name {
+                                    Some(name) => plugins::verify_plugin(&config, name, *verbose),
+                                    None => {
+                                        eprintln!(
+                                            "Error: plugin_name is required when --all is not specified"
+                                        );
+                                        std::process::exit(1);
+                                    }
+                                }
+                            }
+                        }
+                        PluginAction::DryRun { .. } => {
+                            eprintln!("Error: nested dry-run commands are not supported");
+                            std::process::exit(1);
+                        }
+                    }
                 }
             };
 
