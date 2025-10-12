@@ -12,10 +12,6 @@ This directory contains custom slash commands that integrate Codanna's CLI with 
 - `/trace <function> [depth]` - Trace call graph from a starting point
 - `/deps <symbol>` - Analyze dependencies of a symbol
 
-### Testing & Quality Commands
-
-- `/test_coverage <symbol>` - Find test coverage for a symbol
-
 ## Philosophy
 
 These commands follow the Unix philosophy:

@@ -17,6 +17,7 @@ pub mod init;
 pub mod io;
 pub mod mcp;
 pub mod parsing;
+pub mod plugins;
 pub mod project_resolver;
 pub mod relationship;
 pub mod retrieve;

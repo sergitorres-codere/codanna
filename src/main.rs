@@ -321,6 +321,129 @@ enum Commands {
         #[arg(short = 'a', long)]
         all_nodes: bool,
     },
+
+    /// Manage Claude Code plugins
+    #[command(
+        about = "Install, update, and manage Claude Code plugins from marketplaces",
+        long_about = "Manage Claude Code plugins by installing from Git-based marketplaces.\n\nPlugins extend Claude Code with custom commands, agents, hooks, and MCP servers.",
+        after_help = "Examples:\n  codanna plugin add https://github.com/user/marketplace plugin-name\n  codanna plugin remove plugin-name\n  codanna plugin update plugin-name --ref v2.0\n  codanna plugin list\n  codanna plugin verify plugin-name"
+    )]
+    Plugin {
+        #[command(subcommand)]
+        action: PluginAction,
+    },
+}
+
+/// Plugin management actions
+#[derive(Subcommand)]
+enum PluginAction {
+    /// Install a plugin from a marketplace
+    #[command(
+        about = "Install a plugin from a marketplace repository",
+        after_help = "Examples:\n  codanna plugin add https://github.com/user/marketplace plugin-name\n  codanna plugin add ./local-marketplace my-plugin --ref v1.0"
+    )]
+    Add {
+        /// Marketplace repository URL or local path
+        marketplace: String,
+
+        /// Plugin name to install
+        plugin_name: String,
+
+        /// Git reference (branch, tag, or commit SHA)
+        #[arg(long)]
+        r#ref: Option<String>,
+
+        /// Force installation even if conflicts exist
+        #[arg(short, long)]
+        force: bool,
+
+        /// Perform a dry run without making changes
+        #[arg(long)]
+        dry_run: bool,
+    },
+
+    /// Remove an installed plugin
+    #[command(
+        about = "Remove an installed plugin and clean up its files",
+        after_help = "Example:\n  codanna plugin remove plugin-name"
+    )]
+    Remove {
+        /// Plugin name to remove
+        plugin_name: String,
+
+        /// Force removal even if other plugins depend on it
+        #[arg(short, long)]
+        force: bool,
+
+        /// Perform a dry run without making changes
+        #[arg(long)]
+        dry_run: bool,
+    },
+
+    /// Update an installed plugin
+    #[command(
+        about = "Update a plugin to a newer version",
+        after_help = "Examples:\n  codanna plugin update plugin-name\n  codanna plugin update plugin-name --ref v2.0"
+    )]
+    Update {
+        /// Plugin name to update
+        plugin_name: String,
+
+        /// Git reference to update to (branch, tag, or commit SHA)
+        #[arg(long)]
+        r#ref: Option<String>,
+
+        /// Force update even if local modifications exist
+        #[arg(short, long)]
+        force: bool,
+
+        /// Perform a dry run without making changes
+        #[arg(long)]
+        dry_run: bool,
+    },
+
+    /// List installed plugins
+    #[command(
+        about = "List all installed plugins with their versions",
+        after_help = "Example:\n  codanna plugin list"
+    )]
+    List {
+        /// Show detailed information
+        #[arg(short, long)]
+        verbose: bool,
+
+        /// Output in JSON format
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Verify plugin integrity
+    #[command(
+        about = "Verify that a plugin's files match their expected checksums",
+        after_help = "Examples:\n  codanna plugin verify plugin-name\n  codanna plugin verify --all"
+    )]
+    Verify {
+        /// Plugin name to verify (omit to verify all)
+        plugin_name: Option<String>,
+
+        /// Verify all installed plugins
+        #[arg(long)]
+        all: bool,
+
+        /// Show detailed verification results
+        #[arg(short, long)]
+        verbose: bool,
+    },
+
+    /// Perform a dry run of plugin operations
+    #[command(
+        about = "Preview changes without modifying the system",
+        after_help = "Example:\n  codanna plugin dry-run add https://github.com/user/marketplace plugin-name"
+    )]
+    DryRun {
+        #[command(subcommand)]
+        action: Box<PluginAction>,
+    },
 }
 
 /// Query types for retrieving indexed information.
@@ -696,6 +819,7 @@ async fn main() {
             | Commands::Init { .. }
             | Commands::Config
             | Commands::Benchmark { .. }
+            | Commands::Plugin { .. }
     );
 
     // Determine if we need full trait resolver initialization
@@ -2655,6 +2779,70 @@ async fn main() {
         Commands::Parse { .. } => {
             // Already handled with early return above
             unreachable!("Parse command should have been handled earlier");
+        }
+
+        Commands::Plugin { action } => {
+            // Execute plugin management command
+            use codanna::plugins;
+            let result = match action {
+                PluginAction::Add {
+                    marketplace,
+                    plugin_name,
+                    r#ref,
+                    force,
+                    dry_run,
+                } => plugins::add_plugin(
+                    &marketplace,
+                    &plugin_name,
+                    r#ref.as_deref(),
+                    force,
+                    dry_run,
+                ),
+                PluginAction::Remove {
+                    plugin_name,
+                    force,
+                    dry_run,
+                } => plugins::remove_plugin(&plugin_name, force, dry_run),
+                PluginAction::Update {
+                    plugin_name,
+                    r#ref,
+                    force,
+                    dry_run,
+                } => plugins::update_plugin(&plugin_name, r#ref.as_deref(), force, dry_run),
+                PluginAction::List { verbose, json } => plugins::list_plugins(verbose, json),
+                PluginAction::Verify {
+                    plugin_name,
+                    all,
+                    verbose,
+                } => {
+                    if all {
+                        plugins::verify_all_plugins(verbose)
+                    } else {
+                        match plugin_name {
+                            Some(name) => plugins::verify_plugin(&name, verbose),
+                            None => {
+                                eprintln!(
+                                    "Error: plugin_name is required when --all is not specified"
+                                );
+                                std::process::exit(1);
+                            }
+                        }
+                    }
+                }
+                PluginAction::DryRun { action: _ } => {
+                    // TODO: Implement recursive dry-run handling
+                    // This should extract the nested action and execute it with dry_run=true
+                    // Example: codanna plugin dry-run add <marketplace> <plugin>
+                    // Currently dead code - action intentionally ignored with _
+                    eprintln!("Dry-run subcommand not yet implemented");
+                    std::process::exit(1);
+                }
+            };
+
+            if let Err(e) = result {
+                eprintln!("Plugin operation failed: {e}");
+                std::process::exit(1);
+            }
         }
     }
 }

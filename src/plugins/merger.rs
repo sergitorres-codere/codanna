@@ -1,0 +1,183 @@
+//! MCP.json merging logic for plugin installation
+
+use super::error::{PluginError, PluginResult};
+use serde_json::{Value, json};
+use std::path::Path;
+
+/// Merge plugin MCP servers into project's .mcp.json
+pub fn merge_mcp_servers(
+    project_mcp_path: &Path,
+    plugin_servers: &Value,
+    _plugin_name: &str, // TODO: Use for logging/tracking which plugin added which servers
+    force: bool,
+) -> PluginResult<Vec<String>> {
+    // Load existing .mcp.json or create new one
+    let mut project_mcp = if project_mcp_path.exists() {
+        let content = std::fs::read_to_string(project_mcp_path)?;
+        serde_json::from_str(&content)?
+    } else {
+        json!({
+            "mcpServers": {}
+        })
+    };
+
+    // Get mcpServers object
+    let servers = project_mcp
+        .as_object_mut()
+        .ok_or_else(|| PluginError::InvalidPluginManifest {
+            reason: "Invalid .mcp.json structure".to_string(),
+        })?
+        .entry("mcpServers")
+        .or_insert_with(|| json!({}));
+
+    let servers_obj =
+        servers
+            .as_object_mut()
+            .ok_or_else(|| PluginError::InvalidPluginManifest {
+                reason: "mcpServers must be an object".to_string(),
+            })?;
+
+    // Track added keys
+    let mut added_keys = Vec::new();
+
+    // Merge plugin servers
+    if let Some(plugin_servers_obj) = plugin_servers.as_object() {
+        for (key, value) in plugin_servers_obj {
+            // Check for conflicts
+            if servers_obj.contains_key(key) && !force {
+                return Err(PluginError::McpServerConflict { key: key.clone() });
+            }
+
+            // Add server configuration
+            servers_obj.insert(key.clone(), value.clone());
+            added_keys.push(key.clone());
+        }
+    }
+
+    // Save updated .mcp.json
+    let json = serde_json::to_string_pretty(&project_mcp)?;
+    std::fs::write(project_mcp_path, json)?;
+
+    Ok(added_keys)
+}
+
+/// Remove plugin MCP servers from project's .mcp.json
+pub fn remove_mcp_servers(project_mcp_path: &Path, server_keys: &[String]) -> PluginResult<()> {
+    if !project_mcp_path.exists() {
+        return Ok(());
+    }
+
+    // Load existing .mcp.json
+    let content = std::fs::read_to_string(project_mcp_path)?;
+    let mut project_mcp: Value = serde_json::from_str(&content)?;
+
+    // Get mcpServers object
+    if let Some(servers) = project_mcp.as_object_mut() {
+        if let Some(servers_obj) = servers.get_mut("mcpServers") {
+            if let Some(servers_map) = servers_obj.as_object_mut() {
+                // Remove specified keys
+                for key in server_keys {
+                    servers_map.remove(key);
+                }
+            }
+        }
+    }
+
+    // Save updated .mcp.json
+    let json = serde_json::to_string_pretty(&project_mcp)?;
+    std::fs::write(project_mcp_path, json)?;
+
+    Ok(())
+}
+
+/// Load MCP servers from plugin
+pub fn load_plugin_mcp_servers(
+    plugin_dir: &Path,
+    mcp_spec: &crate::plugins::plugin::McpServerSpec,
+) -> PluginResult<Value> {
+    use crate::plugins::plugin::McpServerSpec;
+
+    match mcp_spec {
+        McpServerSpec::Path(path) => {
+            let mcp_path = plugin_dir.join(path);
+            let content = std::fs::read_to_string(&mcp_path)?;
+            let mcp_json: Value = serde_json::from_str(&content)?;
+
+            // Extract mcpServers object
+            if let Some(servers) = mcp_json.get("mcpServers") {
+                Ok(servers.clone())
+            } else {
+                Ok(json!({}))
+            }
+        }
+        McpServerSpec::Inline(value) => Ok(value.clone()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_merge_mcp_servers() -> Result<(), Box<dyn std::error::Error>> {
+        let temp_dir = tempdir()?;
+        let mcp_path = temp_dir.path().join(".mcp.json");
+
+        // Create initial .mcp.json
+        let initial = json!({
+            "mcpServers": {
+                "existing": {
+                    "command": "existing-server"
+                }
+            }
+        });
+        std::fs::write(&mcp_path, serde_json::to_string(&initial)?)?;
+
+        // Merge new servers
+        let plugin_servers = json!({
+            "plugin-server": {
+                "command": "plugin-command"
+            }
+        });
+
+        let added = merge_mcp_servers(&mcp_path, &plugin_servers, "test-plugin", false)?;
+        assert_eq!(added, vec!["plugin-server".to_string()]);
+
+        // Verify merged content
+        let content = std::fs::read_to_string(&mcp_path)?;
+        let merged: Value = serde_json::from_str(&content)?;
+        assert!(merged["mcpServers"]["existing"].is_object());
+        assert!(merged["mcpServers"]["plugin-server"].is_object());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_conflict_detection() -> Result<(), Box<dyn std::error::Error>> {
+        let temp_dir = tempdir()?;
+        let mcp_path = temp_dir.path().join(".mcp.json");
+
+        // Create .mcp.json with existing server
+        let initial = json!({
+            "mcpServers": {
+                "conflicting": {
+                    "command": "existing"
+                }
+            }
+        });
+        std::fs::write(&mcp_path, serde_json::to_string(&initial)?)?;
+
+        // Try to merge conflicting server
+        let plugin_servers = json!({
+            "conflicting": {
+                "command": "new"
+            }
+        });
+
+        let result = merge_mcp_servers(&mcp_path, &plugin_servers, "test-plugin", false);
+        assert!(matches!(result, Err(PluginError::McpServerConflict { .. })));
+
+        Ok(())
+    }
+}

@@ -1,7 +1,7 @@
 ---
 description: Analyze dependencies of a symbol
 argument-hint: <symbol_name>
-model: claude-opus-4-1-20250805
+model: claude-sonnet-4-5-20250929
 ---
 
 ## Dependency Analysis Workflow
