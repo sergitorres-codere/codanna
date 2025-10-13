@@ -205,6 +205,42 @@ pub fn update_plugin(
                 name: plugin_name.to_string(),
             })?;
 
+    let remote_commit = if force {
+        None
+    } else if let Some(reference) = git_ref {
+        resolver::resolve_reference(&existing.marketplace_url, reference).ok()
+    } else {
+        resolver::resolve_reference(&existing.marketplace_url, "HEAD").ok()
+    };
+
+    if !force {
+        if let Some(commit) = remote_commit.as_ref() {
+            if commit == &existing.commit {
+                if dry_run {
+                    println!(
+                        "DRY RUN: Would update plugin '{plugin_name}' (already at commit {commit})"
+                    );
+                    println!("  Target workspace: {}", paths.root.display());
+                    return Ok(());
+                }
+
+                match verify_entry(&paths, &existing, false) {
+                    Ok(_) => {
+                        println!("Plugin '{plugin_name}' already up to date (commit {commit})");
+                        return Ok(());
+                    }
+                    Err(err) => {
+                        if settings.debug {
+                            eprintln!(
+                                "DEBUG: existing install failed verification, reinstalling: {err}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     let plan = prepare_plugin(
         &paths,
         &lockfile,
@@ -226,6 +262,23 @@ pub fn update_plugin(
         println!("  Target workspace: {}", paths.root.display());
         print_dry_run_summary(&plan);
         return Ok(());
+    }
+
+    if !force && plan.commit_sha == existing.commit {
+        match verify_entry(&paths, &existing, false) {
+            Ok(_) => {
+                println!(
+                    "Plugin '{plugin_name}' already up to date (commit {})",
+                    existing.commit
+                );
+                return Ok(());
+            }
+            Err(err) => {
+                if settings.debug {
+                    eprintln!("DEBUG: existing install failed verification, reinstalling: {err}");
+                }
+            }
+        }
     }
 
     ensure_workspace_layout(&paths)?;

@@ -19,15 +19,15 @@ pub fn merge_mcp_servers(
     plugin_servers: &Value,
     force: bool,
 ) -> PluginResult<McpMergeOutcome> {
-    let original_content = if project_mcp_path.exists() {
+    let previous_content = if project_mcp_path.exists() {
         Some(std::fs::read_to_string(project_mcp_path)?)
     } else {
         None
     };
-    let file_existed = original_content.is_some();
+    let file_existed = previous_content.is_some();
 
     // Load existing .mcp.json or create new one
-    let mut project_mcp = match &original_content {
+    let mut project_mcp = match &previous_content {
         Some(content) => serde_json::from_str(content)?,
         None => json!({ "mcpServers": {} }),
     };
@@ -48,30 +48,39 @@ pub fn merge_mcp_servers(
                 reason: "mcpServers must be an object".to_string(),
             })?;
 
-    // Track added keys
-    let mut added_keys = Vec::new();
+    // Track plugin-owned keys and whether anything changed
+    let mut owned_keys = Vec::new();
+    let mut changed = false;
 
     // Merge plugin servers
     if let Some(plugin_servers_obj) = plugin_servers.as_object() {
         for (key, value) in plugin_servers_obj {
+            owned_keys.push(key.clone());
+
             // Check for conflicts
-            if servers_obj.contains_key(key) && !force {
-                return Err(PluginError::McpServerConflict { key: key.clone() });
+            if let Some(existing) = servers_obj.get(key) {
+                if existing == value {
+                    continue;
+                }
+                if !force {
+                    return Err(PluginError::McpServerConflict { key: key.clone() });
+                }
             }
 
             // Add server configuration
             servers_obj.insert(key.clone(), value.clone());
-            added_keys.push(key.clone());
+            changed = true;
         }
     }
 
-    // Save updated .mcp.json
-    let json = serde_json::to_string_pretty(&project_mcp)?;
-    std::fs::write(project_mcp_path, json)?;
+    if changed {
+        let json = serde_json::to_string_pretty(&project_mcp)?;
+        std::fs::write(project_mcp_path, json)?;
+    }
 
     Ok(McpMergeOutcome {
-        added_keys,
-        previous_content: original_content,
+        added_keys: owned_keys,
+        previous_content,
         file_existed,
     })
 }
@@ -258,6 +267,42 @@ mod tests {
 
         let check = check_mcp_conflicts(&mcp_path, &plugin_servers, false, &allowed);
         assert!(check.is_ok());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_merge_noop_preserves_file() -> Result<(), Box<dyn std::error::Error>> {
+        let temp_dir = tempdir()?;
+        let mcp_path = temp_dir.path().join(".mcp.json");
+
+        let initial = r#"{
+  "mcpServers": {
+    "codanna": {
+      "command": "npx",
+      "args": ["start"]
+    },
+    "context7": {
+      "command": "npx",
+      "args": ["@upstash/context7-mcp"]
+    }
+  }
+}
+"#;
+        std::fs::write(&mcp_path, initial)?;
+
+        let plugin_servers = json!({
+            "codanna": {
+                "command": "npx",
+                "args": ["start"]
+            }
+        });
+
+        let outcome = merge_mcp_servers(&mcp_path, &plugin_servers, false)?;
+        assert_eq!(outcome.added_keys, vec!["codanna".to_string()]);
+
+        let final_content = std::fs::read_to_string(&mcp_path)?;
+        assert_eq!(final_content, initial);
 
         Ok(())
     }

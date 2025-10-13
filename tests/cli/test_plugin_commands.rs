@@ -179,3 +179,26 @@ fn dry_run_remove_succeeds_without_install() {
         );
     });
 }
+
+#[test]
+fn update_reports_already_up_to_date() {
+    with_temp_workspace(|workspace| {
+        prepare_workspace(workspace);
+        let repo_url = create_marketplace_repo(workspace, "demo-plugin");
+
+        let (code, stdout, stderr) =
+            run_cli(workspace, &["plugin", "add", &repo_url, "demo-plugin"]);
+        assert_eq!(code, 0, "install should succeed, stderr: {stderr}");
+        assert!(
+            stdout.contains("Plugin 'demo-plugin' installed"),
+            "stdout should mention successful install, got:\n{stdout}"
+        );
+
+        let (code, stdout, stderr) = run_cli(workspace, &["plugin", "update", "demo-plugin"]);
+        assert_eq!(code, 0, "update should succeed, stderr: {stderr}");
+        assert!(
+            stdout.contains("Plugin 'demo-plugin' already up to date"),
+            "stdout should report up-to-date status, got:\n{stdout}"
+        );
+    });
+}
