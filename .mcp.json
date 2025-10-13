@@ -1,11 +1,14 @@
 {
   "mcpServers": {
-    "Context7": {
+    "time": {
+      "command": "/Users/bartolli/.pyenv/shims/uv",
       "args": [
-        "-y",
-        "@upstash/context7-mcp"
-      ],
-      "command": "npx"
+        "--directory",
+        "/Users/bartolli/Projects/mcp-servers/servers/src/time",
+        "run",
+        "mcp-server-time",
+        "--local-timezone=America/New_York"
+      ]
     },
     "codanna": {
       "args": [
