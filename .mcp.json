@@ -1,15 +1,5 @@
 {
   "mcpServers": {
-    "time": {
-      "command": "/Users/bartolli/.pyenv/shims/uv",
-      "args": [
-        "--directory",
-        "/Users/bartolli/Projects/mcp-servers/servers/src/time",
-        "run",
-        "mcp-server-time",
-        "--local-timezone=America/New_York"
-      ]
-    },
     "codanna": {
       "args": [
         "serve",
@@ -35,6 +25,16 @@
         "5"
       ],
       "command": "codanna"
+    },
+    "time": {
+      "args": [
+        "--directory",
+        "/Users/bartolli/Projects/mcp-servers/servers/src/time",
+        "run",
+        "mcp-server-time",
+        "--local-timezone=America/New_York"
+      ],
+      "command": "/Users/bartolli/.pyenv/shims/uv"
     }
   }
 }

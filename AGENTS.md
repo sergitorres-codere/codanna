@@ -56,7 +56,7 @@
 
 ### Query Optimization
 
-Claude, analyze the query above and improve it for code search:
+Analyze the user query and improve it for code search:
 
 1. **If vague** (e.g., "that parsing thing") → Make it specific (e.g., "language parser implementation")
 2. **If a question** (e.g., "how does parsing work?") → Extract keywords (e.g., "parsing implementation process")
@@ -64,8 +64,6 @@ Claude, analyze the query above and improve it for code search:
 4. **If too broad** (e.g., "errors") → Add context (e.g., "error handling exception management")
 
 **YourOptimizedQuery**: _{Write and memorize your improved query here, then use it below in a context that is best for the task}_
-
-Execute this command with your optimized query:
 
 ### New Bash tools for code exploration at yoour disposal now
 
@@ -134,3 +132,9 @@ Use the Bash tool below to explore the codebase.
 
 [PRD Document](docs/enhancements/plugins/PRD.md)
 [Sprint Tracking Document](docs/enhancements/plugins/SPRINT_PLAN.md)
+
+**Official Plugin & Marketplace Documentation**
+
+- [Markeplace & Manifest Spec/Logic](.claude/docs/plugin-marketplace.md)
+- [Plugin Reference](.claude/docs/plugins-reference.md)
+- [Plugins Overview](.claude/docs/plugins.md)

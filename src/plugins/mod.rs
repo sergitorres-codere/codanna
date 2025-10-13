@@ -15,8 +15,8 @@ use crate::Settings;
 use chrono::Utc;
 use error::{PluginError, PluginResult};
 use fsops::{calculate_dest_path, calculate_integrity, copy_plugin_files, copy_plugin_payload};
-use lockfile::{PluginLockEntry, PluginLockfile};
-use marketplace::MarketplaceManifest;
+use lockfile::{LockfilePluginSource, PluginLockEntry, PluginLockfile};
+use marketplace::{MarketplaceManifest, ResolvedPluginSource};
 use plugin::{HookSpec, PathSpec, PluginManifest};
 use resolver::{clone_repository, extract_subdirectory};
 use serde_json::Value;
@@ -45,6 +45,7 @@ struct PreparedPlugin {
     component_files: Vec<String>,
     commit_sha: String,
     mcp_servers: Option<Value>,
+    source: LockfilePluginSource,
 }
 
 struct ExistingPluginBackup {
@@ -207,10 +208,8 @@ pub fn update_plugin(
 
     let remote_commit = if force {
         None
-    } else if let Some(reference) = git_ref {
-        resolver::resolve_reference(&existing.marketplace_url, reference).ok()
     } else {
-        resolver::resolve_reference(&existing.marketplace_url, "HEAD").ok()
+        resolve_remote_commit(&existing, git_ref)
     };
 
     if !force {
@@ -337,6 +336,19 @@ pub fn list_plugins(settings: &Settings, verbose: bool, json: bool) -> Result<()
         }
     }
     Ok(())
+}
+
+fn resolve_remote_commit(existing: &PluginLockEntry, override_ref: Option<&str>) -> Option<String> {
+    match existing.source.as_ref() {
+        Some(LockfilePluginSource::Git { url, git_ref, .. }) => {
+            let reference = override_ref.or(git_ref.as_deref()).unwrap_or("HEAD");
+            resolver::resolve_reference(url, reference).ok()
+        }
+        Some(LockfilePluginSource::MarketplacePath { .. }) | None => {
+            let reference = override_ref.unwrap_or("HEAD");
+            resolver::resolve_reference(&existing.marketplace_url, reference).ok()
+        }
+    }
 }
 
 /// Verify integrity of a specific plugin
@@ -505,7 +517,13 @@ fn verify_entry(
     entry: &PluginLockEntry,
     verbose: bool,
 ) -> PluginResult<()> {
-    let absolute_files = to_absolute_paths(paths, &entry.files);
+    let filtered: Vec<String> = entry
+        .files
+        .iter()
+        .filter(|path| path.as_str() != ".mcp.json")
+        .cloned()
+        .collect();
+    let absolute_files = to_absolute_paths(paths, &filtered);
     let actual = calculate_integrity(&absolute_files)?;
 
     if actual != entry.integrity {
@@ -574,17 +592,6 @@ fn uninstall_plugin(
     Ok(())
 }
 
-fn normalize_source_path(source: &str) -> String {
-    let trimmed = source.trim();
-    let without_prefix = trimmed.trim_start_matches("./");
-    let without_slash = without_prefix.trim_start_matches('/');
-    if without_slash.is_empty() {
-        ".".to_string()
-    } else {
-        without_slash.to_string()
-    }
-}
-
 fn collect_component_files(
     plugin_root: &Path,
     manifest: &PluginManifest,
@@ -607,6 +614,9 @@ fn collect_component_files(
     }
 
     add_directory_files(plugin_root, "scripts", &mut files)?;
+    if let Some(spec) = &manifest.scripts {
+        add_spec_paths(plugin_root, spec, &mut files)?;
+    }
 
     let mut list: Vec<_> = files.into_iter().collect();
     list.sort();
@@ -775,12 +785,58 @@ fn prepare_plugin(
             name: plugin_name.to_string(),
         })?;
 
-    let plugin_source = normalize_source_path(&plugin_entry.source);
-    let plugin_dir = tempdir()?;
-    extract_subdirectory(marketplace_dir.path(), &plugin_source, plugin_dir.path())?;
+    let resolved_source = plugin_entry.resolve_source(marketplace_manifest.metadata.as_ref())?;
+    let mut effective_commit = commit_sha.clone();
+
+    let (plugin_dir, source_for_lockfile) = match &resolved_source {
+        ResolvedPluginSource::MarketplacePath { relative } => {
+            let plugin_dir = tempdir()?;
+            extract_subdirectory(marketplace_dir.path(), relative, plugin_dir.path())?;
+            (
+                plugin_dir,
+                LockfilePluginSource::MarketplacePath {
+                    relative: relative.clone(),
+                },
+            )
+        }
+        ResolvedPluginSource::Git {
+            url,
+            git_ref,
+            subdir,
+        } => {
+            let repo_dir = tempdir()?;
+            let repo_commit = resolver::clone_repository(url, repo_dir.path(), git_ref.as_deref())?;
+            effective_commit = repo_commit;
+            let plugin_dir = if let Some(path) = subdir {
+                let plugin_dir = tempdir()?;
+                extract_subdirectory(repo_dir.path(), path, plugin_dir.path())?;
+                plugin_dir
+            } else {
+                repo_dir
+            };
+            (
+                plugin_dir,
+                LockfilePluginSource::Git {
+                    url: url.clone(),
+                    git_ref: git_ref.clone(),
+                    subdir: subdir.clone(),
+                },
+            )
+        }
+    };
 
     let plugin_manifest_path = plugin_dir.path().join(".claude-plugin/plugin.json");
-    let manifest = PluginManifest::from_file(&plugin_manifest_path)?;
+    let manifest = if plugin_manifest_path.exists() {
+        PluginManifest::from_file(&plugin_manifest_path)?
+    } else if plugin_entry.strict {
+        return Err(PluginError::InvalidPluginManifest {
+            reason: format!(
+                "Plugin '{plugin_name}' requires .claude-plugin/plugin.json but none was found"
+            ),
+        });
+    } else {
+        plugin_entry.to_plugin_manifest()?
+    };
     let component_files = collect_component_files(plugin_dir.path(), &manifest)?;
 
     check_file_conflicts(
@@ -805,8 +861,9 @@ fn prepare_plugin(
         plugin_dir,
         manifest,
         component_files,
-        commit_sha,
+        commit_sha: effective_commit,
         mcp_servers,
+        source: source_for_lockfile,
     })
 }
 
@@ -1028,6 +1085,7 @@ fn execute_install_with_plan(
         integrity,
         files: normalized_files,
         mcp_keys: added_keys,
+        source: Some(plan.source.clone()),
     };
 
     lockfile.add_plugin(entry.clone());

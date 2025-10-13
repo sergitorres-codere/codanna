@@ -45,6 +45,26 @@ pub struct PluginLockEntry {
     /// MCP server keys added
     #[serde(default)]
     pub mcp_keys: Vec<String>,
+
+    /// Resolved plugin source information
+    #[serde(default)]
+    pub source: Option<LockfilePluginSource>,
+}
+
+/// Stored plugin source information
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum LockfilePluginSource {
+    /// Plugin files came from a path within the marketplace repository
+    MarketplacePath { relative: String },
+    /// Plugin files were fetched from an external git repository
+    Git {
+        url: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        git_ref: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subdir: Option<String>,
+    },
 }
 
 impl PluginLockfile {
@@ -136,6 +156,7 @@ mod tests {
             integrity: "sha256:abc".to_string(),
             files: vec![".claude/commands/test.md".to_string()],
             mcp_keys: vec![],
+            source: None,
         };
 
         lockfile.add_plugin(entry);
@@ -155,6 +176,7 @@ mod tests {
             integrity: "sha256:abc".to_string(),
             files: vec![".claude/commands/test.md".to_string()],
             mcp_keys: vec![],
+            source: None,
         };
 
         lockfile.add_plugin(entry);

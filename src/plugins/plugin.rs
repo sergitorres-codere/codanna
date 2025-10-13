@@ -45,6 +45,10 @@ pub struct PluginManifest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hooks: Option<HookSpec>,
 
+    /// Script paths (beyond default scripts/ directory)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scripts: Option<PathSpec>,
+
     /// MCP server configuration (inline or path to .mcp.json)
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "mcpServers")]
@@ -143,6 +147,10 @@ impl PluginManifest {
 
         if let Some(ref agents) = self.agents {
             Self::validate_path_spec(agents, "agents")?;
+        }
+
+        if let Some(ref scripts) = self.scripts {
+            Self::validate_path_spec(scripts, "scripts")?;
         }
 
         if let Some(HookSpec::Path(ref path)) = self.hooks {
