@@ -12,6 +12,7 @@ pub fn copy_plugin_files(
     plugin_name: &str,
     file_list: &[String],
     force: bool,
+    conflict_owner: impl Fn(&Path) -> Option<String>,
 ) -> PluginResult<Vec<String>> {
     let mut copied_files = Vec::new();
 
@@ -21,11 +22,10 @@ pub fn copy_plugin_files(
 
         // Check for conflicts
         if dest_path.exists() && !force {
-            // TODO: Query lockfile to find actual owner using lockfile.find_file_owner()
-            // Currently hardcoded to "unknown" - should lookup which plugin installed this file
+            let owner = conflict_owner(&dest_path).unwrap_or_else(|| "unknown".to_string());
             return Err(PluginError::FileConflict {
                 path: dest_path,
-                owner: "unknown".to_string(),
+                owner,
             });
         }
 
@@ -49,9 +49,12 @@ pub fn copy_plugin_payload(
     dest_dir: &Path,
     plugin_name: &str,
     force: bool,
+    conflict_owner: impl Fn(&Path) -> Option<String>,
+    already_copied: &[String],
 ) -> PluginResult<Vec<String>> {
     let mut copied_files = Vec::new();
     let plugin_dest_root = dest_dir.join(".claude/plugins").join(plugin_name);
+    let already: std::collections::HashSet<_> = already_copied.iter().cloned().collect();
 
     for entry in WalkDir::new(source_dir).into_iter() {
         let entry = entry.map_err(|e| PluginError::IoError(io::Error::other(e)))?;
@@ -68,12 +71,23 @@ pub fn copy_plugin_payload(
             continue;
         }
 
+        let normalized = relative.to_string_lossy().replace('\\', "/");
+        if already.contains(&normalized)
+            || normalized.starts_with("commands/")
+            || normalized.starts_with("agents/")
+            || normalized.starts_with("hooks/")
+            || normalized.starts_with("scripts/")
+        {
+            continue;
+        }
+
         let dest_path = plugin_dest_root.join(relative);
 
         if dest_path.exists() && !force {
+            let owner = conflict_owner(&dest_path).unwrap_or_else(|| "unknown".to_string());
             return Err(PluginError::FileConflict {
                 path: dest_path,
-                owner: "unknown".to_string(),
+                owner,
             });
         }
 
@@ -107,7 +121,7 @@ pub fn remove_plugin_files(file_list: &[String]) -> PluginResult<()> {
 }
 
 /// Calculate destination path for a plugin file
-fn calculate_dest_path(dest_dir: &Path, plugin_name: &str, file_path: &str) -> PathBuf {
+pub(crate) fn calculate_dest_path(dest_dir: &Path, plugin_name: &str, file_path: &str) -> PathBuf {
     let trimmed = file_path.trim_start_matches("./");
     let path = Path::new(trimmed);
 
@@ -127,6 +141,12 @@ fn calculate_dest_path(dest_dir: &Path, plugin_name: &str, file_path: &str) -> P
         let relative = path.strip_prefix("hooks").unwrap_or(Path::new(""));
         dest_dir
             .join(".claude/hooks")
+            .join(plugin_name)
+            .join(relative)
+    } else if path.starts_with("scripts") {
+        let relative = path.strip_prefix("scripts").unwrap_or(Path::new(""));
+        dest_dir
+            .join(".claude/scripts")
             .join(plugin_name)
             .join(relative)
     } else {
@@ -212,7 +232,10 @@ mod tests {
 
         // Copy files
         let files = vec!["commands/test.md".to_string()];
-        let copied = copy_plugin_files(&source_dir, &dest_dir, "test-plugin", &files, false)?;
+        let copied =
+            copy_plugin_files(&source_dir, &dest_dir, "test-plugin", &files, false, |_| {
+                None
+            })?;
 
         assert_eq!(copied.len(), 1);
         assert!(

@@ -2,23 +2,34 @@
 
 use super::error::{PluginError, PluginResult};
 use serde_json::{Value, json};
+use std::collections::HashSet;
 use std::path::Path;
+
+/// Result of merging MCP servers
+#[derive(Debug)]
+pub struct McpMergeOutcome {
+    pub added_keys: Vec<String>,
+    pub previous_content: Option<String>,
+    pub file_existed: bool,
+}
 
 /// Merge plugin MCP servers into project's .mcp.json
 pub fn merge_mcp_servers(
     project_mcp_path: &Path,
     plugin_servers: &Value,
-    _plugin_name: &str, // TODO: Use for logging/tracking which plugin added which servers
     force: bool,
-) -> PluginResult<Vec<String>> {
-    // Load existing .mcp.json or create new one
-    let mut project_mcp = if project_mcp_path.exists() {
-        let content = std::fs::read_to_string(project_mcp_path)?;
-        serde_json::from_str(&content)?
+) -> PluginResult<McpMergeOutcome> {
+    let original_content = if project_mcp_path.exists() {
+        Some(std::fs::read_to_string(project_mcp_path)?)
     } else {
-        json!({
-            "mcpServers": {}
-        })
+        None
+    };
+    let file_existed = original_content.is_some();
+
+    // Load existing .mcp.json or create new one
+    let mut project_mcp = match &original_content {
+        Some(content) => serde_json::from_str(content)?,
+        None => json!({ "mcpServers": {} }),
     };
 
     // Get mcpServers object
@@ -58,7 +69,43 @@ pub fn merge_mcp_servers(
     let json = serde_json::to_string_pretty(&project_mcp)?;
     std::fs::write(project_mcp_path, json)?;
 
-    Ok(added_keys)
+    Ok(McpMergeOutcome {
+        added_keys,
+        previous_content: original_content,
+        file_existed,
+    })
+}
+
+/// Check for MCP server conflicts without modifying files
+pub fn check_mcp_conflicts(
+    project_mcp_path: &Path,
+    plugin_servers: &Value,
+    force: bool,
+    allowed_keys: &HashSet<String>,
+) -> PluginResult<()> {
+    if !project_mcp_path.exists() {
+        return Ok(());
+    }
+
+    let content = std::fs::read_to_string(project_mcp_path)?;
+    let project_mcp: Value = serde_json::from_str(&content)?;
+
+    let servers = project_mcp
+        .get("mcpServers")
+        .and_then(|value| value.as_object())
+        .ok_or_else(|| PluginError::InvalidPluginManifest {
+            reason: "Invalid .mcp.json structure".to_string(),
+        })?;
+
+    if let Some(plugin_servers_obj) = plugin_servers.as_object() {
+        for key in plugin_servers_obj.keys() {
+            if servers.contains_key(key) && !force && !allowed_keys.contains(key) {
+                return Err(PluginError::McpServerConflict { key: key.clone() });
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// Remove plugin MCP servers from project's .mcp.json
@@ -141,8 +188,9 @@ mod tests {
             }
         });
 
-        let added = merge_mcp_servers(&mcp_path, &plugin_servers, "test-plugin", false)?;
-        assert_eq!(added, vec!["plugin-server".to_string()]);
+        let outcome = merge_mcp_servers(&mcp_path, &plugin_servers, false)?;
+        assert_eq!(outcome.added_keys, vec!["plugin-server".to_string()]);
+        assert!(outcome.file_existed);
 
         // Verify merged content
         let content = std::fs::read_to_string(&mcp_path)?;
@@ -175,8 +223,41 @@ mod tests {
             }
         });
 
-        let result = merge_mcp_servers(&mcp_path, &plugin_servers, "test-plugin", false);
+        let result = merge_mcp_servers(&mcp_path, &plugin_servers, false);
         assert!(matches!(result, Err(PluginError::McpServerConflict { .. })));
+
+        // Check helper detects conflict without modifying file
+        let check = check_mcp_conflicts(&mcp_path, &plugin_servers, false, &HashSet::new());
+        assert!(matches!(check, Err(PluginError::McpServerConflict { .. })));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_conflict_allowed_keys() -> Result<(), Box<dyn std::error::Error>> {
+        let temp_dir = tempdir()?;
+        let mcp_path = temp_dir.path().join(".mcp.json");
+
+        let initial = json!({
+            "mcpServers": {
+                "codanna": {
+                    "command": "existing"
+                }
+            }
+        });
+        std::fs::write(&mcp_path, serde_json::to_string(&initial)?)?;
+
+        let plugin_servers = json!({
+            "codanna": {
+                "command": "replacement"
+            }
+        });
+
+        let mut allowed = HashSet::new();
+        allowed.insert("codanna".to_string());
+
+        let check = check_mcp_conflicts(&mcp_path, &plugin_servers, false, &allowed);
+        assert!(check.is_ok());
 
         Ok(())
     }

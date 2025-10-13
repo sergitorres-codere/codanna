@@ -14,7 +14,7 @@ pub mod resolver;
 use crate::Settings;
 use chrono::Utc;
 use error::{PluginError, PluginResult};
-use fsops::{calculate_integrity, copy_plugin_files, copy_plugin_payload};
+use fsops::{calculate_dest_path, calculate_integrity, copy_plugin_files, copy_plugin_payload};
 use lockfile::{PluginLockEntry, PluginLockfile};
 use marketplace::MarketplaceManifest;
 use plugin::{HookSpec, PathSpec, PluginManifest};
@@ -24,7 +24,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use tempfile::tempdir;
+use tempfile::{TempDir, tempdir};
 use walkdir::WalkDir;
 
 #[derive(Debug, Clone)]
@@ -33,9 +33,25 @@ struct WorkspacePaths {
     commands_dir: PathBuf,
     agents_dir: PathBuf,
     hooks_dir: PathBuf,
+    scripts_dir: PathBuf,
     plugins_dir: PathBuf,
     lockfile_path: PathBuf,
     mcp_path: PathBuf,
+}
+
+struct PreparedPlugin {
+    plugin_dir: TempDir,
+    manifest: PluginManifest,
+    component_files: Vec<String>,
+    commit_sha: String,
+    mcp_servers: Option<Value>,
+}
+
+struct ExistingPluginBackup {
+    entry: PluginLockEntry,
+    files: Vec<(PathBuf, Vec<u8>)>,
+    mcp_content: Option<Vec<u8>>,
+    mcp_existed: bool,
 }
 
 impl WorkspacePaths {
@@ -44,6 +60,7 @@ impl WorkspacePaths {
         let commands_dir = claude_dir.join("commands");
         let agents_dir = claude_dir.join("agents");
         let hooks_dir = claude_dir.join("hooks");
+        let scripts_dir = claude_dir.join("scripts");
         let plugins_dir = claude_dir.join("plugins");
         let lockfile_path = root.join(".codanna/plugins/lockfile.json");
         let mcp_path = root.join(".mcp.json");
@@ -53,6 +70,7 @@ impl WorkspacePaths {
             commands_dir,
             agents_dir,
             hooks_dir,
+            scripts_dir,
             plugins_dir,
             lockfile_path,
             mcp_path,
@@ -70,6 +88,27 @@ pub fn add_plugin(
     dry_run: bool,
 ) -> Result<(), PluginError> {
     let workspace_root = resolve_workspace_root(settings)?;
+    let paths = WorkspacePaths::for_root(workspace_root.clone());
+
+    let mut lockfile = load_lockfile(&paths)?;
+    let previous_entry = lockfile.get_plugin(plugin_name).cloned();
+    if previous_entry.is_some() && !force {
+        let existing = previous_entry.unwrap();
+        return Err(PluginError::AlreadyInstalled {
+            name: plugin_name.to_string(),
+            version: existing.version,
+        });
+    }
+
+    let plan = prepare_plugin(
+        &paths,
+        &lockfile,
+        plugin_name,
+        marketplace_url,
+        git_ref,
+        force,
+        previous_entry.as_ref(),
+    )?;
 
     if dry_run {
         println!("DRY RUN: Would install plugin '{plugin_name}' from {marketplace_url}");
@@ -79,98 +118,28 @@ pub fn add_plugin(
         if force {
             println!("  Force mode: would overwrite conflicts");
         }
-        println!("  Target workspace: {}", workspace_root.display());
+        println!("  Target workspace: {}", paths.root.display());
+        print_dry_run_summary(&plan);
         return Ok(());
     }
 
-    let paths = WorkspacePaths::for_root(workspace_root.clone());
     ensure_workspace_layout(&paths)?;
 
-    let mut lockfile = load_lockfile(&paths)?;
-
-    if let Some(existing) = lockfile.get_plugin(plugin_name) {
-        if !force {
-            return Err(PluginError::AlreadyInstalled {
-                name: plugin_name.to_string(),
-                version: existing.version.clone(),
-            });
-        }
-    }
-
-    let marketplace_dir = tempdir()?;
-    let commit_sha = clone_repository(marketplace_url, marketplace_dir.path(), git_ref)?;
-
-    let marketplace_manifest_path = marketplace_dir
-        .path()
-        .join(".claude-plugin/marketplace.json");
-    let marketplace_manifest = MarketplaceManifest::from_file(&marketplace_manifest_path)?;
-    let plugin_entry = marketplace_manifest
-        .find_plugin(plugin_name)
-        .ok_or_else(|| PluginError::PluginNotFound {
-            name: plugin_name.to_string(),
-        })?;
-
-    let plugin_source = normalize_source_path(&plugin_entry.source);
-    let plugin_dir = tempdir()?;
-    extract_subdirectory(marketplace_dir.path(), &plugin_source, plugin_dir.path())?;
-
-    let plugin_manifest_path = plugin_dir.path().join(".claude-plugin/plugin.json");
-    let plugin_manifest = PluginManifest::from_file(&plugin_manifest_path)?;
-
-    let component_files = collect_component_files(plugin_dir.path(), &plugin_manifest)?;
-    if settings.debug {
-        eprintln!("DEBUG: component files for plugin '{plugin_name}': {component_files:?}");
-    }
-
-    let mut copied_files = Vec::new();
-
-    if !component_files.is_empty() {
-        let component_paths = copy_plugin_files(
-            plugin_dir.path(),
-            &paths.root,
-            plugin_name,
-            &component_files,
-            force,
-        )?;
-        copied_files.extend(component_paths);
-    }
-
-    let payload_paths = copy_plugin_payload(plugin_dir.path(), &paths.root, plugin_name, force)?;
-    copied_files.extend(payload_paths);
-
-    let mut mcp_keys = Vec::new();
-    if let Some(mcp_servers) = load_plugin_mcp(plugin_dir.path(), &plugin_manifest)? {
-        let project_mcp_path = &paths.mcp_path;
-        let added = merger::merge_mcp_servers(project_mcp_path, &mcp_servers, plugin_name, force)?;
-        if !added.is_empty() {
-            mcp_keys = added;
-            copied_files.push(project_mcp_path.to_string_lossy().replace('\\', "/"));
-        }
-    }
-
-    let copied_files = normalize_paths(&paths.root, copied_files);
-    let integrity_inputs = to_absolute_paths(&paths, &copied_files);
-    let integrity = calculate_integrity(&integrity_inputs)?;
-    let timestamp = Utc::now().to_rfc3339();
-
-    let entry = PluginLockEntry {
-        name: plugin_name.to_string(),
-        version: plugin_manifest.version.clone(),
-        commit: commit_sha,
-        marketplace_url: marketplace_url.to_string(),
-        installed_at: timestamp.clone(),
-        updated_at: timestamp,
-        integrity,
-        files: copied_files,
-        mcp_keys,
-    };
-
-    lockfile.add_plugin(entry);
-    save_lockfile(&paths, &lockfile)?;
+    let entry = execute_install_with_plan(
+        &paths,
+        &mut lockfile,
+        plugin_name,
+        marketplace_url,
+        force,
+        settings.debug,
+        None,
+        plan,
+    )?;
 
     println!(
-        "Plugin '{plugin_name}' installed into {}",
-        paths.root.display()
+        "Plugin '{plugin_name}' installed into {} (commit {})",
+        paths.root.display(),
+        entry.commit
     );
     Ok(())
 }
@@ -207,19 +176,7 @@ pub fn remove_plugin(
 
     // TODO: Consider dependency graph when available. For now we ignore `force`.
 
-    let absolute_files = to_absolute_paths(&paths, &entry.files);
-    fsops::remove_plugin_files(&absolute_files)?;
-
-    let payload_dir = paths.plugins_dir.join(plugin_name);
-    if payload_dir.exists() {
-        let _ = fs::remove_dir_all(&payload_dir);
-    }
-
-    if !entry.mcp_keys.is_empty() {
-        merger::remove_mcp_servers(&paths.mcp_path, &entry.mcp_keys)?;
-    }
-
-    lockfile.remove_plugin(plugin_name);
+    uninstall_plugin(&paths, &mut lockfile, plugin_name, &entry)?;
     save_lockfile(&paths, &lockfile)?;
 
     println!(
@@ -238,6 +195,25 @@ pub fn update_plugin(
     dry_run: bool,
 ) -> Result<(), PluginError> {
     let workspace_root = resolve_workspace_root(settings)?;
+    let paths = WorkspacePaths::for_root(workspace_root.clone());
+    let mut lockfile = load_lockfile(&paths)?;
+    let existing =
+        lockfile
+            .get_plugin(plugin_name)
+            .cloned()
+            .ok_or_else(|| PluginError::NotInstalled {
+                name: plugin_name.to_string(),
+            })?;
+
+    let plan = prepare_plugin(
+        &paths,
+        &lockfile,
+        plugin_name,
+        &existing.marketplace_url,
+        git_ref,
+        force,
+        Some(&existing),
+    )?;
 
     if dry_run {
         println!("DRY RUN: Would update plugin '{plugin_name}'");
@@ -247,22 +223,30 @@ pub fn update_plugin(
         if force {
             println!("  Force mode: would overwrite local changes");
         }
-        println!("  Target workspace: {}", workspace_root.display());
+        println!("  Target workspace: {}", paths.root.display());
+        print_dry_run_summary(&plan);
         return Ok(());
     }
 
-    // TODO: Implement actual plugin update
+    ensure_workspace_layout(&paths)?;
+
+    let entry = execute_install_with_plan(
+        &paths,
+        &mut lockfile,
+        plugin_name,
+        &existing.marketplace_url,
+        force,
+        settings.debug,
+        Some(existing.clone()),
+        plan,
+    )?;
+
     println!(
-        "Updating plugin '{plugin_name}' in {}",
-        workspace_root.display()
+        "Plugin '{plugin_name}' updated in {} ({} -> {})",
+        paths.root.display(),
+        existing.commit,
+        entry.commit
     );
-
-    // 1. Read lockfile to get marketplace URL
-    // 2. Fetch new version
-    // 3. Compute diff
-    // 4. Apply changes
-    // 5. Update lockfile
-
     Ok(())
 }
 
@@ -361,6 +345,7 @@ fn ensure_workspace_layout(paths: &WorkspacePaths) -> PluginResult<()> {
         &paths.commands_dir,
         &paths.agents_dir,
         &paths.hooks_dir,
+        &paths.scripts_dir,
         &paths.plugins_dir,
     ] {
         fs::create_dir_all(sub)?;
@@ -388,6 +373,78 @@ fn to_absolute_paths(paths: &WorkspacePaths, files: &[String]) -> Vec<String> {
                 .replace('\\', "/")
         })
         .collect()
+}
+
+fn resolve_file_owner(
+    paths: &WorkspacePaths,
+    lockfile: &PluginLockfile,
+    path: &Path,
+) -> Option<String> {
+    let relative = path
+        .strip_prefix(&paths.root)
+        .map(|p| p.to_string_lossy().replace('\\', "/"))
+        .unwrap_or_else(|_| path.to_string_lossy().replace('\\', "/"));
+    lockfile
+        .find_file_owner(&relative)
+        .map(|name| name.to_string())
+}
+
+fn backup_existing_plugin(
+    paths: &WorkspacePaths,
+    entry: &PluginLockEntry,
+) -> PluginResult<ExistingPluginBackup> {
+    let mut files = Vec::new();
+    for relative in &entry.files {
+        let absolute = paths.root.join(relative);
+        if absolute.exists() {
+            let data = fs::read(&absolute)?;
+            files.push((absolute, data));
+        }
+    }
+
+    let (mcp_content, mcp_existed) = if paths.mcp_path.exists() {
+        (Some(fs::read(&paths.mcp_path)?), true)
+    } else {
+        (None, false)
+    };
+
+    Ok(ExistingPluginBackup {
+        entry: entry.clone(),
+        files,
+        mcp_content,
+        mcp_existed,
+    })
+}
+
+fn restore_existing_plugin(
+    paths: &WorkspacePaths,
+    backup: &ExistingPluginBackup,
+) -> PluginResult<()> {
+    for (path, data) in &backup.files {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(path, data)?;
+    }
+
+    match (&backup.mcp_content, backup.mcp_existed) {
+        (Some(content), _) => {
+            if let Some(parent) = paths.mcp_path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::write(&paths.mcp_path, content)?;
+        }
+        (None, true) => {
+            // If the file previously existed but we could not read it, leave as-is
+        }
+        (None, false) => {
+            if paths.mcp_path.exists() {
+                let _ = fs::remove_file(&paths.mcp_path);
+            }
+        }
+    }
+
+    Ok(())
 }
 
 fn verify_entry(
@@ -444,6 +501,26 @@ fn verify_entry(
     Ok(())
 }
 
+fn uninstall_plugin(
+    paths: &WorkspacePaths,
+    lockfile: &mut PluginLockfile,
+    plugin_name: &str,
+    entry: &PluginLockEntry,
+) -> PluginResult<()> {
+    let mut absolute_files = to_absolute_paths(paths, &entry.files);
+    absolute_files.retain(|path| Path::new(path) != paths.mcp_path);
+    fsops::remove_plugin_files(&absolute_files)?;
+
+    cleanup_plugin_dirs(paths, plugin_name);
+
+    if !entry.mcp_keys.is_empty() {
+        merger::remove_mcp_servers(&paths.mcp_path, &entry.mcp_keys)?;
+    }
+
+    lockfile.remove_plugin(plugin_name);
+    Ok(())
+}
+
 fn normalize_source_path(source: &str) -> String {
     let trimmed = source.trim();
     let without_prefix = trimmed.trim_start_matches("./");
@@ -475,6 +552,8 @@ fn collect_component_files(
     if let Some(HookSpec::Path(path)) = &manifest.hooks {
         add_single_path(plugin_root, path, &mut files)?;
     }
+
+    add_directory_files(plugin_root, "scripts", &mut files)?;
 
     let mut list: Vec<_> = files.into_iter().collect();
     list.sort();
@@ -618,5 +697,343 @@ fn resolve_workspace_root(settings: &Settings) -> Result<PathBuf, PluginError> {
         }
     } else {
         Ok(std::env::current_dir()?)
+    }
+}
+
+fn prepare_plugin(
+    paths: &WorkspacePaths,
+    lockfile: &PluginLockfile,
+    plugin_name: &str,
+    marketplace_url: &str,
+    git_ref: Option<&str>,
+    force: bool,
+    previous_entry: Option<&PluginLockEntry>,
+) -> Result<PreparedPlugin, PluginError> {
+    let marketplace_dir = tempdir()?;
+    let commit_sha = clone_repository(marketplace_url, marketplace_dir.path(), git_ref)?;
+
+    let marketplace_manifest_path = marketplace_dir
+        .path()
+        .join(".claude-plugin/marketplace.json");
+    let marketplace_manifest = MarketplaceManifest::from_file(&marketplace_manifest_path)?;
+    let plugin_entry = marketplace_manifest
+        .find_plugin(plugin_name)
+        .ok_or_else(|| PluginError::PluginNotFound {
+            name: plugin_name.to_string(),
+        })?;
+
+    let plugin_source = normalize_source_path(&plugin_entry.source);
+    let plugin_dir = tempdir()?;
+    extract_subdirectory(marketplace_dir.path(), &plugin_source, plugin_dir.path())?;
+
+    let plugin_manifest_path = plugin_dir.path().join(".claude-plugin/plugin.json");
+    let manifest = PluginManifest::from_file(&plugin_manifest_path)?;
+    let component_files = collect_component_files(plugin_dir.path(), &manifest)?;
+
+    check_file_conflicts(
+        paths,
+        lockfile,
+        plugin_name,
+        &component_files,
+        plugin_dir.path(),
+        force,
+    )?;
+
+    let mcp_servers = load_plugin_mcp(plugin_dir.path(), &manifest)?;
+
+    if let Some(servers) = &mcp_servers {
+        let allowed_keys: HashSet<String> = previous_entry
+            .map(|entry| entry.mcp_keys.iter().cloned().collect())
+            .unwrap_or_default();
+        merger::check_mcp_conflicts(&paths.mcp_path, servers, force, &allowed_keys)?;
+    }
+
+    Ok(PreparedPlugin {
+        plugin_dir,
+        manifest,
+        component_files,
+        commit_sha,
+        mcp_servers,
+    })
+}
+
+fn check_file_conflicts(
+    paths: &WorkspacePaths,
+    lockfile: &PluginLockfile,
+    plugin_name: &str,
+    component_files: &[String],
+    plugin_dir: &Path,
+    force: bool,
+) -> PluginResult<()> {
+    for relative in component_files {
+        let dest = calculate_dest_path(&paths.root, plugin_name, relative);
+        if dest.exists() {
+            match resolve_file_owner(paths, lockfile, &dest) {
+                Some(owner) if owner != plugin_name && !force => {
+                    return Err(PluginError::FileConflict { path: dest, owner });
+                }
+                None if !force => {
+                    return Err(PluginError::FileConflict {
+                        path: dest,
+                        owner: "unknown".to_string(),
+                    });
+                }
+                _ => {}
+            }
+        }
+    }
+
+    for entry in WalkDir::new(plugin_dir).into_iter() {
+        let entry = entry.map_err(|e| PluginError::IoError(io::Error::other(e)))?;
+        if entry.file_type().is_dir() {
+            continue;
+        }
+
+        let relative = entry
+            .path()
+            .strip_prefix(plugin_dir)
+            .expect("walkdir entry should be under plugin root");
+
+        if relative.components().any(|c| c.as_os_str() == ".git") {
+            continue;
+        }
+
+        let relative_str = relative.to_string_lossy().replace('\\', "/");
+        if component_files.contains(&relative_str)
+            || relative_str.starts_with("commands/")
+            || relative_str.starts_with("agents/")
+            || relative_str.starts_with("hooks/")
+            || relative_str.starts_with("scripts/")
+        {
+            continue;
+        }
+
+        let dest = paths.plugins_dir.join(plugin_name).join(relative);
+        if dest.exists() {
+            match resolve_file_owner(paths, lockfile, &dest) {
+                Some(owner) if owner != plugin_name && !force => {
+                    return Err(PluginError::FileConflict { path: dest, owner });
+                }
+                None if !force => {
+                    return Err(PluginError::FileConflict {
+                        path: dest,
+                        owner: "unknown".to_string(),
+                    });
+                }
+                _ => {}
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn print_dry_run_summary(plan: &PreparedPlugin) {
+    let command_count = plan
+        .component_files
+        .iter()
+        .filter(|p| p.starts_with("commands/"))
+        .count();
+    let agent_count = plan
+        .component_files
+        .iter()
+        .filter(|p| p.starts_with("agents/"))
+        .count();
+    let hook_count = plan
+        .component_files
+        .iter()
+        .filter(|p| p.starts_with("hooks/"))
+        .count();
+    let script_count = plan
+        .component_files
+        .iter()
+        .filter(|p| p.starts_with("scripts/"))
+        .count();
+
+    println!("  Commit: {}", plan.commit_sha);
+    println!("  Commands: {command_count}");
+    println!("  Agents: {agent_count}");
+    println!("  Hooks: {hook_count}");
+    println!("  Scripts: {script_count}");
+}
+
+fn execute_install_with_plan(
+    paths: &WorkspacePaths,
+    lockfile: &mut PluginLockfile,
+    plugin_name: &str,
+    marketplace_url: &str,
+    force: bool,
+    debug: bool,
+    previous_entry: Option<PluginLockEntry>,
+    plan: PreparedPlugin,
+) -> Result<PluginLockEntry, PluginError> {
+    if debug {
+        eprintln!(
+            "DEBUG: component files for plugin '{}': {:?}",
+            plugin_name, plan.component_files
+        );
+    }
+
+    let mut copied_files: Vec<String> = Vec::new();
+    let mut mcp_backup: Option<merger::McpMergeOutcome> = None;
+    let mut previous_backup: Option<ExistingPluginBackup> = None;
+
+    if let Some(prev) = previous_entry.as_ref() {
+        previous_backup = Some(backup_existing_plugin(paths, prev)?);
+        uninstall_plugin(paths, lockfile, plugin_name, prev)?;
+    }
+
+    let component_paths = copy_plugin_files(
+        plan.plugin_dir.path(),
+        &paths.root,
+        plugin_name,
+        &plan.component_files,
+        force,
+        |path| resolve_file_owner(paths, lockfile, path),
+    );
+
+    match component_paths {
+        Ok(paths_copied) => {
+            copied_files.extend(paths_copied);
+        }
+        Err(e) => {
+            rollback_install(
+                paths,
+                lockfile,
+                plugin_name,
+                &copied_files,
+                &mcp_backup,
+                previous_backup.as_ref(),
+            )?;
+            return Err(e);
+        }
+    }
+
+    let payload_paths = copy_plugin_payload(
+        plan.plugin_dir.path(),
+        &paths.root,
+        plugin_name,
+        force,
+        |path| resolve_file_owner(paths, lockfile, path),
+        &plan.component_files,
+    );
+
+    match payload_paths {
+        Ok(paths_copied) => {
+            copied_files.extend(paths_copied);
+        }
+        Err(e) => {
+            rollback_install(
+                paths,
+                lockfile,
+                plugin_name,
+                &copied_files,
+                &mcp_backup,
+                previous_backup.as_ref(),
+            )?;
+            return Err(e);
+        }
+    }
+
+    let mut added_keys = Vec::new();
+    if let Some(servers) = plan.mcp_servers.as_ref() {
+        match merger::merge_mcp_servers(&paths.mcp_path, servers, force) {
+            Ok(outcome) => {
+                added_keys = outcome.added_keys.clone();
+                mcp_backup = Some(outcome);
+            }
+            Err(e) => {
+                rollback_install(
+                    paths,
+                    lockfile,
+                    plugin_name,
+                    &copied_files,
+                    &mcp_backup,
+                    previous_backup.as_ref(),
+                )?;
+                return Err(e);
+            }
+        }
+    }
+
+    let normalized_files = normalize_paths(&paths.root, copied_files.clone());
+    let normalized_files: Vec<_> = normalized_files
+        .into_iter()
+        .filter(|path| path != ".mcp.json")
+        .collect();
+    let integrity_inputs = to_absolute_paths(paths, &normalized_files);
+    let integrity = calculate_integrity(&integrity_inputs)?;
+    let timestamp = Utc::now().to_rfc3339();
+
+    let entry = PluginLockEntry {
+        name: plugin_name.to_string(),
+        version: plan.manifest.version.clone(),
+        commit: plan.commit_sha.clone(),
+        marketplace_url: marketplace_url.to_string(),
+        installed_at: timestamp.clone(),
+        updated_at: timestamp,
+        integrity,
+        files: normalized_files,
+        mcp_keys: added_keys,
+    };
+
+    lockfile.add_plugin(entry.clone());
+    if let Err(e) = save_lockfile(paths, lockfile) {
+        lockfile.remove_plugin(plugin_name);
+        rollback_install(
+            paths,
+            lockfile,
+            plugin_name,
+            &copied_files,
+            &mcp_backup,
+            previous_backup.as_ref(),
+        )?;
+        return Err(e);
+    }
+
+    Ok(entry)
+}
+
+fn rollback_install(
+    paths: &WorkspacePaths,
+    lockfile: &mut PluginLockfile,
+    plugin_name: &str,
+    copied_files: &[String],
+    mcp_backup: &Option<merger::McpMergeOutcome>,
+    previous_backup: Option<&ExistingPluginBackup>,
+) -> PluginResult<()> {
+    if !copied_files.is_empty() {
+        fsops::remove_plugin_files(copied_files)?;
+    }
+
+    if let Some(previous) = previous_backup {
+        restore_existing_plugin(paths, previous)?;
+        lockfile.add_plugin(previous.entry.clone());
+        save_lockfile(paths, lockfile)?;
+    } else if let Some(backup) = mcp_backup {
+        if backup.file_existed {
+            if let Some(content) = &backup.previous_content {
+                fs::write(&paths.mcp_path, content)?;
+            }
+        } else if paths.mcp_path.exists() {
+            let _ = fs::remove_file(&paths.mcp_path);
+        }
+    }
+
+    if previous_backup.is_none() {
+        cleanup_plugin_dirs(paths, plugin_name);
+    }
+    Ok(())
+}
+
+fn cleanup_plugin_dirs(paths: &WorkspacePaths, plugin_name: &str) {
+    let payload_dir = paths.plugins_dir.join(plugin_name);
+    if payload_dir.exists() {
+        let _ = fs::remove_dir_all(&payload_dir);
+    }
+
+    let script_dir = paths.scripts_dir.join(plugin_name);
+    if script_dir.exists() {
+        let _ = fs::remove_dir_all(&script_dir);
     }
 }

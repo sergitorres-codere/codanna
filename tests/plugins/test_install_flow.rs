@@ -3,6 +3,7 @@ use std::path::Path;
 
 use codanna::plugins::error::PluginError;
 use codanna::{Settings, plugins};
+use git2::{IndexAddOption, Repository, Signature};
 use serde_json::Value;
 use tempfile::TempDir;
 
@@ -49,6 +50,62 @@ fn load_workspace_settings(workspace: &Path) -> Settings {
     settings
 }
 
+fn create_marketplace_repo(
+    workspace: &Path,
+    repo_name: &str,
+    plugin_name: &str,
+    plugin_manifest: &str,
+    extra_files: &[(&str, &str)],
+) -> String {
+    let repo_path = workspace.join(repo_name);
+    let plugin_root = repo_path.join("plugin");
+    let marketplace_dir = repo_path.join(".claude-plugin");
+    let plugin_manifest_dir = plugin_root.join(".claude-plugin");
+
+    fs::create_dir_all(&plugin_manifest_dir).expect("create plugin manifest dir");
+    fs::create_dir_all(&marketplace_dir).expect("create marketplace dir");
+
+    let marketplace_json = format!(
+        r#"{{
+    "name": "{repo_name}",
+    "owner": {{"name": "Test"}},
+    "plugins": [
+        {{
+            "name": "{plugin_name}",
+            "source": "./plugin",
+            "description": "Test plugin for integration failures"
+        }}
+    ]
+}}"#
+    );
+    fs::write(marketplace_dir.join("marketplace.json"), marketplace_json)
+        .expect("write marketplace manifest");
+    fs::write(plugin_manifest_dir.join("plugin.json"), plugin_manifest)
+        .expect("write plugin manifest");
+
+    for (relative, content) in extra_files {
+        let file_path = plugin_root.join(relative);
+        if let Some(parent) = file_path.parent() {
+            fs::create_dir_all(parent).expect("create parent directories for extra file");
+        }
+        fs::write(&file_path, content).expect("write extra file");
+    }
+
+    let repo = Repository::init(&repo_path).expect("init git repo");
+    let mut index = repo.index().expect("load git index");
+    index
+        .add_all(["*"].iter(), IndexAddOption::DEFAULT, None)
+        .expect("stage files");
+    index.write().expect("write index");
+    let tree_id = index.write_tree().expect("write tree");
+    let tree = repo.find_tree(tree_id).expect("find tree");
+    let sig = Signature::now("Test", "test@example.com").expect("signature");
+    repo.commit(Some("HEAD"), &sig, &sig, "initial commit", &tree, &[])
+        .expect("commit repository");
+
+    repo_path.to_str().unwrap().to_string()
+}
+
 #[test]
 fn add_plugin_installs_codanna_cc_plugin() {
     with_temp_workspace(|workspace| {
@@ -68,11 +125,11 @@ fn add_plugin_installs_codanna_cc_plugin() {
         assert_file_exists(workspace, ".claude/commands/codanna-cc-plugin/find.md");
         assert_file_exists(
             workspace,
-            ".claude/plugins/codanna-cc-plugin/scripts/context-provider.js",
+            ".claude/scripts/codanna-cc-plugin/context-provider.js",
         );
         assert_file_exists(
             workspace,
-            ".claude/plugins/codanna-cc-plugin/scripts/formatters/symbol.js",
+            ".claude/scripts/codanna-cc-plugin/formatters/symbol.js",
         );
 
         // Ensure .mcp.json merged entries
@@ -161,7 +218,7 @@ fn remove_plugin_cleans_files_and_lockfile() {
                 .join(".claude/commands/codanna-cc-plugin/ask.md")
                 .exists()
         );
-        assert!(!workspace.join(".claude/plugins/codanna-cc-plugin").exists());
+        assert!(!workspace.join(".claude/scripts/codanna-cc-plugin").exists());
 
         let lockfile = read_json(workspace, ".codanna/plugins/lockfile.json");
         assert!(
@@ -232,5 +289,176 @@ fn list_plugins_reports_state() {
         .expect("install succeeds");
 
         plugins::list_plugins(&settings, true, false).expect("list succeeds after install");
+    });
+}
+
+#[test]
+fn update_plugin_restores_integrity() {
+    with_temp_workspace(|workspace| {
+        let settings = load_workspace_settings(workspace);
+        let marketplace = "https://github.com/bartolli/codanna-cc-plugin.git";
+
+        plugins::add_plugin(
+            &settings,
+            marketplace,
+            "codanna-cc-plugin",
+            None,
+            false,
+            false,
+        )
+        .expect("install succeeds");
+
+        let target_file = workspace.join(".claude/commands/codanna-cc-plugin/ask.md");
+        let original = fs::read_to_string(&target_file).expect("read original command");
+        fs::write(&target_file, "tampered content").expect("tamper file");
+
+        plugins::update_plugin(&settings, "codanna-cc-plugin", None, true, false)
+            .expect("update succeeds");
+
+        let restored = fs::read_to_string(&target_file).expect("read restored command");
+        assert_eq!(restored, original);
+
+        plugins::verify_plugin(&settings, "codanna-cc-plugin", false)
+            .expect("verification passes after update");
+    });
+}
+
+#[test]
+fn update_plugin_dry_run_does_not_modify_workspace() {
+    with_temp_workspace(|workspace| {
+        let settings = load_workspace_settings(workspace);
+        let marketplace = "https://github.com/bartolli/codanna-cc-plugin.git";
+
+        plugins::add_plugin(
+            &settings,
+            marketplace,
+            "codanna-cc-plugin",
+            None,
+            false,
+            false,
+        )
+        .expect("install succeeds");
+
+        let lockfile_before = read_json(workspace, ".codanna/plugins/lockfile.json");
+        let commit_before = lockfile_before["plugins"]["codanna-cc-plugin"]["commit"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        plugins::update_plugin(&settings, "codanna-cc-plugin", None, false, true)
+            .expect("dry-run update succeeds");
+
+        let lockfile_after = read_json(workspace, ".codanna/plugins/lockfile.json");
+        let commit_after = lockfile_after["plugins"]["codanna-cc-plugin"]["commit"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        assert_eq!(commit_before, commit_after);
+    });
+}
+
+#[test]
+fn update_plugin_requires_installation() {
+    with_temp_workspace(|workspace| {
+        let settings = load_workspace_settings(workspace);
+        let err = plugins::update_plugin(&settings, "codanna-cc-plugin", None, false, false)
+            .expect_err("update should fail when plugin missing");
+
+        assert!(matches!(err, PluginError::NotInstalled { .. }));
+    });
+}
+
+#[test]
+fn install_fails_on_invalid_manifest() {
+    with_temp_workspace(|workspace| {
+        let settings = load_workspace_settings(workspace);
+        let repo_url = create_marketplace_repo(
+            workspace,
+            "invalid_manifest_repo",
+            "invalid-plugin",
+            r#"{
+    "name": "invalid-plugin",
+    "version": "0.1.0",
+    "description": "Invalid plugin",
+    "author": { "name": "Test" },
+    "commands": "invalid-path"
+}"#,
+            &[],
+        );
+
+        let err = plugins::add_plugin(&settings, &repo_url, "invalid-plugin", None, false, false)
+            .expect_err("expected invalid manifest error");
+        match err {
+            PluginError::InvalidPluginManifest { .. } => {}
+            other => panic!("unexpected error: {other}"),
+        }
+    });
+}
+
+#[test]
+fn install_fails_on_mcp_conflict() {
+    with_temp_workspace(|workspace| {
+        let settings = load_workspace_settings(workspace);
+        let marketplace = "https://github.com/bartolli/codanna-cc-plugin.git";
+
+        plugins::add_plugin(
+            &settings,
+            marketplace,
+            "codanna-cc-plugin",
+            None,
+            false,
+            false,
+        )
+        .expect("install succeeds");
+
+        let repo_url = create_marketplace_repo(
+            workspace,
+            "conflict_repo",
+            "conflict-plugin",
+            r#"{
+    "name": "conflict-plugin",
+    "version": "0.1.0",
+    "description": "Conflicting MCP server",
+    "author": { "name": "Test" },
+    "commands": "./commands/conflict.md",
+    "mcpServers": "./.mcp.json"
+}"#,
+            &[
+                (
+                    "commands/conflict.md",
+                    "# Conflict Command\n\nThis command should not install.",
+                ),
+                (
+                    ".mcp.json",
+                    r#"{
+    "mcpServers": {
+        "codanna": {
+            "command": "echo",
+            "args": ["conflict"]
+        }
+    }
+}"#,
+                ),
+            ],
+        );
+
+        let err = plugins::add_plugin(&settings, &repo_url, "conflict-plugin", None, false, false)
+            .expect_err("expected MCP conflict");
+        match err {
+            PluginError::McpServerConflict { key } if key == "codanna" => {}
+            other => panic!("unexpected error: {other}"),
+        }
+
+        assert!(
+            !workspace.join(".claude/commands/conflict-plugin").exists(),
+            "conflicting plugin should not leave installed commands"
+        );
+
+        let lockfile = read_json(workspace, ".codanna/plugins/lockfile.json");
+        assert!(
+            lockfile["plugins"].get("conflict-plugin").is_none(),
+            "lockfile should not record failed plugin"
+        );
     });
 }

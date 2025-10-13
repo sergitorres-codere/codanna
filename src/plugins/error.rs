@@ -1,7 +1,7 @@
 //! Error types for plugin management operations
 
-use std::io;
-use std::path::PathBuf;
+use crate::io::exit_code::ExitCode;
+use std::{io, path::PathBuf};
 use thiserror::Error;
 
 /// Errors that can occur during plugin operations
@@ -110,6 +110,35 @@ pub enum PluginError {
 
 /// Result type for plugin operations
 pub type PluginResult<T> = Result<T, PluginError>;
+
+impl PluginError {
+    /// Map plugin errors to CLI exit codes for consistent UX.
+    pub fn exit_code(&self) -> ExitCode {
+        match self {
+            PluginError::MarketplaceNotFound { .. }
+            | PluginError::PluginNotFound { .. }
+            | PluginError::NotInstalled { .. } => ExitCode::NotFound,
+            PluginError::InvalidMarketplaceManifest { .. }
+            | PluginError::InvalidPluginManifest { .. }
+            | PluginError::JsonError(_)
+            | PluginError::MissingArgument(_)
+            | PluginError::LockfileCorrupted => ExitCode::ConfigError,
+            PluginError::FileConflict { .. }
+            | PluginError::IntegrityCheckFailed { .. }
+            | PluginError::HasDependents { .. }
+            | PluginError::McpServerConflict { .. }
+            | PluginError::LocalModifications { .. } => ExitCode::BlockingError,
+            PluginError::PermissionDenied { .. }
+            | PluginError::IoError(_)
+            | PluginError::GitOperationFailed { .. }
+            | PluginError::Git2Error(_)
+            | PluginError::NetworkError(_)
+            | PluginError::InvalidReference { .. } => ExitCode::GeneralError,
+            PluginError::AlreadyInstalled { .. } => ExitCode::UnsupportedOperation,
+            PluginError::DryRunSuccess => ExitCode::Success,
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {

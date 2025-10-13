@@ -434,16 +434,6 @@ enum PluginAction {
         #[arg(short, long)]
         verbose: bool,
     },
-
-    /// Perform a dry run of plugin operations
-    #[command(
-        about = "Preview changes without modifying the system",
-        after_help = "Example:\n  codanna plugin dry-run add https://github.com/user/marketplace plugin-name"
-    )]
-    DryRun {
-        #[command(subcommand)]
-        action: Box<PluginAction>,
-    },
 }
 
 /// Query types for retrieving indexed information.
@@ -2834,73 +2824,12 @@ async fn main() {
                         }
                     }
                 }
-                PluginAction::DryRun { action } => {
-                    // Execute the nested action with dry_run semantics where applicable
-                    match action.as_ref() {
-                        PluginAction::Add {
-                            marketplace,
-                            plugin_name,
-                            r#ref,
-                            force,
-                            ..
-                        } => plugins::add_plugin(
-                            &config,
-                            marketplace,
-                            plugin_name,
-                            r#ref.as_deref(),
-                            *force,
-                            true,
-                        ),
-                        PluginAction::Remove {
-                            plugin_name, force, ..
-                        } => plugins::remove_plugin(&config, plugin_name, *force, true),
-                        PluginAction::Update {
-                            plugin_name,
-                            r#ref,
-                            force,
-                            ..
-                        } => plugins::update_plugin(
-                            &config,
-                            plugin_name,
-                            r#ref.as_deref(),
-                            *force,
-                            true,
-                        ),
-                        PluginAction::List { verbose, json } => {
-                            eprintln!("Dry run note: 'list' is read-only; executing command.");
-                            plugins::list_plugins(&config, *verbose, *json)
-                        }
-                        PluginAction::Verify {
-                            plugin_name,
-                            all,
-                            verbose,
-                        } => {
-                            eprintln!("Dry run note: 'verify' is read-only; executing command.");
-                            if *all {
-                                plugins::verify_all_plugins(&config, *verbose)
-                            } else {
-                                match plugin_name {
-                                    Some(name) => plugins::verify_plugin(&config, name, *verbose),
-                                    None => {
-                                        eprintln!(
-                                            "Error: plugin_name is required when --all is not specified"
-                                        );
-                                        std::process::exit(1);
-                                    }
-                                }
-                            }
-                        }
-                        PluginAction::DryRun { .. } => {
-                            eprintln!("Error: nested dry-run commands are not supported");
-                            std::process::exit(1);
-                        }
-                    }
-                }
             };
 
             if let Err(e) = result {
+                let code: codanna::io::exit_code::ExitCode = e.exit_code();
                 eprintln!("Plugin operation failed: {e}");
-                std::process::exit(1);
+                std::process::exit(i32::from(code));
             }
         }
     }

@@ -13,6 +13,8 @@ pub fn clone_repository(
     target_dir: &Path,
     git_ref: Option<&str>,
 ) -> PluginResult<String> {
+    let is_local = repo_url.starts_with("file://") || Path::new(repo_url).exists();
+
     // Ensure parent directory exists
     if let Some(parent) = target_dir.parent() {
         std::fs::create_dir_all(parent)?;
@@ -29,7 +31,9 @@ pub fn clone_repository(
 
     // Set up fetch options with shallow clone
     let mut fetch_opts = FetchOptions::new();
-    fetch_opts.depth(1); // Shallow clone
+    if !is_local {
+        fetch_opts.depth(1); // Shallow clone
+    }
     fetch_opts.download_tags(AutotagOption::All);
     fetch_opts.remote_callbacks(callbacks);
 
