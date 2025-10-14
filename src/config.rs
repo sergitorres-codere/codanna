@@ -774,6 +774,9 @@ impl Settings {
                 // enabled field in semantic_search - comment already added above
             } else if line.starts_with("model = ") {
                 result.push_str("\n# Model to use for embeddings\n");
+                result.push_str(
+                    "# Note: Changing models requires re-indexing (codanna index --force)\n",
+                );
                 result.push_str("# - AllMiniLML6V2: English-only, 384 dimensions (default)\n");
                 result.push_str("# - MultilingualE5Small: 94 languages including, 384 dimensions (recommended for multilingual)\n");
                 result.push_str(

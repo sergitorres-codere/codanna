@@ -440,8 +440,10 @@ impl SimpleSemanticSearch {
             return Err(SemanticSearchError::DimensionMismatch {
                 expected: metadata.dimension,
                 actual: storage.dimension().get(),
-                suggestion: "Metadata and storage dimension mismatch. The index may be corrupted."
-                    .to_string(),
+                suggestion: format!(
+                    "Index was created with a {}-dimension model. Re-index with: codanna index <path> --force",
+                    storage.dimension().get()
+                ),
             });
         }
 
