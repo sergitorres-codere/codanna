@@ -1589,6 +1589,7 @@ impl DocumentIndex {
                 end_line,
                 end_column: end_col,
             },
+            file_path: None,
             signature: signature.map(|s| s.into()),
             doc_comment: doc_comment.map(|s| s.into()),
             module_path: module_path.map(|s| s.into()),

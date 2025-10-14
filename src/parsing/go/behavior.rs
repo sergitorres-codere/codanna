@@ -791,6 +791,7 @@ mod tests {
                 end_line: 1,
                 end_column: 10,
             },
+            file_path: None,
             doc_comment: None,
             visibility: Visibility::Private, // Will be updated by configure_symbol
             scope_context: None,
@@ -819,6 +820,7 @@ mod tests {
                 end_line: 1,
                 end_column: 10,
             },
+            file_path: None,
             doc_comment: None,
             visibility: Visibility::Public, // Will be updated by configure_symbol
             scope_context: None,

@@ -1593,6 +1593,13 @@ impl SimpleIndexer {
                 if let Some(language_id) = self.file_languages.get(&symbol.file_id) {
                     symbol.language_id = Some(*language_id);
                 }
+                if symbol.file_path.is_none() {
+                    let base_path = self
+                        .get_file_path(symbol.file_id)
+                        .unwrap_or_else(|| "<unknown>".to_string());
+                    let line_number = symbol.range.start_line.saturating_add(1);
+                    symbol.file_path = Some(format!("{base_path}:{line_number}").into());
+                }
                 symbol
             })
             .collect()
@@ -1607,6 +1614,13 @@ impl SimpleIndexer {
                 // Enrich the symbol with language_id from our file_languages cache
                 if let Some(language_id) = self.file_languages.get(&symbol.file_id) {
                     symbol.language_id = Some(*language_id);
+                }
+                if symbol.file_path.is_none() {
+                    let base_path = self
+                        .get_file_path(symbol.file_id)
+                        .unwrap_or_else(|| "<unknown>".to_string());
+                    let line_number = symbol.range.start_line.saturating_add(1);
+                    symbol.file_path = Some(format!("{base_path}:{line_number}").into());
                 }
                 symbol
             })
@@ -1699,12 +1713,20 @@ impl SimpleIndexer {
     ) -> Option<crate::symbol::context::SymbolContext> {
         use crate::symbol::context::{SymbolContext, SymbolRelationships};
 
-        let symbol = self.get_symbol(symbol_id)?;
-        let base_path = self
-            .get_file_path(symbol.file_id)
-            .unwrap_or_else(|| "<unknown>".to_string());
-        // Include line number for actionable paths
-        let file_path = format!("{}:{}", base_path, symbol.range.start_line + 1);
+        let mut symbol = self.get_symbol(symbol_id)?;
+        if symbol.file_path.is_none() {
+            let base_path = self
+                .get_file_path(symbol.file_id)
+                .unwrap_or_else(|| "<unknown>".to_string());
+            let line_number = symbol.range.start_line.saturating_add(1);
+            symbol.file_path = Some(format!("{base_path}:{line_number}").into());
+        }
+        // Use the resolved file path if present, fall back to <unknown>:line
+        let file_path = symbol
+            .file_path
+            .as_deref()
+            .map(str::to_owned)
+            .unwrap_or_else(|| format!("<unknown>:{}", symbol.range.start_line.saturating_add(1)));
 
         let mut relationships = SymbolRelationships::default();
 
@@ -2980,6 +3002,7 @@ mod tests {
             kind: SymbolKind::Trait,
             range: crate::Range::new(0, 0, 0, 0),
             file_id,
+            file_path: None,
             visibility: Visibility::Public,
             doc_comment: None,
             signature: None,
@@ -2994,6 +3017,7 @@ mod tests {
             kind: SymbolKind::Struct,
             range: crate::Range::new(1, 0, 1, 0),
             file_id,
+            file_path: None,
             visibility: Visibility::Public,
             doc_comment: None,
             signature: None,
@@ -3680,6 +3704,7 @@ pub struct Another {
             module_path: None,
             file_id: FileId(1),
             range: crate::Range::new(0, 10, 0, 20),
+            file_path: None,
             visibility: Visibility::Private,
             doc_comment: None,
             scope_context: None,
@@ -3723,6 +3748,7 @@ pub struct Another {
             module_path: None,
             file_id: FileId(1),
             range: crate::Range::new(0, 10, 0, 20),
+            file_path: None,
             visibility: Visibility::Public,
             doc_comment: None,
             scope_context: None,
@@ -3763,6 +3789,7 @@ pub struct Another {
             module_path: None,
             file_id: FileId(1),
             range: crate::Range::new(0, 10, 0, 20),
+            file_path: None,
             visibility: Visibility::Public,
             doc_comment: None,
             scope_context: None,
@@ -3810,6 +3837,7 @@ pub struct Another {
             module_path: None,
             file_id: FileId(1),
             range: crate::Range::new(0, 10, 0, 20),
+            file_path: None,
             visibility: Visibility::Private,
             doc_comment: None,
             scope_context: None,
@@ -3824,6 +3852,7 @@ pub struct Another {
             module_path: None,
             file_id: FileId(2),
             range: crate::Range::new(0, 10, 0, 20),
+            file_path: None,
             visibility: Visibility::Private,
             doc_comment: None,
             scope_context: None,
@@ -3838,6 +3867,7 @@ pub struct Another {
             module_path: None,
             file_id: FileId(3),
             range: crate::Range::new(0, 10, 0, 20),
+            file_path: None,
             visibility: Visibility::Private,
             doc_comment: None,
             scope_context: None,

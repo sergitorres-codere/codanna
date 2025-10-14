@@ -480,10 +480,20 @@ pub fn retrieve_describe(
     } else {
         // Get the first matching symbol for basic info, but aggregate relationships from ALL symbols
         let symbol = symbols[0].clone();
-        let base_path = indexer
-            .get_file_path(symbol.file_id)
-            .unwrap_or_else(|| "unknown".to_string());
-        let file_path = format!("{}:{}", base_path, symbol.range.start_line + 1);
+        let file_path = symbol
+            .file_path
+            .as_deref()
+            .map(str::to_string)
+            .unwrap_or_else(|| {
+                let base_path = indexer
+                    .get_file_path(symbol.file_id)
+                    .unwrap_or_else(|| "unknown".to_string());
+                format!(
+                    "{}:{}",
+                    base_path,
+                    symbol.range.start_line.saturating_add(1)
+                )
+            });
 
         // Build context with relationships using the same working methods as retrieve calls/callers
         let mut context = SymbolContext {
