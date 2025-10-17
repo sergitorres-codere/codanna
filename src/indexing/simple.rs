@@ -1728,12 +1728,7 @@ impl SimpleIndexer {
             let line_number = symbol.range.start_line.saturating_add(1);
             symbol.file_path = Some(format!("{base_path}:{line_number}").into());
         }
-        // Use the resolved file path if present, fall back to <unknown>:line
-        let file_path = symbol
-            .file_path
-            .as_deref()
-            .map(str::to_owned)
-            .unwrap_or_else(|| format!("<unknown>:{}", symbol.range.start_line.saturating_add(1)));
+        let file_path = SymbolContext::symbol_location(&symbol);
 
         let mut relationships = SymbolRelationships::default();
 

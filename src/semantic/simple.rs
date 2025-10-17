@@ -131,8 +131,6 @@ impl SimpleSemanticSearch {
             .map_err(|e| SemanticSearchError::EmbeddingError(e.to_string()))?;
         let dimensions = test_embedding.into_iter().next().unwrap().len();
 
-        eprintln!("Semantic search enabled (model: {model_name}, threshold: 0.6)");
-
         // Create initial metadata
         let metadata = crate::semantic::SemanticMetadata::new(
             model_name.clone(),
@@ -419,8 +417,6 @@ impl SimpleSemanticSearch {
 
         // Load metadata first
         let metadata = SemanticMetadata::load(path)?;
-
-        eprintln!("Loading semantic index with model: {}", metadata.model_name);
 
         // Parse model name from metadata
         let model = crate::vector::parse_embedding_model(&metadata.model_name)

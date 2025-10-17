@@ -65,12 +65,12 @@ Analyze the user query and improve it for code search:
 
 **YourOptimizedQuery**: _{Write and memorize your improved query here, then use it below in a context that is best for the task}_
 
-### New Bash tools for code exploration at yoour disposal now
+### New Bash tools for code exploration at your disposal now
 
 Use the Bash tool below to explore the codebase.
 
 **Workflow:**
-1. Execute: `node .claude/scripts/context-provider.js find "$YourOptimizedQuery" --limit=5`
+1. Execute: `node .claude/scripts/codanna/context-provider.js find "$YourOptimizedQuery" --limit=5`
 2. Analyze the results with their relevance scores
 3. **To see actual implementation** of interesting results:
    - Use the line range from the Location field to read just the relevant code
@@ -79,8 +79,8 @@ Use the Bash tool below to explore the codebase.
    - This shows the actual code implementation, not just the signature
 4. **When relationships are shown** (called_by, calls, defines, implements):
    - If a relationship looks relevant to answering the query, investigate it
-   - Execute: `node .claude/scripts/context-provider.js symbol <relationship_symbol_name>`
-   - Example: If you see "Called by: `initialize_registry`", run: `node .claude/scripts/context-provider.js symbol initialize_registry`
+   - Execute: `node .claude/scripts/codanna/context-provider.js symbol <relationship_symbol_name>`
+   - Example: If you see "Called by: `initialize_registry`", run: `node .claude/scripts/codanna/context-provider.js symbol initialize_registry`
 5. Build a complete picture by following 1-2 key relationships and reading relevant code sections
 6. Present findings to the user with context from search results, relationships, and actual code snippets
 

@@ -6,7 +6,7 @@ This directory provides tools for exploring AST structures using the official tr
 
 1. **Install a grammar** (one-time setup per language):
    ```bash
-   ./scripts/setup.sh typescript
+   ./contributing/tree-sitter/scripts/setup.sh typescript
    ```
 
 2. **Parse files and explore AST**:
@@ -15,13 +15,13 @@ This directory provides tools for exploring AST structures using the official tr
    tree-sitter parse examples/typescript/comprehensive.ts
 
    # Or use our helper script
-   ./scripts/explore-ast.sh examples/typescript/comprehensive.ts
+   ./contributing/tree-sitter/scripts/explore-ast.sh examples/typescript/comprehensive.ts
    ```
 
 3. **Compare with our parser**:
    ```bash
    # From project root
-   ./scripts/compare-nodes.sh typescript
+   ./contributing/tree-sitter/scripts/compare-nodes.sh typescript
    ```
 
 ## Setup Script
@@ -30,12 +30,12 @@ The setup script configures tree-sitter and installs grammars on-demand:
 
 ```bash
 # Show installed grammars
-./scripts/setup.sh
+./contributing/tree-sitter/scripts/setup.sh
 
 # Install specific language grammar
-./scripts/setup.sh python
-./scripts/setup.sh rust
-./scripts/setup.sh go
+./contributing/tree-sitter/scripts/setup.sh python
+./contributing/tree-sitter/scripts/setup.sh rust
+./contributing/tree-sitter/scripts/setup.sh go
 ```
 
 Supported languages: typescript, python, rust, go, php, c, cpp
@@ -54,23 +54,23 @@ All scripts are located in `contributing/tree-sitter/scripts/`:
 Parse files with codanna and/or tree-sitter:
 ```bash
 # Default: Use codanna parse (named nodes only)
-./scripts/explore-ast.sh examples/rust/main.rs
+./contributing/tree-sitter/scripts/explore-ast.sh examples/rust/main.rs
 
 # Use tree-sitter
-./scripts/explore-ast.sh examples/rust/main.rs tree-sitter
+./contributing/tree-sitter/scripts/explore-ast.sh examples/rust/main.rs tree-sitter
 
 # Compare both parsers
-./scripts/explore-ast.sh examples/rust/main.rs both
+./contributing/tree-sitter/scripts/explore-ast.sh examples/rust/main.rs both
 ```
 
 ### compare-nodes.sh
 **Two modes:**
-- **Language mode**: `./scripts/compare-nodes.sh typescript`
+- **Language mode**: `./contributing/tree-sitter/scripts/compare-nodes.sh typescript`
   - Compares comprehensive.* files with our parser
   - Triggers audit report generation
   - Shows differences between parsers
 
-- **File mode**: `./scripts/compare-nodes.sh path/to/file.ts`
+- **File mode**: `./contributing/tree-sitter/scripts/compare-nodes.sh path/to/file.ts`
   - Compares AST nodes between codanna and tree-sitter
   - Saves detailed output to `{filename}_comparison.log`
   - Shows matching statistics and differences
