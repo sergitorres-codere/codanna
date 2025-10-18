@@ -101,6 +101,7 @@ fn create_custom_help() -> String {
     help.push_str("  mcp         Execute MCP tools directly\n");
     help.push_str("  benchmark   Benchmark parser performance\n");
     help.push_str("  parse       Output AST nodes in JSONL format\n");
+    help.push_str("  plugin      Manage Claude Code plugins\n");
     help.push_str("  help        Print this message or the help of the given subcommand(s)\n\n");
 
     help.push_str("See 'codanna help <command>' for more information on a specific command.\n\n");
@@ -325,7 +326,7 @@ enum Commands {
     /// Manage Claude Code plugins
     #[command(
         about = "Install, update, and manage Claude Code plugins from marketplaces",
-        long_about = "Manage Claude Code plugins by installing from Git-based marketplaces.\n\nPlugins extend Claude Code with custom commands, agents, hooks, and MCP servers.",
+        long_about = "Manage Claude Code plugins by installing from Git-based marketplaces.\n\nPlugins extend Claude Code with custom commands, agents, hooks, and MCP servers.\n\nNote: Plugins are installed and managed by codanna per-project in .claude/plugins, not managed by claude code CLI directly.",
         after_help = "Examples:\n  codanna plugin add https://github.com/user/marketplace plugin-name\n  codanna plugin remove plugin-name\n  codanna plugin update plugin-name --ref v2.0\n  codanna plugin list\n  codanna plugin verify plugin-name"
     )]
     Plugin {
