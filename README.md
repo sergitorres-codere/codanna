@@ -451,7 +451,6 @@ Available tools when using the MCP server. All tools support `--json` flag for s
 | `find_callers` | Show functions that call a given function | `codanna mcp find_callers init` |
 | `analyze_impact` | Analyze the impact radius of symbol changes | `codanna mcp analyze_impact Parser --json` |
 | `get_index_info` | Get index statistics and metadata | `codanna mcp get_index_info --json` |
-| `get_symbol_details` | Get detailed info for a specific symbol | `codanna mcp get_symbol_details symbol_name:Parser file_path:"src/main.rs"` |
 
 #### Complex Tools (Key:Value Arguments)
 | Tool | Description | Example |
@@ -459,6 +458,7 @@ Available tools when using the MCP server. All tools support `--json` flag for s
 | `search_symbols` | Search symbols with full-text fuzzy matching | `codanna mcp search_symbols query:parse kind:function limit:10` |
 | `semantic_search_docs` | Search using natural language queries | `codanna mcp semantic_search_docs query:"error handling" limit:5` |
 | `semantic_search_with_context` | Search with enhanced context | `codanna mcp semantic_search_with_context query:"parse files" threshold:0.7` |
+| `get_symbol_details` | Get detailed information about a specific symbol (use after search_symbols with summary_only=true) | `codanna mcp get_symbol_details symbol_name:Parser file_path:"src/main.rs"` |
 
 #### Language Filtering (Mixed Codebases)
 Semantic search tools support language filtering to reduce noise in mixed-language projects:
@@ -494,16 +494,17 @@ Use summary mode for:
 Then use `find_symbol` or full search for specific symbols you want to explore.
 
 #### Parameters Reference
+
 | Tool | Parameters |
 |------|------------|
 | `find_symbol` | `name` (required), `lang` |
-| `search_symbols` | `query`, `limit`, `kind`, `module`, `lang`, `offset`, `summary_only` |
-| `semantic_search_docs` | `query`, `limit`, `threshold`, `lang` |
-| `semantic_search_with_context` | `query`, `limit`, `threshold`, `lang` |
-| `get_calls` | `function_name` |
-| `find_callers` | `function_name` |
-| `analyze_impact` | `symbol_name`, `max_depth` |
+| `get_calls` | `function_name` (required) |
+| `find_callers` | `function_name` (required) |
+| `analyze_impact` | `symbol_name` (required), `max_depth` |
 | `get_index_info` | None |
+| `search_symbols` | `query` (required), `limit`, `kind`, `module`, `lang`, `file_pattern`, `exclude_pattern`, `offset`, `summary_only` |
+| `semantic_search_docs` | `query` (required), `limit`, `threshold`, `lang` |
+| `semantic_search_with_context` | `query` (required), `limit`, `threshold`, `lang` |
 | `get_symbol_details` | `symbol_name` (required), `file_path`, `module` |
 
 
