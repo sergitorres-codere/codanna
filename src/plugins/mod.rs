@@ -93,12 +93,13 @@ pub fn add_plugin(
 
     let mut lockfile = load_lockfile(&paths)?;
     let previous_entry = lockfile.get_plugin(plugin_name).cloned();
-    if previous_entry.is_some() && !force {
-        let existing = previous_entry.unwrap();
-        return Err(PluginError::AlreadyInstalled {
-            name: plugin_name.to_string(),
-            version: existing.version,
-        });
+    if let Some(ref existing) = previous_entry {
+        if !force {
+            return Err(PluginError::AlreadyInstalled {
+                name: plugin_name.to_string(),
+                version: existing.version.clone(),
+            });
+        }
     }
 
     let plan = prepare_plugin(
