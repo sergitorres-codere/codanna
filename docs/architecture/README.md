@@ -1,3 +1,7 @@
+[Documentation](../README.md) / **Architecture**
+
+---
+
 # Architecture
 
 High-performance code intelligence system in Rust. Indexes code, tracks relationships, serves via MCP.
@@ -56,3 +60,5 @@ codanna benchmark python       # Test specific language
 - Learn about [User Guide](../user-guide/) for usage
 - Explore [Advanced](../advanced/) features
 - Read [Contributing](../contributing/) to add features
+
+[Back to Documentation](../README.md)

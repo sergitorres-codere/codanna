@@ -1,3 +1,7 @@
+[Documentation](../README.md) / **Advanced**
+
+---
+
 # Advanced
 
 ## Nerds Section
@@ -52,3 +56,5 @@ codanna mcp find_callers walk_and_stream --json | jq -r '.system_message'
 - Explore [Architecture](../architecture/) internals
 - Read about [User Guide](../user-guide/) for basic usage
 - Check [Reference](../reference/) for specifications
+
+[Back to Documentation](../README.md)

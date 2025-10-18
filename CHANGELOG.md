@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.3] - 2025-10-18
+
+### Added
+- **Plugin Management System**: Install, remove, and manage plugins
+  - Transactional installs with automatic rollback on failure
+  - Smart update detection skips I/O when no changes needed
+  - Marketplace resolution for external plugin sources
+- **Documentation Hub**: Centralized navigation at `docs/README.md`
+  - Organized sections: Getting Started, User Guide, Integrations, Architecture, Advanced, Contributing, Plugins, Reference
+  - Navigation footers across all documentation pages
+
+### Changed
+- Symbol display now includes file paths with line numbers for precise navigation
+- Enhanced relationship formatting for better readability
+- Improved plugins documentation with marketplace and MCP setup details
+
+### Fixed
+- TypeScript call tracking from object property functions
+- Documentation cross-references updated for new structure
+
 ## [0.5.26] - 2025-10-09
 
 ### Added

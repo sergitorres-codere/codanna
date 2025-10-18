@@ -1,3 +1,7 @@
+[Documentation](../README.md) / **Reference**
+
+---
+
 # Reference
 
 Quick reference documentation for Codanna.
@@ -62,3 +66,5 @@ Language filtering eliminates duplicate results when similar documentation exist
 - Check the [User Guide](../user-guide/) for usage
 - Explore [Advanced](../advanced/) features
 - See [Architecture](../architecture/) for technical details
+
+[Back to Documentation](../README.md)

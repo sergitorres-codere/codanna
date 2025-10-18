@@ -1,3 +1,7 @@
+[Documentation](../README.md) / **Getting Started**
+
+---
+
 # Getting Started
 
 Welcome to Codanna! Start here for the basics.
@@ -29,3 +33,5 @@ codanna mcp semantic_search_docs query:"where do we resolve symbol references" l
 - [User Guide](../user-guide/) - Complete CLI reference
 - [Integrations](../integrations/) - Connect to Claude, Codex, and other clients
 - [Advanced](../advanced/) - Unix philosophy and power features
+
+[Back to Documentation](../README.md)

@@ -1,10 +1,27 @@
-## Plugins
+[Documentation](../README.md) / **Plugins**
 
-Codanna plugins extend Claude Code's plugin infrastructure with project-scoped storage. Unlike Claude Code's global plugins, codanna
-plugins live in your project's .claude/ directory because every project has unique workflows and context management needs.
+---
 
-Plugins are distributed via Git repositories with transactional installation, integrity verification, and automatic rollback
-protection.
+# Plugins
+
+Codanna plugins are project-scoped. They install to `.claude/` in your project directory, not globally. This lets each project have different plugin versions.
+
+## codanna-cc Plugin
+
+Available via Claude Code's `/plugin` command or codanna's CLI. Pick `codanna-cc` plugin.
+
+**Via Claude Code:**
+```bash
+/plugin  # Browse and install codanna-cc
+```
+
+**Via Codanna CLI:**
+```bash
+codanna plugin add https://github.com/bartolli/codanna-plugins.git codanna
+codanna plugin add https://github.com/bartolli/codanna-plugins.git codanna --ref v1.2.0  # Specific version
+```
+
+The CLI method gives you version control - install different tags per project.
 
 ## Quick Start
 
@@ -360,3 +377,7 @@ Users can then install with:
 ```bash
 codanna plugin add https://github.com/you/my-plugin.git my-plugin
 ```
+
+---
+
+[Back to Documentation](../README.md)

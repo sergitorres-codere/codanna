@@ -1,3 +1,7 @@
+[Documentation](../README.md) / **User Guide**
+
+---
+
 # User Guide
 
 Complete documentation for using Codanna effectively.
@@ -38,3 +42,5 @@ Complete documentation for using Codanna effectively.
 - Set up [Integrations](../integrations/) with your AI assistant
 - Explore [Advanced](../advanced/) Unix-native features
 - Learn about the [Architecture](../architecture/) under the hood
+
+[Back to Documentation](../README.md)

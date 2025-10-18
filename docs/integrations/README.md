@@ -1,3 +1,7 @@
+[Documentation](../README.md) / **Integrations**
+
+---
+
 # Integrations
 
 Drop codanna in as an MCP server, point the agent at it, and watch it stop hand-waving and start answering with receipts.
@@ -65,3 +69,5 @@ Start with semantic search, then narrow with specific queries.
 - Configure [Agent Guidance](agent-guidance.md) for optimal steering
 - Learn about [MCP Tools](../user-guide/mcp-tools.md) in detail
 - Explore [Advanced](../advanced/) features
+
+[Back to Documentation](../README.md)

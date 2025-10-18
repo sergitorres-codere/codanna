@@ -1,3 +1,7 @@
+[Documentation](../README.md) / **Contributing**
+
+---
+
 # Contributing
 
 Contributions welcome! This section covers development setup and guidelines.
@@ -51,3 +55,5 @@ When adding new language support:
 - Read the main [CONTRIBUTING.md](../../CONTRIBUTING.md)
 - Explore the [Architecture](../architecture/) to understand internals
 - Check [User Guide](../user-guide/) to understand usage patterns
+
+[Back to Documentation](../README.md)
