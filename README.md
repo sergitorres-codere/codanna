@@ -133,7 +133,7 @@ codanna mcp semantic_search_docs query:"where do we resolve symbol references  0
 
 ## How It Works
 
-1. **Parse fast** - Tree-sitter AST parsing (same as GitHub code navigator) for Rust, Python, TypeScript, Go and PHP (more on deck)
+1. **Parse fast** - Tree-sitter AST parsing (same as GitHub code navigator) for Rust, Python, TypeScript, Go, PHP, C#, C, and C++ (more on deck)
 2. **Extract real stuff** -  functions, traits, type relationships, call graphs
 3. **Embed** - semantic vectors built from your doc comments
 4. **Index** - Tantivy + memory-mapped symbol cache for <10ms lookups
@@ -543,7 +543,8 @@ Parser benchmarks on a 750-symbol test file:
 | **Python** | 75,047 symbols/sec | 7.5x faster ✓ | Production |
 | **TypeScript** | 82,156 symbols/sec | 8.2x faster ✓ | Production |
 | **PHP** | 68,432 symbols/sec | 6.8x faster ✓ | Production |
-| **Go** | 74,655 symbols/second  | 7.5x faster ✓ | Production |
+| **Go** | 74,655 symbols/sec | 7.5x faster ✓ | Production |
+| **C#** | 31,590 symbols/sec | 3.2x faster ✓ | Production |
 
 Run performance benchmarks:
 ```bash
@@ -594,7 +595,7 @@ sudo dnf install pkgconfig openssl-devel
 
 ## Current Limitations
 
-- Supports Rust, Python, TypeScript, Go, PHP, C, and C++ (more language support coming)
+- Supports Rust, Python, TypeScript, Go, PHP, C#, C, and C++ (more language support coming)
 - Semantic search requires English documentation/comments
 - Windows support is experimental
 
