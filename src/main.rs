@@ -10,8 +10,7 @@ use clap::{
 use codanna::FileId;
 use codanna::init;
 use codanna::parsing::{
-    CSharpParser, GoParser, LanguageParser, PhpParser, PythonParser, RustParser,
-    TypeScriptParser,
+    CSharpParser, GoParser, LanguageParser, PhpParser, PythonParser, RustParser, TypeScriptParser,
 };
 use codanna::project_resolver::{
     providers::typescript::TypeScriptProvider, registry::SimpleProviderRegistry,
