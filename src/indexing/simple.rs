@@ -2211,6 +2211,10 @@ impl SimpleIndexer {
             self.resolve_cross_file_relationships()?;
         }
 
+        // Stop timing and update final stats
+        stats.stop_timing();
+        stats.symbols_found = self.symbol_count();
+
         Ok(stats)
     }
 
