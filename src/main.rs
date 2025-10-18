@@ -8,6 +8,7 @@ use clap::{
     builder::styling::{AnsiColor, Effects, Styles},
 };
 use codanna::FileId;
+use codanna::init;
 use codanna::parsing::{
     GoParser, LanguageParser, PhpParser, PythonParser, RustParser, TypeScriptParser,
 };
@@ -160,6 +161,14 @@ enum Commands {
         /// Force overwrite existing configuration
         #[arg(short, long)]
         force: bool,
+
+        /// Copy embedded .claude configuration to project
+        #[arg(long)]
+        copy_claude: bool,
+
+        /// Copy .claude configuration from custom source directory
+        #[arg(long, value_name = "PATH", conflicts_with = "copy_claude")]
+        copy_claude_from: Option<PathBuf>,
     },
 
     /// Index source files or directories
@@ -609,7 +618,11 @@ async fn main() {
     };
 
     match &cli.command {
-        Commands::Init { force } => {
+        Commands::Init {
+            force,
+            copy_claude,
+            copy_claude_from,
+        } => {
             let config_path = PathBuf::from(".codanna/settings.toml");
 
             if config_path.exists() && !force {
@@ -631,6 +644,25 @@ async fn main() {
                     std::process::exit(1);
                 }
             }
+
+            // Copy Claude configuration if requested
+            if *copy_claude || copy_claude_from.is_some() {
+                println!(); // Add blank line for separation
+                match init::claude_config::copy_claude_config(
+                    *copy_claude,
+                    copy_claude_from.as_deref(),
+                    *force,
+                ) {
+                    Ok(()) => {
+                        // Success message already printed by copy_claude_config
+                    }
+                    Err(e) => {
+                        eprintln!("Error copying .claude configuration: {e}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+
             return;
         }
 

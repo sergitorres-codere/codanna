@@ -50,17 +50,40 @@ Codanna cuts the noise:
 # Install
 cargo install codanna --all-features
 
-# setup
+# Initialize with embedded Claude templates (recommended)
+codanna init --copy-claude
+
+# Or standard init (creates only settings.toml)
 codanna init
 
 # See what would be indexed (dry run, optional)
 codanna index src --dry-run
 
-# index your code
+# Index your code
 codanna index src --progress
 
-# ask real questions
+# Ask real questions
 codanna mcp semantic_search_docs query:"where do we resolve symbol references" limit:3
+```
+
+### Claude Configuration Templates
+
+When you run `codanna init --copy-claude`, it copies optimized Claude configuration to `.codanna/`:
+
+- **Agents** (`agents/codanna-navigator.md`) - Specialized agent for code navigation
+- **Commands** (`commands/find.md`, `commands/deps.md`) - Slash commands for smart searches
+- **Prompts** (`prompts/mcp-workflow.md`) - Reusable workflow templates
+- **Hooks** (`hooks/hooks-config.yml`) - Event hooks configuration
+
+These templates are embedded in the binary, so they're always available and version-matched to your installed codanna version.
+
+**Custom templates:**
+```bash
+# Use your own template directory
+codanna init --copy-claude-from /path/to/your/templates
+
+# Force overwrite existing files
+codanna init --copy-claude --force
 ```
 
 ## How Accurate and Fast is Codanna?
@@ -405,6 +428,8 @@ This encourages better documentation → better AI understanding → more motiva
 | Command | Description | Example |
 |---------|-------------|---------|
 | `codanna init` | Set up .codanna directory with default configuration | `codanna init --force` |
+| `codanna init --copy-claude` | Initialize with embedded Claude configuration templates (agents, commands, prompts, hooks) | `codanna init --copy-claude` |
+| `codanna init --copy-claude-from <PATH>` | Initialize with custom Claude templates from specified directory | `codanna init --copy-claude-from ../my-templates` |
 | `codanna index <PATH>` | Build searchable index from your codebase | `codanna index src --progress` |
 | `codanna config` | Display active settings | `codanna config` |
 | `codanna serve` | Start MCP server for AI assistants | `codanna serve --watch` |
