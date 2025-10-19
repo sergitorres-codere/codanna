@@ -9,7 +9,9 @@ How Codanna generates and uses semantic embeddings for code search.
 | `AllMiniLML6V2` | 384 | English | Default, fast, English codebases |
 | `MultilingualE5Small` | 384 | 94 | Multilingual, same performance |
 | `MultilingualE5Base` | 768 | 94 | Better quality, slower |
-| `MultilingualE5Large` | 1024 | 94 | Best quality, slowest |
+| `ParaphraseMLMiniLML12V2` | 384 | Multilingual | Paraphrase and semantic similarity tasks |
+
+**Note:** Many other models are supported by the underlying fastembed library. See [Configuration Guide](../user-guide/configuration.md) for recommended models.
 
 ## Model Selection
 
@@ -150,11 +152,11 @@ Vectors are organized using Inverted File with Flat vectors for fast search:
 - **Quality**: Better accuracy
 - **Use**: Quality-critical applications
 
-### MultilingualE5Large
-- **Size**: ~560MB
-- **Speed**: Slowest
-- **Quality**: Best accuracy
-- **Use**: Maximum quality needs
+### ParaphraseMLMiniLML12V2
+- **Size**: ~120MB
+- **Speed**: Similar to E5Small
+- **Quality**: Optimized for paraphrase detection
+- **Use**: Semantic similarity and paraphrase tasks
 
 ## Performance Characteristics
 
@@ -222,8 +224,8 @@ For 100,000 symbols:
 **MultilingualE5Base (768-dim):**
 - 100k × 768 floats × 4 bytes = 307.2 MB
 
-**MultilingualE5Large (1024-dim):**
-- 100k × 1024 floats × 4 bytes = 409.6 MB
+**ParaphraseMLMiniLML12V2 (384-dim):**
+- 100k × 384 floats × 4 bytes = 153.6 MB
 
 ## See Also
 

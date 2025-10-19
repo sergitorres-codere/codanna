@@ -21,11 +21,10 @@ Codanna configuration lives in `.codanna/settings.toml`.
 [semantic]
 # Model to use for embeddings
 # - AllMiniLML6V2: English-only, 384 dimensions (default)
-# - MultilingualE5Small: 94 languages including, 384 dimensions (recommended for multilingual)
+# - MultilingualE5Small: 94 languages, 384 dimensions (recommended for multilingual)
 # - MultilingualE5Base: 94 languages, 768 dimensions (better quality)
-# - MultilingualE5Large: 94 languages, 1024 dimensions (best quality)
-# - BGESmallZHV15: Chinese-specialized, 512 dimensions
-# - See documentation for full list of available models
+# - ParaphraseMLMiniLML12V2: Multilingual, 384 dimensions (paraphrase-optimized)
+# - See architecture/embedding-model.md for full details
 model = "AllMiniLML6V2"
 ```
 
@@ -66,8 +65,9 @@ Coming soon: Python (`pyproject.toml`), Go (`go.mod`), and other languages with 
 | Model | Description | Use Case |
 |-------|-------------|----------|
 | `AllMiniLML6V2` | Fast, English-optimized (default) | English codebases |
-| `MultilingualE5Small` | Better for non-English | Mixed language teams |
-| `ParaphraseMultilingualMiniLML12V2` | Best multilingual | International projects |
+| `MultilingualE5Small` | Multilingual, same speed as AllMiniLM | Mixed language teams |
+| `MultilingualE5Base` | Better quality, larger size | Quality-critical multilingual projects |
+| `ParaphraseMLMiniLML12V2` | Paraphrase-optimized multilingual | Semantic similarity tasks |
 
 ### Switching Models
 
