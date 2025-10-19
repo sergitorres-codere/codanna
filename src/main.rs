@@ -9,7 +9,7 @@ use clap::{
 };
 use codanna::FileId;
 use codanna::parsing::{
-    GoParser, LanguageParser, PhpParser, PythonParser, RustParser, TypeScriptParser,
+    CSharpParser, GoParser, LanguageParser, PhpParser, PythonParser, RustParser, TypeScriptParser,
 };
 use codanna::project_resolver::{
     providers::typescript::TypeScriptProvider, registry::SimpleProviderRegistry,
@@ -295,7 +295,7 @@ enum Commands {
     /// Benchmark parser performance
     #[command(about = "Benchmark parser performance")]
     Benchmark {
-        /// Language to benchmark (rust, python, all)
+        /// Language to benchmark (rust, python, php, typescript, go, csharp, all)
         #[arg(default_value = "all")]
         language: String,
 
@@ -2882,6 +2882,7 @@ fn run_benchmark_command(language: &str, custom_file: Option<PathBuf>) {
         "php" => benchmark_php_parser(custom_file),
         "typescript" | "ts" => benchmark_typescript_parser(custom_file),
         "go" => benchmark_go_parser(custom_file),
+        "csharp" | "c#" | "cs" => benchmark_csharp_parser(custom_file),
         "all" => {
             benchmark_rust_parser(None);
             println!();
@@ -2892,10 +2893,12 @@ fn run_benchmark_command(language: &str, custom_file: Option<PathBuf>) {
             benchmark_typescript_parser(None);
             println!();
             benchmark_go_parser(None);
+            println!();
+            benchmark_csharp_parser(None);
         }
         _ => {
             eprintln!("Unknown language: {language}");
-            eprintln!("Available languages: rust, python, php, typescript, go, all");
+            eprintln!("Available languages: rust, python, php, typescript, go, csharp, all");
             std::process::exit(1);
         }
     }
@@ -2999,6 +3002,22 @@ fn benchmark_go_parser(custom_file: Option<PathBuf>) {
 
     let mut parser = GoParser::new().expect("Failed to create Go parser");
     benchmark_parser("Go", &mut parser, &code, file_path);
+}
+
+fn benchmark_csharp_parser(custom_file: Option<PathBuf>) {
+    let (code, file_path) = if let Some(path) = custom_file {
+        let content = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+            eprintln!("Failed to read {}: {e}", path.display());
+            std::process::exit(1);
+        });
+        (content, Some(path))
+    } else {
+        // Generate benchmark code
+        (generate_csharp_benchmark_code(), None)
+    };
+
+    let mut parser = CSharpParser::new().expect("Failed to create C# parser");
+    benchmark_parser("C#", &mut parser, &code, file_path);
 }
 
 fn benchmark_parser(
@@ -3402,6 +3421,111 @@ func main() {
     ok := Function_0(1, "x")
     if ok {
         fmt.Println("ok")
+    }
+}
+"#,
+    );
+
+    code
+}
+
+fn generate_csharp_benchmark_code() -> String {
+    let mut code = String::from(
+        "// C# benchmark file\n\nusing System;\nusing System.Collections.Generic;\nusing System.Linq;\n\nnamespace BenchmarkNamespace\n{\n",
+    );
+
+    // Generate 500 static classes with methods
+    for i in 0..500 {
+        code.push_str(&format!(
+            r#"    /// <summary>
+    /// Static class {i} documentation
+    /// </summary>
+    public static class StaticClass{i}
+    {{
+        public static int Method{i}(int param)
+        {{
+            return param * 2;
+        }}
+
+        public static string Process{i}(string input)
+        {{
+            return input.ToUpper();
+        }}
+    }}
+
+"#
+        ));
+    }
+
+    // Generate 50 classes with properties/fields/constructors
+    for i in 0..50 {
+        code.push_str(&format!(
+            r#"    /// <summary>
+    /// Class {i} documentation
+    /// </summary>
+    public class Class{i}
+    {{
+        private int _value;
+
+        public int Value {{ get; set; }}
+        public string Name {{ get; set; }}
+
+        public Class{i}(int value, string name)
+        {{
+            _value = value;
+            Value = value;
+            Name = name;
+        }}
+
+        public int Calculate()
+        {{
+            return _value * 2;
+        }}
+
+        public void Process(string input)
+        {{
+            Console.WriteLine(input);
+        }}
+    }}
+
+"#
+        ));
+    }
+
+    // Generate 25 interfaces
+    for i in 0..25 {
+        code.push_str(&format!(
+            r#"    /// <summary>
+    /// Interface {i} documentation
+    /// </summary>
+    public interface IInterface{i}
+    {{
+        void Process(string input);
+        int Calculate();
+    }}
+
+"#
+        ));
+    }
+
+    // Program class with Main method
+    code.push_str(
+        r#"    /// <summary>
+    /// Entry point class
+    /// </summary>
+    class Program
+    {
+        static void Main(string[] args)
+        {
+            var obj = new Class0(42, "test");
+            var result = obj.Calculate();
+            obj.Process("hello");
+
+            var staticResult = StaticClass0.Method0(10);
+            var processed = StaticClass0.Process0("world");
+
+            Console.WriteLine($"Result: {result}, Static: {staticResult}, Processed: {processed}");
+        }
     }
 }
 "#,

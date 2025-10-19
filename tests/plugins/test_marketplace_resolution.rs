@@ -146,6 +146,13 @@ fn install_supports_git_source_object() {
 
         let plugin_repo = create_external_plugin_repo(workspace, "external-source");
 
+        // Convert to proper file:// URL (cross-platform)
+        // file:// URLs for absolute paths require 3 slashes on all platforms
+        // Windows: C:/path -> file:///C:/path
+        // Unix:    /path   -> file:///path
+        let plugin_path = plugin_repo.display().to_string().replace('\\', "/");
+        let file_url = format!("file:///{}", plugin_path.trim_start_matches('/'));
+
         let marketplace_json = format!(
             r#"{{
   "name": "catalog",
@@ -155,13 +162,12 @@ fn install_supports_git_source_object() {
       "name": "external-plugin",
       "source": {{
         "source": "git",
-        "url": "file://{}"
+        "url": "{file_url}"
       }},
       "description": "External plugin source"
     }}
   ]
-}}"#,
-            plugin_repo.display()
+}}"#
         );
 
         write_file(&marketplace_dir.join("marketplace.json"), &marketplace_json);
@@ -190,6 +196,13 @@ fn update_external_plugin_detects_up_to_date() {
 
         let plugin_repo = create_external_plugin_repo(workspace, "external-update-source");
 
+        // Convert to proper file:// URL (cross-platform)
+        // file:// URLs for absolute paths require 3 slashes on all platforms
+        // Windows: C:/path -> file:///C:/path
+        // Unix:    /path   -> file:///path
+        let plugin_path = plugin_repo.display().to_string().replace('\\', "/");
+        let file_url = format!("file:///{}", plugin_path.trim_start_matches('/'));
+
         let marketplace_json = format!(
             r#"{{
   "name": "catalog",
@@ -199,12 +212,11 @@ fn update_external_plugin_detects_up_to_date() {
       "name": "external-plugin",
       "source": {{
         "source": "git",
-        "url": "file://{}"
+        "url": "{file_url}"
       }}
     }}
   ]
-}}"#,
-            plugin_repo.display()
+}}"#
         );
 
         write_file(&marketplace_dir.join("marketplace.json"), &marketplace_json);

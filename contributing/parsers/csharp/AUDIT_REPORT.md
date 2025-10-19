@@ -1,11 +1,11 @@
 # C# Parser Coverage Report
 
-*Generated: 2025-10-08 21:30:53 UTC*
+*Generated: 2025-10-19 03:59:38 UTC*
 
 ## Summary
-- Nodes in file: 108
-- Nodes handled by parser: 108
-- Symbol kinds extracted: 7
+- Nodes in file: 142
+- Nodes handled by parser: 142
+- Symbol kinds extracted: 9
 
 ## Coverage Table
 
@@ -13,25 +13,25 @@
 |-----------|-----|--------|
 | class_declaration | 231 | ✅ implemented |
 | interface_declaration | 236 | ✅ implemented |
-| struct_declaration | - | ❌ not found |
-| record_declaration | - | ❌ not found |
+| struct_declaration | 232 | ✅ implemented |
+| record_declaration | 238 | ✅ implemented |
 | enum_declaration | 233 | ✅ implemented |
 | enum_member_declaration | 235 | ✅ implemented |
-| delegate_declaration | - | ❌ not found |
+| delegate_declaration | 237 | ✅ implemented |
 | namespace_declaration | 228 | ✅ implemented |
 | file_scoped_namespace_declaration | - | ❌ not found |
 | method_declaration | 255 | ✅ implemented |
 | constructor_declaration | 253 | ✅ implemented |
-| destructor_declaration | - | ❌ not found |
+| destructor_declaration | 254 | ✅ implemented |
 | property_declaration | 262 | ✅ implemented |
-| indexer_declaration | - | ❌ not found |
-| event_declaration | - | ❌ not found |
+| indexer_declaration | 260 | ✅ implemented |
+| event_declaration | 256 | ✅ implemented |
 | event_field_declaration | 257 | ✅ implemented |
 | field_declaration | 252 | ✅ implemented |
-| operator_declaration | - | ❌ not found |
-| conversion_operator_declaration | - | ❌ not found |
+| operator_declaration | 248 | ✅ implemented |
+| conversion_operator_declaration | 249 | ✅ implemented |
 | using_directive | 221 | ✅ implemented |
-| extern_alias_directive | - | ❌ not found |
+| extern_alias_directive | 220 | ✅ implemented |
 | modifier | 241 | ✅ implemented |
 | parameter | 265 | ✅ implemented |
 | type_parameter | 243 | ✅ implemented |
@@ -55,14 +55,5 @@
 ### Priority 2: Missing Examples
 These nodes aren't in the comprehensive example. Consider:
 
-- `struct_declaration`: Add example to comprehensive.cs or verify node name
-- `record_declaration`: Add example to comprehensive.cs or verify node name
-- `delegate_declaration`: Add example to comprehensive.cs or verify node name
 - `file_scoped_namespace_declaration`: Add example to comprehensive.cs or verify node name
-- `destructor_declaration`: Add example to comprehensive.cs or verify node name
-- `indexer_declaration`: Add example to comprehensive.cs or verify node name
-- `event_declaration`: Add example to comprehensive.cs or verify node name
-- `operator_declaration`: Add example to comprehensive.cs or verify node name
-- `conversion_operator_declaration`: Add example to comprehensive.cs or verify node name
-- `extern_alias_directive`: Add example to comprehensive.cs or verify node name
 

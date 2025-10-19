@@ -1,30 +1,26 @@
 # C# Grammar Analysis
 
-*Generated: 2025-10-08 21:30:53 UTC*
+*Generated: 2025-10-19 03:59:38 UTC*
 
 ## Statistics
 - Total nodes in grammar JSON: 220
-- Nodes found in comprehensive.cs: 108
-- Nodes handled by parser: 108
-- Symbol kinds extracted: 7
+- Nodes found in comprehensive.cs: 142
+- Nodes handled by parser: 142
+- Symbol kinds extracted: 9
 
 ## Nodes in Grammar but Not in Example
-**Count**: 157
+**Count**: 142
 
 - `alias_qualified_name`
 - `and_pattern`
 - `anonymous_method_expression`
 - `anonymous_object_creation_expression`
-- `array_creation_expression`
-- `arrow_expression_clause`
 - `as_expression`
 - `attribute`
 - `attribute_argument`
 - `attribute_argument_list`
 - `attribute_list`
 - `attribute_target_specifier`
-- `bracketed_argument_list`
-- `bracketed_parameter_list`
 - `break_statement`
 - `calling_convention`
 - `cast_expression`
@@ -39,22 +35,16 @@
 - `constructor_constraint`
 - `constructor_initializer`
 - `continue_statement`
-- `conversion_operator_declaration`
 - `declaration`
 - `declaration_expression`
 - `declaration_pattern`
-- `delegate_declaration`
-- `destructor_declaration`
 - `discard`
 - `do_statement`
-- `element_access_expression`
 - `element_binding_expression`
 - `empty_statement`
 - `escape_sequence`
-- `event_declaration`
 - `explicit_interface_specifier`
 - `expression`
-- `extern_alias_directive`
 - `file_scoped_namespace_declaration`
 - `finally_clause`
 - `fixed_statement`
@@ -71,7 +61,6 @@
 - `implicit_object_creation_expression`
 - `implicit_parameter`
 - `implicit_stackalloc_expression`
-- `indexer_declaration`
 - `interpolation_alignment_clause`
 - `interpolation_format_clause`
 - `interpolation_quote`
@@ -91,7 +80,6 @@
 - `negated_pattern`
 - `non_lvalue_expression`
 - `nullable_type`
-- `operator_declaration`
 - `or_pattern`
 - `order_by_clause`
 - `parenthesized_expression`
@@ -115,7 +103,6 @@
 - `preproc_region`
 - `preproc_undef`
 - `preproc_warning`
-- `primary_constructor_base_type`
 - `property_pattern_clause`
 - `query_expression`
 - `range_expression`
@@ -124,7 +111,6 @@
 - `raw_string_literal`
 - `raw_string_start`
 - `real_literal`
-- `record_declaration`
 - `recursive_pattern`
 - `ref_expression`
 - `ref_type`
@@ -138,7 +124,6 @@
 - `stackalloc_expression`
 - `statement`
 - `string_literal_encoding`
-- `struct_declaration`
 - `subpattern`
 - `switch_body`
 - `switch_expression`
@@ -174,19 +159,27 @@
 
 
 ## Nodes Handled by Parser
-**Count**: 108
+**Count**: 142
 
 - `!`
+- `!=`
 - `"`
+- `%`
 - `(`
 - `)`
+- `*`
+- `+`
+- `+=`
 - `,`
+- `-`
+- `-=`
 - `.`
 - `:`
 - `;`
 - `<`
 - `=`
 - `==`
+- `=>`
 - `>`
 - `?`
 - `[`
@@ -194,10 +187,14 @@
 - `abstract`
 - `accessor_declaration`
 - `accessor_list`
+- `add`
+- `alias`
 - `argument`
 - `argument_list`
+- `array_creation_expression`
 - `array_rank_specifier`
 - `array_type`
+- `arrow_expression_clause`
 - `assignment_expression`
 - `async`
 - `await`
@@ -206,6 +203,8 @@
 - `binary_expression`
 - `block`
 - `boolean_literal`
+- `bracketed_argument_list`
+- `bracketed_parameter_list`
 - `class`
 - `class_declaration`
 - `comment`
@@ -214,16 +213,25 @@
 - `conditional_expression`
 - `const`
 - `constructor_declaration`
+- `conversion_operator_declaration`
 - `declaration_list`
 - `default`
 - `default_expression`
+- `delegate`
+- `delegate_declaration`
+- `destructor_declaration`
+- `element_access_expression`
 - `enum`
 - `enum_declaration`
 - `enum_member_declaration`
 - `enum_member_declaration_list`
 - `event`
+- `event_declaration`
 - `event_field_declaration`
+- `explicit`
 - `expression_statement`
+- `extern`
+- `extern_alias_directive`
 - `false`
 - `field_declaration`
 - `generic_name`
@@ -231,7 +239,9 @@
 - `identifier`
 - `if`
 - `if_statement`
+- `implicit`
 - `implicit_type`
+- `indexer_declaration`
 - `initializer_expression`
 - `integer_literal`
 - `interface`
@@ -251,17 +261,23 @@
 - `new`
 - `null_literal`
 - `object_creation_expression`
+- `operator`
+- `operator_declaration`
 - `override`
 - `parameter`
 - `parameter_list`
 - `predefined_type`
 - `prefix_unary_expression`
+- `primary_constructor_base_type`
 - `private`
 - `property_declaration`
 - `protected`
 - `public`
 - `qualified_name`
 - `readonly`
+- `record`
+- `record_declaration`
+- `remove`
 - `return`
 - `return_statement`
 - `set`
@@ -269,6 +285,8 @@
 - `string_content`
 - `string_literal`
 - `string_literal_content`
+- `struct`
+- `struct_declaration`
 - `this`
 - `throw`
 - `throw_statement`
@@ -284,4 +302,5 @@
 - `virtual`
 - `{`
 - `}`
+- `~`
 
