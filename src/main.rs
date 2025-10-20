@@ -1338,13 +1338,15 @@ async fn main() {
                     // Parse positional arguments for function name and key:value pairs
                     let (positional_function, params) = parse_positional_args(&args);
 
-                    // Determine function name (priority: positional > key:value)
+                    // Determine function name or symbol_id (priority: positional > key:value)
                     let final_function = positional_function
                         .or_else(|| params.get("function").cloned())
+                        .or_else(|| params.get("symbol_id").map(|id| format!("symbol_id:{id}")))
                         .unwrap_or_else(|| {
-                            eprintln!("Error: callers requires a function name");
+                            eprintln!("Error: callers requires a function name or symbol_id");
                             eprintln!("Usage: codanna retrieve callers main");
                             eprintln!("   or: codanna retrieve callers function:main");
+                            eprintln!("   or: codanna retrieve callers symbol_id:1771");
                             std::process::exit(1);
                         });
 
@@ -1360,13 +1362,15 @@ async fn main() {
                     // Parse positional arguments for function name and key:value pairs
                     let (positional_function, params) = parse_positional_args(&args);
 
-                    // Determine function name (priority: positional > key:value)
+                    // Determine function name or symbol_id (priority: positional > key:value)
                     let final_function = positional_function
                         .or_else(|| params.get("function").cloned())
+                        .or_else(|| params.get("symbol_id").map(|id| format!("symbol_id:{id}")))
                         .unwrap_or_else(|| {
-                            eprintln!("Error: calls requires a function name");
+                            eprintln!("Error: calls requires a function name or symbol_id");
                             eprintln!("Usage: codanna retrieve calls process_file");
                             eprintln!("   or: codanna retrieve calls function:process_file");
+                            eprintln!("   or: codanna retrieve calls symbol_id:1771");
                             std::process::exit(1);
                         });
 
@@ -1483,13 +1487,15 @@ async fn main() {
                     // Parse positional arguments for symbol name and key:value pairs
                     let (positional_symbol, params) = parse_positional_args(&args);
 
-                    // Determine symbol name (priority: positional > key:value)
+                    // Determine symbol name or symbol_id (priority: positional > key:value)
                     let final_symbol = positional_symbol
                         .or_else(|| params.get("symbol").cloned())
+                        .or_else(|| params.get("symbol_id").map(|id| format!("symbol_id:{id}")))
                         .unwrap_or_else(|| {
-                            eprintln!("Error: describe requires a symbol name");
+                            eprintln!("Error: describe requires a symbol name or symbol_id");
                             eprintln!("Usage: codanna retrieve describe SimpleIndexer");
                             eprintln!("   or: codanna retrieve describe symbol:SimpleIndexer");
+                            eprintln!("   or: codanna retrieve describe symbol_id:1771");
                             std::process::exit(1);
                         });
 
@@ -1706,30 +1712,44 @@ async fn main() {
                     .and_then(|v| v.as_str());
 
                 if let Some(func_name) = function_name {
-                    // Find the function first
-                    let symbols = indexer.find_symbols_by_name(func_name, language);
-                    if let Some(symbol) = symbols.into_iter().find(|s| {
-                        matches!(
-                            s.kind,
-                            crate::SymbolKind::Function | crate::SymbolKind::Method
-                        )
-                    }) {
-                        use codanna::symbol::context::ContextIncludes;
-                        // Get context with calls
-                        let context = indexer.get_symbol_context(symbol.id, ContextIncludes::CALLS);
+                    use codanna::symbol::context::ContextIncludes;
+                    use std::collections::HashSet;
 
-                        if let Some(ctx) = context {
-                            // Extract just the calls from the context
-                            if let Some(calls) = ctx.relationships.calls {
-                                Some(calls)
-                            } else {
-                                Some(Vec::new())
-                            }
-                        } else {
-                            Some(Vec::new())
-                        }
-                    } else {
+                    // Find ALL symbols with this name
+                    let symbols = indexer.find_symbols_by_name(func_name, language);
+                    let function_symbols: Vec<_> = symbols
+                        .into_iter()
+                        .filter(|s| {
+                            matches!(
+                                s.kind,
+                                crate::SymbolKind::Function | crate::SymbolKind::Method
+                            )
+                        })
+                        .collect();
+
+                    if function_symbols.is_empty() {
                         None // Function not found
+                    } else {
+                        // Aggregate calls from ALL symbols with this name (same as MCP handler)
+                        let mut all_calls = Vec::new();
+                        let mut seen_ids = HashSet::new();
+
+                        for symbol in function_symbols {
+                            let context =
+                                indexer.get_symbol_context(symbol.id, ContextIncludes::CALLS);
+                            if let Some(ctx) = context {
+                                if let Some(calls) = ctx.relationships.calls {
+                                    for (called, metadata) in calls {
+                                        // Deduplicate by symbol ID
+                                        if seen_ids.insert(called.id) {
+                                            all_calls.push((called, metadata));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Some(all_calls)
                     }
                 } else {
                     None
@@ -1750,15 +1770,23 @@ async fn main() {
                     .and_then(|v| v.as_str());
 
                 if let Some(func_name) = function_name {
+                    use std::collections::HashSet;
+
                     // Find all functions with this name
                     let symbols = indexer.find_symbols_by_name(func_name, language);
                     if !symbols.is_empty() {
                         let mut all_callers = Vec::new();
+                        let mut seen_ids = HashSet::new();
 
-                        // Check all symbols with this name (could be multiple overloads)
+                        // Check all symbols with this name and deduplicate (same as MCP handler)
                         for symbol in &symbols {
                             let callers = indexer.get_calling_functions_with_metadata(symbol.id);
-                            all_callers.extend(callers);
+                            for (caller, metadata) in callers {
+                                // Deduplicate by symbol ID
+                                if seen_ids.insert(caller.id) {
+                                    all_callers.push((caller, metadata));
+                                }
+                            }
                         }
 
                         Some(all_callers)
@@ -1784,29 +1812,37 @@ async fn main() {
                     .and_then(|v| v.as_str());
 
                 if let Some(sym_name) = symbol_name {
-                    // Find the symbol first
+                    use std::collections::HashSet;
+
+                    // Find ALL symbols with this name (same as MCP handler)
                     let symbols = indexer.find_symbols_by_name(sym_name, language);
-                    if let Some(symbol) = symbols.first() {
+
+                    if symbols.is_empty() {
+                        None // Symbol not found
+                    } else {
                         let max_depth = arguments
                             .as_ref()
                             .and_then(|m| m.get("max_depth"))
                             .and_then(|v| v.as_u64())
                             .unwrap_or(3) as usize;
 
-                        // Get impact radius - returns Vec<SymbolId>
-                        let impacted_ids = indexer.get_impact_radius(symbol.id, Some(max_depth));
+                        // Aggregate impact from ALL symbols with this name (same as MCP handler)
+                        let mut all_impacted_ids = HashSet::new();
+                        for symbol in &symbols {
+                            let impacted_ids =
+                                indexer.get_impact_radius(symbol.id, Some(max_depth));
+                            all_impacted_ids.extend(impacted_ids);
+                        }
 
                         // Convert SymbolIds to full Symbols
                         let mut impacted_symbols = Vec::new();
-                        for id in impacted_ids {
+                        for id in all_impacted_ids {
                             if let Some(sym) = indexer.get_symbol(id) {
                                 impacted_symbols.push(sym);
                             }
                         }
 
                         Some(impacted_symbols)
-                    } else {
-                        None // Symbol not found
                     }
                 } else {
                     None
@@ -2099,13 +2135,26 @@ async fn main() {
                         .as_ref()
                         .and_then(|m| m.get("function_name"))
                         .and_then(|v| v.as_str())
-                        .unwrap_or_else(|| {
-                            eprintln!("Error: get_calls requires 'function_name' parameter");
-                            std::process::exit(1);
-                        });
+                        .map(|s| s.to_string());
+
+                    let symbol_id = arguments
+                        .as_ref()
+                        .and_then(|m| m.get("symbol_id"))
+                        .and_then(|v| v.as_u64())
+                        .map(|id| id as u32);
+
+                    // Require either function_name or symbol_id
+                    if function_name.is_none() && symbol_id.is_none() {
+                        eprintln!(
+                            "Error: get_calls requires either 'function_name' or 'symbol_id' parameter"
+                        );
+                        std::process::exit(1);
+                    }
+
                     server
                         .get_calls(Parameters(GetCallsRequest {
-                            function_name: function_name.to_string(),
+                            function_name,
+                            symbol_id,
                         }))
                         .await
                 }
@@ -2114,13 +2163,26 @@ async fn main() {
                         .as_ref()
                         .and_then(|m| m.get("function_name"))
                         .and_then(|v| v.as_str())
-                        .unwrap_or_else(|| {
-                            eprintln!("Error: find_callers requires 'function_name' parameter");
-                            std::process::exit(1);
-                        });
+                        .map(|s| s.to_string());
+
+                    let symbol_id = arguments
+                        .as_ref()
+                        .and_then(|m| m.get("symbol_id"))
+                        .and_then(|v| v.as_u64())
+                        .map(|id| id as u32);
+
+                    // Require either function_name or symbol_id
+                    if function_name.is_none() && symbol_id.is_none() {
+                        eprintln!(
+                            "Error: find_callers requires either 'function_name' or 'symbol_id' parameter"
+                        );
+                        std::process::exit(1);
+                    }
+
                     server
                         .find_callers(Parameters(FindCallersRequest {
-                            function_name: function_name.to_string(),
+                            function_name,
+                            symbol_id,
                         }))
                         .await
                 }
@@ -2129,10 +2191,22 @@ async fn main() {
                         .as_ref()
                         .and_then(|m| m.get("symbol_name"))
                         .and_then(|v| v.as_str())
-                        .unwrap_or_else(|| {
-                            eprintln!("Error: analyze_impact requires 'symbol_name' parameter");
-                            std::process::exit(1);
-                        });
+                        .map(|s| s.to_string());
+
+                    let symbol_id = arguments
+                        .as_ref()
+                        .and_then(|m| m.get("symbol_id"))
+                        .and_then(|v| v.as_u64())
+                        .map(|id| id as u32);
+
+                    // Require either symbol_name or symbol_id
+                    if symbol_name.is_none() && symbol_id.is_none() {
+                        eprintln!(
+                            "Error: analyze_impact requires either 'symbol_name' or 'symbol_id' parameter"
+                        );
+                        std::process::exit(1);
+                    }
+
                     let max_depth = arguments
                         .as_ref()
                         .and_then(|m| m.get("max_depth"))
@@ -2140,7 +2214,8 @@ async fn main() {
                         .unwrap_or(3) as u32;
                     server
                         .analyze_impact(Parameters(AnalyzeImpactRequest {
-                            symbol_name: symbol_name.to_string(),
+                            symbol_name,
+                            symbol_id,
                             max_depth,
                         }))
                         .await

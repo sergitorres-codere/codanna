@@ -53,8 +53,8 @@ pub struct Symbol {
     pub kind: SymbolKind,
     pub file_id: FileId,
     pub range: Range,
-    /// Resolved file path including line when available (e.g., "src/lib.rs:42")
-    pub file_path: Option<Box<str>>,
+    /// Clean file path without line numbers (e.g., "src/lib.rs")
+    pub file_path: Box<str>,
     pub signature: Option<Box<str>>,
     /// Documentation comment extracted from source (e.g., /// or /** */ in Rust)
     pub doc_comment: Option<Box<str>>,
@@ -103,7 +103,7 @@ impl Symbol {
             kind,
             file_id,
             range,
-            file_path: None,
+            file_path: "<unknown>".into(),
             signature: None,
             doc_comment: None,
             module_path: None,
@@ -128,7 +128,7 @@ impl Symbol {
     }
 
     pub fn with_file_path(mut self, file_path: impl Into<Box<str>>) -> Self {
-        self.file_path = Some(file_path.into());
+        self.file_path = file_path.into();
         self
     }
 
@@ -332,7 +332,7 @@ impl CompactSymbol {
             kind,
             file_id: FileId::new(self.file_id as u32)?,
             range: Range::new(self.start_line, self.start_col, self.end_line, self.end_col),
-            file_path: None,
+            file_path: "<unknown>".into(),
             signature: None,
             doc_comment: None,
             module_path: None,

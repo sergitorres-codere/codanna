@@ -23,7 +23,7 @@
 //! - Full namespace resolution implementation
 //! - Type/value space population from parser
 
-use crate::parsing::resolution::ProjectResolutionEnhancer;
+use crate::parsing::resolution::{ImportBinding, ProjectResolutionEnhancer};
 use crate::parsing::{InheritanceResolver, ResolutionScope, ScopeLevel, ScopeType};
 use crate::project_resolver::persist::ResolutionRules;
 use crate::{FileId, SymbolId};
@@ -71,6 +71,9 @@ pub struct TypeScriptResolutionContext {
     qualified_names: HashMap<String, SymbolId>,
     /// Namespace alias to target module path (normalized, dots)
     namespace_aliases: HashMap<String, String>,
+
+    /// Binding info for imports keyed by visible name
+    import_bindings: HashMap<String, ImportBinding>,
 }
 
 impl TypeScriptResolutionContext {
@@ -87,6 +90,7 @@ impl TypeScriptResolutionContext {
             imports: Vec::new(),
             qualified_names: HashMap::new(),
             namespace_aliases: HashMap::new(),
+            import_bindings: HashMap::new(),
         }
     }
 
@@ -501,6 +505,22 @@ impl ResolutionScope for TypeScriptResolutionContext {
                 true
             }
         }
+    }
+
+    fn populate_imports(&mut self, imports: &[crate::parsing::Import]) {
+        // Convert Import records into our internal (path, alias) tuple format
+        for import in imports {
+            self.add_import(import.path.clone(), import.alias.clone());
+        }
+    }
+
+    fn register_import_binding(&mut self, binding: ImportBinding) {
+        self.import_bindings
+            .insert(binding.exposed_name.clone(), binding);
+    }
+
+    fn import_binding(&self, name: &str) -> Option<ImportBinding> {
+        self.import_bindings.get(name).cloned()
     }
 }
 

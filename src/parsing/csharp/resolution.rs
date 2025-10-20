@@ -15,7 +15,7 @@
 //!
 //! This order follows C# language specification for name resolution.
 
-use crate::parsing::resolution::ResolutionScope;
+use crate::parsing::resolution::{ImportBinding, ResolutionScope};
 use crate::parsing::{ScopeLevel, ScopeType};
 use crate::{FileId, SymbolId};
 use std::collections::HashMap;
@@ -52,6 +52,9 @@ pub struct CSharpResolutionContext {
 
     /// Using directive tracking (namespace -> alias if any)
     using_directives: Vec<(String, Option<String>)>,
+
+    /// Binding info for imports keyed by visible name
+    import_bindings: HashMap<String, ImportBinding>,
 }
 
 impl CSharpResolutionContext {
@@ -65,6 +68,7 @@ impl CSharpResolutionContext {
             global_symbols: HashMap::new(),
             scope_stack: Vec::new(),
             using_directives: Vec::new(),
+            import_bindings: HashMap::new(),
         }
     }
 
@@ -290,5 +294,14 @@ impl ResolutionScope for CSharpResolutionContext {
                 self.resolve(to_name)
             }
         }
+    }
+
+    fn register_import_binding(&mut self, binding: ImportBinding) {
+        self.import_bindings
+            .insert(binding.exposed_name.clone(), binding);
+    }
+
+    fn import_binding(&self, name: &str) -> Option<ImportBinding> {
+        self.import_bindings.get(name).cloned()
     }
 }

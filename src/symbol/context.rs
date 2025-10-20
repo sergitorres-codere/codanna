@@ -1,5 +1,6 @@
 //! Symbol context aggregation for comprehensive metadata display
 
+use crate::relationship::RelationshipMetadata;
 use crate::{Symbol, Visibility};
 use bitflags::bitflags;
 use serde::Serialize;
@@ -25,10 +26,10 @@ pub struct SymbolRelationships {
     pub implemented_by: Option<Vec<Symbol>>,
     /// What methods/fields this symbol defines
     pub defines: Option<Vec<Symbol>>,
-    /// What this symbol calls (with metadata)
-    pub calls: Option<Vec<(Symbol, Option<String>)>>,
-    /// What calls this symbol (with metadata)
-    pub called_by: Option<Vec<(Symbol, Option<String>)>>,
+    /// What this symbol calls (with relationship metadata including call site location)
+    pub calls: Option<Vec<(Symbol, Option<RelationshipMetadata>)>>,
+    /// What calls this symbol (with relationship metadata including call site location)
+    pub called_by: Option<Vec<(Symbol, Option<RelationshipMetadata>)>>,
 }
 
 bitflags! {
@@ -85,11 +86,12 @@ impl SymbolContext {
 
     fn append_header(&self, output: &mut String, indent: &str) {
         output.push_str(&format!(
-            "{}{} ({:?}) at {}\n",
+            "{}{} ({:?}) at {} [symbol_id:{}]\n",
             indent,
             self.symbol.name,
             self.symbol.kind,
-            Self::symbol_location(&self.symbol)
+            Self::symbol_location(&self.symbol),
+            self.symbol.id.value()
         ));
     }
 
@@ -188,16 +190,32 @@ impl SymbolContext {
             if !calls.is_empty() {
                 output.push_str(&format!("{}Calls {} function(s):\n", indent, calls.len()));
                 for (called, metadata) in calls {
+                    // Use call site location from metadata if available, otherwise definition location
+                    let location = if let Some(meta) = metadata {
+                        if let Some(line) = meta.line {
+                            format!("{}:{}", called.file_path, line.saturating_add(1))
+                        } else {
+                            Self::symbol_location(called)
+                        }
+                    } else {
+                        Self::symbol_location(called)
+                    };
+
                     output.push_str(&format!(
-                        "{}  - {} ({:?}) at {}",
+                        "{}  - {} ({:?}) at {} [symbol_id:{}]",
                         indent,
                         called.name,
                         called.kind,
-                        Self::symbol_location(called)
+                        location,
+                        called.id.value()
                     ));
+
+                    // Show receiver info if available
                     if let Some(meta) = metadata {
-                        if !meta.is_empty() {
-                            output.push_str(&format!(" [{meta}]"));
+                        if let Some(context) = &meta.context {
+                            if !context.is_empty() {
+                                output.push_str(&format!(" [{context}]"));
+                            }
                         }
                     }
                     output.push('\n');
@@ -214,16 +232,32 @@ impl SymbolContext {
                     callers.len()
                 ));
                 for (caller, metadata) in callers {
+                    // Use call site location from metadata if available, otherwise definition location
+                    let location = if let Some(meta) = metadata {
+                        if let Some(line) = meta.line {
+                            format!("{}:{}", caller.file_path, line.saturating_add(1))
+                        } else {
+                            Self::symbol_location(caller)
+                        }
+                    } else {
+                        Self::symbol_location(caller)
+                    };
+
                     output.push_str(&format!(
-                        "{}  - {} ({:?}) at {}",
+                        "{}  - {} ({:?}) at {} [symbol_id:{}]",
                         indent,
                         caller.name,
                         caller.kind,
-                        Self::symbol_location(caller)
+                        location,
+                        caller.id.value()
                     ));
+
+                    // Show receiver info if available
                     if let Some(meta) = metadata {
-                        if !meta.is_empty() {
-                            output.push_str(&format!(" [{meta}]"));
+                        if let Some(context) = &meta.context {
+                            if !context.is_empty() {
+                                output.push_str(&format!(" [{context}]"));
+                            }
                         }
                     }
                     output.push('\n');
@@ -233,28 +267,14 @@ impl SymbolContext {
     }
 
     pub(crate) fn symbol_location(symbol: &Symbol) -> String {
-        let base = symbol
-            .file_path
-            .as_deref()
-            .map(strip_numeric_suffix)
-            .unwrap_or("<unknown>");
         let start = symbol.range.start_line.saturating_add(1);
         let end = symbol.range.end_line.saturating_add(1);
         if start == end {
-            format!("{base}:{start}")
+            format!("{}:{start}", symbol.file_path)
         } else {
-            format!("{base}:{start}-{end}")
+            format!("{}:{start}-{end}", symbol.file_path)
         }
     }
-}
-
-fn strip_numeric_suffix(path: &str) -> &str {
-    if let Some(idx) = path.rfind(':') {
-        if path[idx + 1..].chars().all(|c| c.is_ascii_digit()) {
-            return &path[..idx];
-        }
-    }
-    path
 }
 
 impl SymbolContext {

@@ -72,6 +72,13 @@ pub struct IndexSchema {
     pub cluster_id: Field,
     pub vector_id: Field,
     pub has_vector: Field,
+
+    // Import fields (for cross-session persistence)
+    pub import_file_id: Field,      // Which file has this import
+    pub import_path: Field,         // Full import path (e.g., "indicatif::ProgressBar")
+    pub import_alias: Field,        // Optional alias
+    pub import_is_glob: Field,      // Boolean (0/1) for glob imports
+    pub import_is_type_only: Field, // Boolean (0/1) for type-only imports (TypeScript)
 }
 
 impl IndexSchema {
@@ -154,6 +161,13 @@ impl IndexSchema {
         let vector_id = builder.add_u64_field("vector_id", FAST | STORED);
         let has_vector = builder.add_u64_field("has_vector", FAST | STORED); // Using u64 as bool for FAST field
 
+        // Import fields (for cross-session persistence of import metadata)
+        let import_file_id = builder.add_u64_field("import_file_id", indexed_u64_options.clone());
+        let import_path = builder.add_text_field("import_path", STRING | STORED);
+        let import_alias = builder.add_text_field("import_alias", STRING | STORED);
+        let import_is_glob = builder.add_u64_field("import_is_glob", STORED);
+        let import_is_type_only = builder.add_u64_field("import_is_type_only", STORED);
+
         let schema = builder.build();
         let index_schema = IndexSchema {
             doc_type,
@@ -188,6 +202,11 @@ impl IndexSchema {
             cluster_id,
             vector_id,
             has_vector,
+            import_file_id,
+            import_path,
+            import_alias,
+            import_is_glob,
+            import_is_type_only,
         };
 
         (schema, index_schema)
@@ -1589,7 +1608,11 @@ impl DocumentIndex {
                 end_line,
                 end_column: end_col,
             },
-            file_path: None,
+            file_path: doc
+                .get_first(self.schema.file_path)
+                .and_then(|v| v.as_str())
+                .unwrap_or("<unknown>")
+                .into(),
             signature: signature.map(|s| s.into()),
             doc_comment: doc_comment.map(|s| s.into()),
             module_path: module_path.map(|s| s.into()),
@@ -2173,6 +2196,153 @@ impl DocumentIndex {
         doc.add_u64(self.schema.file_timestamp, timestamp);
 
         writer.add_document(doc)?;
+        Ok(())
+    }
+
+    /// Store an import document in the index
+    ///
+    /// This is a pure storage operation storing raw import metadata.
+    /// Resolution logic happens in the resolution layer.
+    pub fn store_import(&self, import: &crate::parsing::Import) -> StorageResult<()> {
+        let mut writer_lock = match self.writer.lock() {
+            Ok(lock) => lock,
+            Err(poisoned) => {
+                eprintln!("Warning: Recovering from poisoned writer mutex in store_import");
+                poisoned.into_inner()
+            }
+        };
+        let writer = writer_lock.as_mut().ok_or(StorageError::NoActiveBatch)?;
+
+        let mut doc = Document::new();
+
+        // Document type
+        doc.add_text(self.schema.doc_type, "import");
+
+        // Import metadata fields
+        doc.add_u64(self.schema.import_file_id, import.file_id.value() as u64);
+        doc.add_text(self.schema.import_path, &import.path);
+
+        if let Some(alias) = &import.alias {
+            doc.add_text(self.schema.import_alias, alias);
+        }
+
+        doc.add_u64(
+            self.schema.import_is_glob,
+            if import.is_glob { 1 } else { 0 },
+        );
+        doc.add_u64(
+            self.schema.import_is_type_only,
+            if import.is_type_only { 1 } else { 0 },
+        );
+
+        writer.add_document(doc)?;
+        Ok(())
+    }
+
+    /// Get all imports for a specific file
+    ///
+    /// Returns raw import metadata - resolution happens in the resolution layer.
+    pub fn get_imports_for_file(
+        &self,
+        file_id: FileId,
+    ) -> StorageResult<Vec<crate::parsing::Import>> {
+        let query = BooleanQuery::new(vec![
+            (
+                Occur::Must,
+                Box::new(TermQuery::new(
+                    Term::from_field_text(self.schema.doc_type, "import"),
+                    IndexRecordOption::Basic,
+                )),
+            ),
+            (
+                Occur::Must,
+                Box::new(TermQuery::new(
+                    Term::from_field_u64(self.schema.import_file_id, file_id.value() as u64),
+                    IndexRecordOption::Basic,
+                )),
+            ),
+        ]);
+
+        let searcher = self.reader.searcher();
+        let top_docs = searcher
+            .search(&query, &TopDocs::with_limit(1000))
+            .map_err(|e| StorageError::General(format!("Import search failed: {e}")))?;
+
+        let mut imports = Vec::new();
+        for (_score, doc_address) in top_docs {
+            let doc: Document = searcher.doc(doc_address).map_err(|e| {
+                StorageError::General(format!("Failed to retrieve import document: {e}"))
+            })?;
+
+            // Extract fields from document
+            let import_path = doc
+                .get_first(self.schema.import_path)
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| StorageError::General("Missing import_path".to_string()))?
+                .to_string();
+
+            let alias = doc
+                .get_first(self.schema.import_alias)
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+
+            let is_glob = doc
+                .get_first(self.schema.import_is_glob)
+                .and_then(|v| v.as_u64())
+                .map(|v| v == 1)
+                .unwrap_or(false);
+
+            let is_type_only = doc
+                .get_first(self.schema.import_is_type_only)
+                .and_then(|v| v.as_u64())
+                .map(|v| v == 1)
+                .unwrap_or(false);
+
+            imports.push(crate::parsing::Import {
+                path: import_path,
+                alias,
+                file_id,
+                is_glob,
+                is_type_only,
+            });
+        }
+
+        Ok(imports)
+    }
+
+    /// Delete all import documents for a file
+    ///
+    /// Used during file updates and deletions.
+    pub fn delete_imports_for_file(&self, file_id: FileId) -> StorageResult<()> {
+        let mut writer_lock = match self.writer.lock() {
+            Ok(lock) => lock,
+            Err(poisoned) => {
+                eprintln!(
+                    "Warning: Recovering from poisoned writer mutex in delete_imports_for_file"
+                );
+                poisoned.into_inner()
+            }
+        };
+        let writer = writer_lock.as_mut().ok_or(StorageError::NoActiveBatch)?;
+
+        let query = BooleanQuery::new(vec![
+            (
+                Occur::Must,
+                Box::new(TermQuery::new(
+                    Term::from_field_text(self.schema.doc_type, "import"),
+                    IndexRecordOption::Basic,
+                )),
+            ),
+            (
+                Occur::Must,
+                Box::new(TermQuery::new(
+                    Term::from_field_u64(self.schema.import_file_id, file_id.value() as u64),
+                    IndexRecordOption::Basic,
+                )),
+            ),
+        ]);
+
+        writer.delete_query(Box::new(query))?;
         Ok(())
     }
 
@@ -3949,5 +4119,124 @@ mod tests {
         println!("  Result: 'ArchivService' correctly finds 'ArchiveService' ✓");
 
         println!("\n=== TEST COMPLETE ===\n");
+    }
+
+    #[test]
+    fn test_import_persistence_across_reload() {
+        // This test verifies the fix for: external imports are lost after index reload,
+        // causing external symbols (e.g., indicatif::ProgressBar) to incorrectly
+        // resolve to local symbols with the same name.
+
+        let temp_dir = TempDir::new().unwrap();
+        let settings = crate::config::Settings::default();
+
+        // Create initial index
+        {
+            let index = DocumentIndex::new(temp_dir.path(), &settings).unwrap();
+            index.start_batch().unwrap();
+
+            let file_id = FileId::new(1).unwrap();
+
+            // Store file info
+            index
+                .store_file_info(file_id, "src/main.rs", "hash123", 1234567890)
+                .unwrap();
+
+            // Store external imports (the data we're testing persistence for)
+            let import1 = crate::parsing::Import {
+                path: "indicatif::ProgressBar".to_string(),
+                alias: None,
+                file_id,
+                is_glob: false,
+                is_type_only: false,
+            };
+
+            let import2 = crate::parsing::Import {
+                path: "serde::Serialize".to_string(),
+                alias: Some("SerTrait".to_string()),
+                file_id,
+                is_glob: false,
+                is_type_only: false,
+            };
+
+            index.store_import(&import1).unwrap();
+            index.store_import(&import2).unwrap();
+
+            index.commit_batch().unwrap();
+        } // Drop index to simulate app shutdown
+
+        // Reload index (simulate app restart)
+        {
+            let index = DocumentIndex::new(temp_dir.path(), &settings).unwrap();
+
+            // CRITICAL: Verify imports survived the reload
+            let loaded_imports = index.get_imports_for_file(FileId::new(1).unwrap()).unwrap();
+
+            assert_eq!(
+                loaded_imports.len(),
+                2,
+                "Should load 2 imports after reload"
+            );
+
+            // Verify first import
+            let import1 = loaded_imports
+                .iter()
+                .find(|i| i.path == "indicatif::ProgressBar")
+                .unwrap();
+            assert_eq!(import1.alias, None);
+            assert!(!import1.is_glob);
+            assert!(!import1.is_type_only);
+
+            // Verify second import (with alias)
+            let import2 = loaded_imports
+                .iter()
+                .find(|i| i.path == "serde::Serialize")
+                .unwrap();
+            assert_eq!(import2.alias.as_deref(), Some("SerTrait"));
+            assert!(!import2.is_glob);
+            assert!(!import2.is_type_only);
+        }
+    }
+
+    #[test]
+    fn test_import_deletion_on_file_removal() {
+        // Verify that deleting a file also deletes its imports
+
+        let temp_dir = TempDir::new().unwrap();
+        let settings = crate::config::Settings::default();
+        let index = DocumentIndex::new(temp_dir.path(), &settings).unwrap();
+
+        index.start_batch().unwrap();
+
+        let file_id = FileId::new(1).unwrap();
+
+        // Store file and import
+        index
+            .store_file_info(file_id, "src/main.rs", "hash123", 1234567890)
+            .unwrap();
+
+        let import = crate::parsing::Import {
+            path: "std::collections::HashMap".to_string(),
+            alias: None,
+            file_id,
+            is_glob: false,
+            is_type_only: false,
+        };
+        index.store_import(&import).unwrap();
+
+        index.commit_batch().unwrap();
+
+        // Verify import exists
+        let imports = index.get_imports_for_file(file_id).unwrap();
+        assert_eq!(imports.len(), 1);
+
+        // Delete imports for this file
+        index.start_batch().unwrap();
+        index.delete_imports_for_file(file_id).unwrap();
+        index.commit_batch().unwrap();
+
+        // Verify imports are gone
+        let imports_after = index.get_imports_for_file(file_id).unwrap();
+        assert_eq!(imports_after.len(), 0, "Imports should be deleted");
     }
 }

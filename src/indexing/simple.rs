@@ -580,13 +580,27 @@ impl SimpleIndexer {
         eprintln!("  get_file_info result: {file_info:?}");
 
         let symbols_to_remove = if let Some(info) = file_info {
+            let file_id = info.0;
+
             // Get all symbols for this file before removing
-            self.document_index
-                .find_symbols_by_file(info.0)
+            let symbols = self
+                .document_index
+                .find_symbols_by_file(file_id)
                 .map_err(|e| IndexError::TantivyError {
                     operation: "find_symbols_by_file".to_string(),
                     cause: e.to_string(),
-                })?
+                })?;
+
+            // CRITICAL: Delete imports for this file to maintain consistency
+            // This prevents stale import metadata from being used after file deletion
+            self.document_index
+                .delete_imports_for_file(file_id)
+                .map_err(|e| IndexError::TantivyError {
+                    operation: "delete_imports_for_file".to_string(),
+                    cause: e.to_string(),
+                })?;
+
+            symbols
         } else {
             // File not in index, nothing to remove
             eprintln!("  File not found in index: {path_str}");
@@ -883,7 +897,14 @@ impl SimpleIndexer {
             // The behavior stores imports in its internal state and uses them during
             // symbol resolution via ResolutionContext::resolve()
             // Track import for resolution
-            behavior.add_import(import);
+            behavior.add_import(import.clone());
+
+            // CRITICAL: Persist import to Tantivy for cross-session persistence
+            // This ensures imports are available after index reload, fixing the bug where
+            // external symbols (e.g., indicatif::ProgressBar) incorrectly resolve to local symbols
+            if let Err(e) = self.document_index.store_import(&import) {
+                debug_print!(self, "Warning: Failed to store import: {}", e);
+            }
         }
 
         // Track traits for later use in relationship extraction
@@ -1600,13 +1621,6 @@ impl SimpleIndexer {
                 if let Some(language_id) = self.file_languages.get(&symbol.file_id) {
                     symbol.language_id = Some(*language_id);
                 }
-                if symbol.file_path.is_none() {
-                    let base_path = self
-                        .get_file_path(symbol.file_id)
-                        .unwrap_or_else(|| "<unknown>".to_string());
-                    let line_number = symbol.range.start_line.saturating_add(1);
-                    symbol.file_path = Some(format!("{base_path}:{line_number}").into());
-                }
                 symbol
             })
             .collect()
@@ -1621,13 +1635,6 @@ impl SimpleIndexer {
                 // Enrich the symbol with language_id from our file_languages cache
                 if let Some(language_id) = self.file_languages.get(&symbol.file_id) {
                     symbol.language_id = Some(*language_id);
-                }
-                if symbol.file_path.is_none() {
-                    let base_path = self
-                        .get_file_path(symbol.file_id)
-                        .unwrap_or_else(|| "<unknown>".to_string());
-                    let line_number = symbol.range.start_line.saturating_add(1);
-                    symbol.file_path = Some(format!("{base_path}:{line_number}").into());
                 }
                 symbol
             })
@@ -1651,25 +1658,18 @@ impl SimpleIndexer {
 
     /// Returns called functions with receiver metadata for enhanced method call analysis.
     ///
-    /// Provides receiver information (instance/static) from stored relationship metadata.
+    /// Provides full relationship metadata including call site line/column and receiver info.
     pub fn get_called_functions_with_metadata(
         &self,
         symbol_id: SymbolId,
-    ) -> Vec<(Symbol, Option<String>)> {
+    ) -> Vec<(Symbol, Option<RelationshipMetadata>)> {
         self.document_index
             .get_relationships_from(symbol_id, RelationKind::Calls)
             .ok()
             .unwrap_or_default()
             .into_iter()
             .filter_map(|(_, to_id, rel)| {
-                self.get_symbol(to_id).map(|symbol| {
-                    // Extract receiver info from metadata context
-                    let receiver_info = rel
-                        .metadata
-                        .and_then(|m| m.context)
-                        .map(|ctx| ctx.to_string());
-                    (symbol, receiver_info)
-                })
+                self.get_symbol(to_id).map(|symbol| (symbol, rel.metadata))
             })
             .collect()
     }
@@ -1685,27 +1685,21 @@ impl SimpleIndexer {
             .collect()
     }
 
-    /// Returns calling functions with receiver metadata for enhanced method call analysis.
+    /// Returns calling functions with full relationship metadata.
     ///
-    /// Provides receiver information (instance/static) from stored relationship metadata.
+    /// Provides call site line/column and receiver information from stored relationship metadata.
     pub fn get_calling_functions_with_metadata(
         &self,
         symbol_id: SymbolId,
-    ) -> Vec<(Symbol, Option<String>)> {
+    ) -> Vec<(Symbol, Option<RelationshipMetadata>)> {
         self.document_index
             .get_relationships_to(symbol_id, RelationKind::Calls)
             .ok()
             .unwrap_or_default()
             .into_iter()
             .filter_map(|(from_id, _, rel)| {
-                self.get_symbol(from_id).map(|symbol| {
-                    // Extract receiver info from metadata context
-                    let receiver_info = rel
-                        .metadata
-                        .and_then(|m| m.context)
-                        .map(|ctx| ctx.to_string());
-                    (symbol, receiver_info)
-                })
+                self.get_symbol(from_id)
+                    .map(|symbol| (symbol, rel.metadata))
             })
             .collect()
     }
@@ -1720,14 +1714,7 @@ impl SimpleIndexer {
     ) -> Option<crate::symbol::context::SymbolContext> {
         use crate::symbol::context::{SymbolContext, SymbolRelationships};
 
-        let mut symbol = self.get_symbol(symbol_id)?;
-        if symbol.file_path.is_none() {
-            let base_path = self
-                .get_file_path(symbol.file_id)
-                .unwrap_or_else(|| "<unknown>".to_string());
-            let line_number = symbol.range.start_line.saturating_add(1);
-            symbol.file_path = Some(format!("{base_path}:{line_number}").into());
-        }
+        let symbol = self.get_symbol(symbol_id)?;
         let file_path = SymbolContext::symbol_location(&symbol);
 
         let mut relationships = SymbolRelationships::default();
@@ -2344,14 +2331,40 @@ impl SimpleIndexer {
                 receiver,
                 method_call.method_name
             );
+
+            // CRITICAL: Check if receiver is from an external import FIRST
+            // This must happen BEFORE we try to resolve, otherwise we might
+            // incorrectly resolve external symbols (e.g., indicatif::ProgressBar)
+            // to local symbols with the same name
+            if context.is_external_import(receiver) {
+                debug_print!(
+                    self,
+                    "Receiver '{}' is from external import, not resolving static method '{}'",
+                    receiver,
+                    method_call.method_name
+                );
+                return None; // External library - don't resolve
+            }
+
             // For static calls, receiver is the type name, try Type::method format
             let static_method = format!("{}::{}", receiver, method_call.method_name);
-            let result = context
-                .resolve(&static_method)
-                .or_else(|| context.resolve(&method_call.method_name));
+
+            // Try qualified resolution
+            if let Some(id) = context.resolve(&static_method) {
+                debug_print!(
+                    self,
+                    "Resolved static method {} to symbol_id: {:?}",
+                    static_method,
+                    id
+                );
+                return Some(id);
+            }
+
+            // Fall back to method name only (receiver was already checked as non-external above)
+            let result = context.resolve(&method_call.method_name);
             debug_print!(
                 self,
-                "Static method resolution result for {}: {:?}",
+                "Static method fallback resolution for {}: {:?}",
                 method_call.method_name,
                 result
             );
@@ -3004,7 +3017,7 @@ mod tests {
             kind: SymbolKind::Trait,
             range: crate::Range::new(0, 0, 0, 0),
             file_id,
-            file_path: None,
+            file_path: "<unknown>".into(),
             visibility: Visibility::Public,
             doc_comment: None,
             signature: None,
@@ -3019,7 +3032,7 @@ mod tests {
             kind: SymbolKind::Struct,
             range: crate::Range::new(1, 0, 1, 0),
             file_id,
-            file_path: None,
+            file_path: "<unknown>".into(),
             visibility: Visibility::Public,
             doc_comment: None,
             signature: None,
@@ -3714,7 +3727,7 @@ pub struct Another {
             module_path: None,
             file_id: FileId(1),
             range: crate::Range::new(0, 10, 0, 20),
-            file_path: None,
+            file_path: "<unknown>".into(),
             visibility: Visibility::Private,
             doc_comment: None,
             scope_context: None,
@@ -3758,7 +3771,7 @@ pub struct Another {
             module_path: None,
             file_id: FileId(1),
             range: crate::Range::new(0, 10, 0, 20),
-            file_path: None,
+            file_path: "<unknown>".into(),
             visibility: Visibility::Public,
             doc_comment: None,
             scope_context: None,
@@ -3799,7 +3812,7 @@ pub struct Another {
             module_path: None,
             file_id: FileId(1),
             range: crate::Range::new(0, 10, 0, 20),
-            file_path: None,
+            file_path: "<unknown>".into(),
             visibility: Visibility::Public,
             doc_comment: None,
             scope_context: None,
@@ -3847,7 +3860,7 @@ pub struct Another {
             module_path: None,
             file_id: FileId(1),
             range: crate::Range::new(0, 10, 0, 20),
-            file_path: None,
+            file_path: "<unknown>".into(),
             visibility: Visibility::Private,
             doc_comment: None,
             scope_context: None,
@@ -3862,7 +3875,7 @@ pub struct Another {
             module_path: None,
             file_id: FileId(2),
             range: crate::Range::new(0, 10, 0, 20),
-            file_path: None,
+            file_path: "<unknown>".into(),
             visibility: Visibility::Private,
             doc_comment: None,
             scope_context: None,
@@ -3877,7 +3890,7 @@ pub struct Another {
             module_path: None,
             file_id: FileId(3),
             range: crate::Range::new(0, 10, 0, 20),
-            file_path: None,
+            file_path: "<unknown>".into(),
             visibility: Visibility::Private,
             doc_comment: None,
             scope_context: None,
