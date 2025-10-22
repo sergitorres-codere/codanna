@@ -53,17 +53,28 @@ Query indexed symbols, relationships, and dependencies
 | Subcommand | Description |
 |------------|-------------|
 | `retrieve symbol` | Find a symbol by name |
-| `retrieve calls` | Show what functions a given function calls |
-| `retrieve callers` | Show what functions call a given function |
+| `retrieve calls` | Show what functions a given function calls (accepts `symbol_id:ID`) |
+| `retrieve callers` | Show what functions call a given function (accepts `symbol_id:ID`) |
 | `retrieve implementations` | Show what types implement a given trait |
 | `retrieve uses` | Show what types a given symbol uses |
 | `retrieve search` | Search for symbols using full-text search |
 | `retrieve defines` | Show what methods a type or trait defines |
 | `retrieve dependencies` | Show dependency analysis for a symbol |
-| `retrieve describe` | Show information about a symbol |
+| `retrieve describe` | Show information about a symbol (accepts `symbol_id:ID`) |
 
 **All retrieve subcommands support:**
 - `--json` - Output in JSON format
+
+**Using symbol_id:**
+```bash
+# By name (may be ambiguous)
+codanna retrieve calls process_file
+
+# By ID (always unambiguous)
+codanna retrieve calls symbol_id:1883
+
+# Works with: calls, callers, describe
+```
 
 `codanna serve`
 Start MCP server with optional HTTP/HTTPS modes

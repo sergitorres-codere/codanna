@@ -98,42 +98,45 @@ codanna mcp semantic_search_with_context query:"parse config" lang:typescript li
 Show functions called by a given function.
 
 **Parameters:**
-- `function_name` (required) - Name of the function to analyze
+- `function_name` OR `symbol_id` (one required) - Function name or symbol ID
 
 **Example:**
 ```bash
 codanna mcp get_calls process_file
+codanna mcp get_calls symbol_id:1883
 codanna mcp get_calls main --json
 ```
 
-**Returns:** List of functions that the specified function calls.
+**Returns:** List of functions that the specified function calls. Each result includes `[symbol_id:123]` for follow-up queries.
 
 ### `find_callers`
 
 Show functions that call a given function.
 
 **Parameters:**
-- `function_name` (required) - Name of the function to find callers for
+- `function_name` OR `symbol_id` (one required) - Function name or symbol ID
 
 **Example:**
 ```bash
 codanna mcp find_callers init
+codanna mcp find_callers symbol_id:1883
 codanna mcp find_callers parse_file --json
 ```
 
-**Returns:** List of functions that call the specified function.
+**Returns:** List of functions that call the specified function. Each result includes `[symbol_id:123]` for follow-up queries.
 
 ### `analyze_impact`
 
 Analyze the impact radius of symbol changes.
 
 **Parameters:**
-- `symbol_name` (required) - Name of the symbol to analyze impact for
+- `symbol_name` OR `symbol_id` (one required) - Symbol name or symbol ID
 - `max_depth` - Maximum depth to search (default: 3)
 
 **Example:**
 ```bash
 codanna mcp analyze_impact Parser
+codanna mcp analyze_impact symbol_id:1883
 codanna mcp analyze_impact SimpleIndexer --json
 ```
 
@@ -142,6 +145,7 @@ codanna mcp analyze_impact SimpleIndexer --json
 - What USES this as a type (fields, parameters, returns)
 - What RENDERS/COMPOSES this (JSX: `<Component>`, Rust: struct fields, etc.)
 - Full dependency graph across files
+- Each result includes `[symbol_id:123]` for unambiguous follow-up
 
 ### `get_index_info`
 
@@ -201,6 +205,28 @@ codanna mcp semantic_search_docs query:"config" --json | \
 jq '.data[] | select(.score > 0.5)'
 ```
 
+## Using symbol_id for Unambiguous Queries
+
+All tools return `[symbol_id:123]` in their results. Use these IDs for precise follow-up queries instead of symbol names.
+
+**Benefits:**
+- **Unambiguous** - Works even when multiple symbols share the same name
+- **Efficient** - No disambiguation needed, direct lookup
+- **Workflow-optimized** - Copy ID from results, paste into next command
+
+**Example workflow:**
+```bash
+# Step 1: Search returns symbol_id
+codanna mcp semantic_search_with_context query:"indexing" limit:1 --json
+# Returns: SimpleIndexer [symbol_id:1883]
+
+# Step 2: Use symbol_id for precise follow-up
+codanna mcp get_calls symbol_id:1883
+
+# Step 3: Follow relationships with IDs from results
+codanna mcp analyze_impact symbol_id:1926
+```
+
 ## Tool Workflow
 
 ### Recommended Approach
@@ -222,6 +248,7 @@ jq '.data[] | select(.score > 0.5)'
 - **Need complete picture?** → Start with `semantic_search_with_context` or `analyze_impact`
 - **Need specific invocations?** → Use `get_calls` or `find_callers`
 - **Unsure?** → Use Tier 1 tools, they show everything
+- **Following relationships?** → Use `symbol_id:ID` from previous results
 
 ## System Messages
 

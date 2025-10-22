@@ -31,11 +31,21 @@ codanna mcp semantic_search_with_context query:"error handling" limit:2 lang:rus
 ```bash
 # Find a symbol, show what it calls, and trace one level deeper
 codanna mcp semantic_search_with_context query:"file processing" limit:1 --json | \
-jq -r '.data[0].symbol.name' | \
+jq -r '.data[0].symbol.id' | \
 xargs -I {} sh -c '
-  echo "=== Symbol: {} ==="
-  codanna mcp get_calls {} --json | jq -r ".data[]? | \"\(.name) - \(.file_path):\(.range.start_line)-\(.range.end_line)\""
+  echo "=== Symbol ID: {} ==="
+  codanna mcp get_calls symbol_id:{} --json | jq -r ".data[]? | \"\(.name) [symbol_id:\(.id)] - \(.file_path):\(.range.start_line)-\(.range.end_line)\""
 '
+```
+
+### Using symbol_id for Unambiguous Queries
+```bash
+# Extract symbol_id from search results and use for precise follow-up
+codanna mcp semantic_search_with_context query:"error handling" limit:1 --json | \
+jq -r '.data[0] | "Symbol: \(.symbol.name) [symbol_id:\(.symbol.id)]"'
+
+# Direct lookup by ID (no ambiguity)
+codanna mcp get_calls symbol_id:1883 --json | jq -r '.data[] | "\(.name) [symbol_id:\(.id)]"'
 ```
 
 ### Extract System Messages

@@ -30,10 +30,15 @@ Quick reference documentation for Codanna.
 | `search_symbols` | `query`, `limit`, `kind`, `module` |
 | `semantic_search_docs` | `query`, `limit`, `threshold`, `lang` |
 | `semantic_search_with_context` | `query`, `limit`, `threshold`, `lang` |
-| `get_calls` | `function_name` |
-| `find_callers` | `function_name` |
-| `analyze_impact` | `symbol_name`, `max_depth` |
+| `get_calls` | `function_name` OR `symbol_id` (one required) |
+| `find_callers` | `function_name` OR `symbol_id` (one required) |
+| `analyze_impact` | `symbol_name` OR `symbol_id` (one required), `max_depth` |
 | `get_index_info` | None |
+
+**Using symbol_id:**
+- All tools return `[symbol_id:123]` for unambiguous lookup
+- Use `symbol_id:ID` instead of name for precise queries
+- Example: `codanna mcp get_calls symbol_id:1883`
 
 ### Language Filtering
 

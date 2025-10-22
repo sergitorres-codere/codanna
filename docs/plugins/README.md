@@ -23,6 +23,22 @@ codanna plugin add https://github.com/bartolli/codanna-plugins.git codanna --ref
 
 The CLI method gives you version control - install different tags per project.
 
+### Token-Efficient Workflows
+
+The plugin includes Node.js scripts that parse JSON output to save tokens. See [codanna-plugins](https://github.com/bartolli/codanna-plugins) for examples.
+
+**Example: Piping with Node.js wrapper**
+```bash
+# Node script handles JSON parsing and formatting
+node .claude/scripts/codanna/context-provider.js find "error handling" --limit=3
+
+# Output includes symbol_id for follow-up queries
+# 1. IndexError (Enum) [symbol_id:205]
+#    Use: node .claude/scripts/codanna/context-provider.js calls symbol_id:205
+```
+
+This approach reduces token usage by pre-processing results before presenting to the AI assistant.
+
 ## Quick Start
 
 **Install our core plugin**

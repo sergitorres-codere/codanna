@@ -28,14 +28,17 @@ Complete documentation for using Codanna effectively.
 | Tool | Description | Example |
 |------|-------------|---------|
 | `find_symbol` | Find a symbol by exact name | `codanna mcp find_symbol main` |
-| `get_calls` | Show functions called by a given function | `codanna mcp get_calls process_file` |
-| `find_callers` | Show functions that call a given function | `codanna mcp find_callers init` |
+| `get_calls` | Show functions called by a given function | `codanna mcp get_calls process_file`<br>`codanna mcp get_calls symbol_id:1883` |
+| `find_callers` | Show functions that call a given function | `codanna mcp find_callers init`<br>`codanna mcp find_callers symbol_id:1883` |
+| `analyze_impact` | Analyze the impact radius of symbol changes | `codanna mcp analyze_impact Parser`<br>`codanna mcp analyze_impact symbol_id:1883` |
 
 ### Complex Tools (Key:Value Arguments)
 | Tool | Description | Example |
 |------|-------------|---------|
 | `search_symbols` | Search symbols with full-text fuzzy matching | `codanna mcp search_symbols query:parse kind:function limit:10` |
 | `semantic_search_docs` | Search using natural language queries | `codanna mcp semantic_search_docs query:"error handling" limit:5` |
+
+**Tip:** All tools return `[symbol_id:123]` in results. Use `symbol_id:ID` for unambiguous follow-up queries instead of symbol names.
 
 ## Next Steps
 

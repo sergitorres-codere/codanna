@@ -104,50 +104,53 @@ codanna mcp semantic_search_docs query:"authentication" threshold:0.5
 
 ### Finding Implementation Details
 1. Start broad with semantic search
-2. Narrow with specific symbol search
-3. Trace relationships
+2. Extract symbol_id from results
+3. Trace relationships using IDs
 
 ```bash
 # Find authentication concepts
 codanna mcp semantic_search_docs query:"user authentication" limit:5
+# Returns: authenticate_user [symbol_id:456]
 
-# Find specific auth function
+# Use symbol_id for unambiguous lookup
+codanna mcp find_callers symbol_id:456
+
+# Or by name if unambiguous
 codanna mcp find_symbol authenticate_user
-
-# See what calls it
-codanna mcp find_callers authenticate_user
 ```
 
 ### Understanding Code Flow
 1. Find entry point
-2. Trace calls
+2. Trace calls using symbol_id
 3. Analyze impact
 
 ```bash
 # Find main processing function
 codanna mcp semantic_search_with_context query:"main processing pipeline"
+# Returns: process_file [symbol_id:789]
 
-# Trace what it calls
-codanna mcp get_calls process_file
+# Trace what it calls (using ID for precision)
+codanna mcp get_calls symbol_id:789
 
 # Understand impact
-codanna mcp analyze_impact process_file
+codanna mcp analyze_impact symbol_id:789
 ```
 
 ### Debugging Issues
 1. Search for error-related code
-2. Find callers
+2. Find callers using symbol_id
 3. Trace to source
 
 ```bash
 # Find error handling
 codanna mcp semantic_search_docs query:"error recovery retry logic"
+# Returns: handle_error [symbol_id:234]
 
-# Find who calls the error handler
-codanna mcp find_callers handle_error
+# Find who calls the error handler (use ID from previous result)
+codanna mcp find_callers symbol_id:234
 
 # Trace back to source
-codanna mcp analyze_impact handle_error
+codanna mcp analyze_impact symbol_id:234
 ```
 
 ## Advanced Techniques
@@ -169,10 +172,12 @@ jq '.data[0]'
 ```
 
 This returns:
-- The symbol itself
-- What calls it
-- What it calls
+- The symbol itself with `[symbol_id:123]`
+- What calls it (each with symbol_id)
+- What it calls (each with symbol_id)
 - Full impact analysis
+
+Use the returned symbol_ids for precise follow-up queries.
 
 ## Common Issues
 
@@ -204,10 +209,23 @@ codanna mcp semantic_search_docs query:"components" lang:typescript
 ## Best Practices
 
 1. **Start with semantic_search_with_context** - It provides the most complete picture
-2. **Use language filters** - Reduces noise by up to 75% in mixed codebases
-3. **Write good documentation** - Better docs = better search results
-4. **Chain searches** - Use results from one search to inform the next
-5. **Use JSON output** - Enables powerful piping and filtering
+2. **Use symbol_id for follow-ups** - Eliminates ambiguity and saves queries
+3. **Use language filters** - Reduces noise by up to 75% in mixed codebases
+4. **Write good documentation** - Better docs = better search results
+5. **Chain searches** - Use symbol_ids from one search in the next
+6. **Use JSON output** - Enables powerful piping and filtering
+
+**Example workflow with symbol_id:**
+```bash
+# Step 1: Find with semantic search
+codanna mcp semantic_search_with_context query:"config parser" limit:1 --json
+# Extract: parse_config [symbol_id:567]
+
+# Step 2: Direct follow-up (no ambiguity)
+codanna mcp get_calls symbol_id:567
+codanna mcp find_callers symbol_id:567
+codanna mcp analyze_impact symbol_id:567
+```
 
 ## Performance Tips
 

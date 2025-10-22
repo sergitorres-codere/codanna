@@ -194,7 +194,7 @@ enum Commands {
     #[command(
         about = "Search symbols, find callers/callees, analyze impact",
         long_about = "Query indexed symbols, relationships, and dependencies.",
-        after_help = "Examples:\n  codanna retrieve symbol main\n  codanna retrieve callers process_file\n  codanna retrieve calls init\n  codanna retrieve implementations Parser\n  codanna retrieve describe OutputManager\n  codanna retrieve search \"parse\" --limit 10\n\nJSON paths:\n  retrieve symbol     .data.items[0].symbol.name\n  retrieve search     .data.items[].symbol.name\n  retrieve callers    .data.items[].symbol.name\n  retrieve describe   .data.items[0].symbol.name"
+        after_help = "Examples:\n  codanna retrieve symbol main\n  codanna retrieve callers process_file\n  codanna retrieve callers symbol_id:1771\n  codanna retrieve calls init\n  codanna retrieve calls symbol_id:1771\n  codanna retrieve implementations Parser\n  codanna retrieve describe OutputManager\n  codanna retrieve search \"parse\" --limit 10\n\nJSON paths:\n  retrieve symbol     .data.items[0].symbol.name\n  retrieve search     .data.items[].symbol.name\n  retrieve callers    .data.items[].symbol.name\n  retrieve describe   .data.items[0].symbol.name"
     )]
     Retrieve {
         #[command(subcommand)]
@@ -457,7 +457,7 @@ enum RetrieveQuery {
 
     /// Show what functions a given function calls
     #[command(
-        after_help = "Examples:\n  codanna retrieve calls process_file\n  codanna retrieve calls function:process_file --json"
+        after_help = "Examples:\n  codanna retrieve calls process_file\n  codanna retrieve calls symbol_id:1771\n  codanna retrieve calls function:process_file --json"
     )]
     Calls {
         /// Positional arguments (function name and/or key:value pairs)
@@ -470,7 +470,7 @@ enum RetrieveQuery {
 
     /// Show what functions call a given function
     #[command(
-        after_help = "Examples:\n  codanna retrieve callers main\n  codanna retrieve callers function:main --json\n  codanna retrieve callers init --json | jq -r '.[].name'"
+        after_help = "Examples:\n  codanna retrieve callers main\n  codanna retrieve callers symbol_id:1771\n  codanna retrieve callers function:main --json"
     )]
     Callers {
         /// Positional arguments (function name and/or key:value pairs)
