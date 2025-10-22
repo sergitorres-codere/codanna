@@ -8,11 +8,15 @@ Codanna plugins are project-scoped. They install to `.claude/` in your project d
 
 ## codanna-cc Plugin
 
-Available via Claude Code's `/plugin` command or codanna's CLI. Pick `codanna-cc` plugin.
+Available via Claude Code's `/plugin` command or codanna's CLI.
 
 **Via Claude Code:**
 ```bash
-/plugin  # Browse and install codanna-cc
+# Add the Codanna marketplace
+/plugin marketplace add bartolli/codanna-plugins
+
+# Install the plugin
+/plugin install codanna-cc@codanna-plugins
 ```
 
 **Via Codanna CLI:**

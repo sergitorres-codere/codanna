@@ -46,7 +46,7 @@ fn test_external_import_detection_prevents_local_resolution() {
     };
 
     println!("\n1. Populating external import: {}", external_import.path);
-    context.populate_imports(&[external_import.clone()]);
+    context.populate_imports(std::slice::from_ref(&external_import));
     register_binding(
         &mut context,
         &external_import,
@@ -116,7 +116,7 @@ fn test_internal_import_not_flagged_as_external() {
     };
 
     println!("1. Populating internal import: {}", internal_import.path);
-    context.populate_imports(&[internal_import.clone()]);
+    context.populate_imports(std::slice::from_ref(&internal_import));
 
     // Add the internal symbol (this mimics what build_resolution_context does)
     let internal_symbol_id = SymbolId::new(200).unwrap();
@@ -178,7 +178,7 @@ fn test_aliased_external_import_detection() {
         "1. Populating aliased import: {} as PBar",
         aliased_import.path
     );
-    context.populate_imports(&[aliased_import.clone()]);
+    context.populate_imports(std::slice::from_ref(&aliased_import));
     register_binding(
         &mut context,
         &aliased_import,
@@ -333,7 +333,7 @@ fn test_external_import_same_name_as_local_symbol() {
     };
 
     println!("\n1. External import: {}", external_import.path);
-    context.populate_imports(&[external_import.clone()]);
+    context.populate_imports(std::slice::from_ref(&external_import));
     register_binding(
         &mut context,
         &external_import,

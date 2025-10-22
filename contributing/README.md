@@ -6,6 +6,7 @@ Thank you for your interest in contributing to Codanna! This guide focuses on th
 
 - **[Development Guidelines](./development/guidelines.md)** - Rust coding principles (MUST READ)
 - **[Adding Language Support](./development/language-support.md)** - Complete language implementation guide
+- **[CI Local/Remote Parity](./development/ci-local-remote-parity.md)** - Ensuring local and remote CI match
 - **[Development Setup](#development-setup)** - Local environment setup
 - **[Testing Workflow](#testing-your-changes)** - Pre-commit and CI/CD scripts
 
@@ -67,6 +68,27 @@ sudo dnf install pkgconfig openssl-devel
    # Run quick checks before committing
    ./contributing/scripts/quick-check.sh
    ```
+
+### Recommended: Codanna Plugin for Claude Code
+
+If you use Claude Code, install the Codanna plugin for better code navigation:
+
+```bash
+# Add the Codanna marketplace
+/plugin marketplace add bartolli/codanna-plugins
+
+# Install the plugin
+/plugin install codanna-cc@codanna-plugins
+
+# Navigate the codebase with /x-ray
+/codanna-cc:x-ray "How does symbol resolution work?"
+/codanna-cc:x-ray "Where is JSX component tracking implemented?"
+
+# Look up specific symbols
+/codanna-cc:symbol TypeScriptParser
+```
+
+The plugin indexes this codebase and provides semantic search, making it easier to understand the architecture and find implementation details.
 
 ## Project Structure
 
