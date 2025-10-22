@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2025-10-21
+
+### Added
+- Symbol ID parameter support for unambiguous queries
+  - `symbol_id` parameter for retrieve commands (calls, callers, describe)
+  - `symbol_id` parameter for MCP tools (get_calls, find_callers, analyze_impact)
+  - CLI help text with symbol_id examples
+  - Token-efficient workflow: search returns `[symbol_id:123]`, use `symbol_id:123` for precise follow-up
+  - Eliminates disambiguation prompts, reduces token usage
+- Import binding system for external dependency detection
+  - Tracks import statements and their bindings
+  - Foundation for external dependency resolution
+- Documentation updates
+  - Symbol_id workflows in User Guide, CLI Reference, and Search Guide
+  - Advanced section with unambiguous query patterns
+  - Plugin documentation with Node.js wrapper examples
+  - Slash command updates with `<relationship_symbol_name|symbol_id:ID>` pattern
+
+### Changed
+- Plugin scripts updated to display and accept symbol_id
+  - Formatters show `[symbol_id:123]` in headers and relationships
+  - Context provider accepts symbol_id for all relationship queries
+  - Applied to Claude Code plugin, codanna-cc, and codanna-base
+- Dependency updates
+  - clap 4.5.41 → 4.5.50
+  - memmap2 0.9.7 → 0.9.9
+  - indicatif 0.18.0 → 0.18.1
+  - rmcp 0.7.0 → 0.8.2
+
 ## [0.6.0] - 2025-10-18
 
 ### Added
