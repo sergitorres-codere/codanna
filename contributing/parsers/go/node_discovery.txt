@@ -1,5 +1,5 @@
 === Go Language ABI-15 COMPREHENSIVE NODE MAPPING ===
-  Generated: 2025-10-08 21:30:53 UTC
+  Generated: 2025-10-23 22:08:17 UTC
   ABI Version: 15
   Node kind count: 115
 
