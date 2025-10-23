@@ -954,16 +954,34 @@ impl CSharpParser {
     ) {
         match node.kind() {
             "using_directive" => {
+                // Try standard field extraction first
                 if let Some(name_node) = node.child_by_field_name("name") {
                     let import_path = code[name_node.byte_range()].to_string();
-
                     imports.push(Import {
-                        path: import_path.clone(),
-                        alias: None, // C# using directives don't typically have aliases
+                        path: import_path,
+                        alias: None,
                         file_id,
-                        is_glob: false, // C# imports entire namespaces (not glob style like Rust *)
-                        is_type_only: false, // C# doesn't have type-only imports like TypeScript
+                        is_glob: false,
+                        is_type_only: false,
                     });
+                } else {
+                    // Fallback: tree-sitter-c-sharp doesn't consistently expose "name" field
+                    // for using_directive nodes. Iterate child nodes to find qualified_name
+                    // or identifier nodes directly.
+                    let mut cursor = node.walk();
+                    for child in node.children(&mut cursor) {
+                        if child.kind() == "qualified_name" || child.kind() == "identifier" {
+                            let import_path = code[child.byte_range()].to_string();
+                            imports.push(Import {
+                                path: import_path,
+                                alias: None,
+                                file_id,
+                                is_glob: false,
+                                is_type_only: false,
+                            });
+                            break;
+                        }
+                    }
                 }
             }
             _ => {
