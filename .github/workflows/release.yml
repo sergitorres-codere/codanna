@@ -210,16 +210,14 @@ jobs:
               [[ "$first" == "false" ]] && echo ","
               first=false
 
-              # Output artifact entry
-              cat <<EOF
-    {
-      "name": "$file",
-      "url": "$url",
-      "sha256": "$sha256",
-      "platform": "$platform",
-      "variant": "$variant"
-    }
-EOF
+              # Output artifact entry (without tab in echo to avoid YAML issues)
+              echo "    {"
+              echo "      \"name\": \"$file\","
+              echo "      \"url\": \"$url\","
+              echo "      \"sha256\": \"$sha256\","
+              echo "      \"platform\": \"$platform\","
+              echo "      \"variant\": \"$variant\""
+              echo "    }"
             done
 
             echo "  ]"
