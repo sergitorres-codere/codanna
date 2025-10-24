@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.2] - 2025-10-23
+
+### Added
+- Binary release workflow with dual variants
+  - Tag-triggered automated releases
+  - 8 pre-built binaries (4 platforms × 2 variants)
+  - Full variant includes MCP server support (--all-features)
+  - Slim variant is CLI only
+  - SHA256/SHA512 checksums for verification
+  - Dist manifest with download URLs for universal installer
+  - Preparation for https://setup.codanna.sh installer
+- C# benchmark command for performance testing
+- C# documentation examples (file-scoped namespaces, comprehensive.cs)
+
+### Fixed
+- C# import extraction fallback for using directives
+- Stats display showing accurate symbol counts and timing
+- Windows test compatibility (platform-agnostic path assertions)
+
 ## [0.6.1] - 2025-10-21
 
 ### Added
