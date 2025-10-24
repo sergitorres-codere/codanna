@@ -1007,12 +1007,11 @@ impl CodeIntelligenceServer {
                 for (idx, (symbol, score)) in results.iter().enumerate() {
                     // Basic symbol information - matching find_symbol format
                     output.push_str(&format!(
-                        "{}. {} - {:?} at {}:{} [symbol_id:{}]\n",
+                        "{}. {} - {:?} at {} [symbol_id:{}]\n",
                         idx + 1,
                         symbol.name,
                         symbol.kind,
-                        symbol.file_path,
-                        symbol.range.start_line + 1,
+                        crate::symbol::context::SymbolContext::symbol_location(symbol),
                         symbol.id.value()
                     ));
                     output.push_str(&format!("   Similarity Score: {score:.3}\n"));

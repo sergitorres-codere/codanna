@@ -68,10 +68,11 @@ impl SymbolContext {
     /// Format location with type info
     pub fn format_location_with_type(&self) -> String {
         format!(
-            "{:?} {} at {}",
+            "{:?} {} at {} [symbol_id:{}]",
             self.symbol.kind,
             self.symbol.name,
-            Self::symbol_location(&self.symbol)
+            Self::symbol_location(&self.symbol),
+            self.symbol.id.value()
         )
     }
 
