@@ -16,6 +16,10 @@ Available for all commands:
 |---------|-------------|
 | `codanna init` | Set up .codanna directory with default configuration |
 | `codanna index` | Build searchable index from codebase |
+| `codanna add-folder` | Add a folder to be indexed |
+| `codanna remove-folder` | Remove a folder from indexed paths |
+| `codanna list-folders` | List all folders that are being indexed |
+| `codanna clean` | Remove symbols from folders no longer in indexed paths |
 | `codanna retrieve` | Query symbols, relationships, and dependencies |
 | `codanna serve` | Start MCP server |
 | `codanna config` | Display active settings |
@@ -33,11 +37,12 @@ Set up .codanna directory with default configuration
 **Options:**
 - `-f, --force` - Force overwrite existing configuration
 
-`codanna index <PATH>`
+`codanna index [PATHS...]`
 Build searchable index from codebase
 
 **Arguments:**
-- `<PATH>` - Path to file or directory to index
+- `[PATHS...]` - Paths to files or directories to index (multiple paths allowed)
+- If no paths provided, uses `indexed_paths` from configuration (must be configured via `add-folder`)
 
 **Options:**
 - `-t, --threads <THREADS>` - Number of threads to use (overrides config)
@@ -45,6 +50,118 @@ Build searchable index from codebase
 - `-p, --progress` - Show progress during indexing
 - `--dry-run` - Dry run - show what would be indexed without indexing
 - `--max-files <MAX_FILES>` - Maximum number of files to index
+
+**Examples:**
+```bash
+# Index a single directory
+codanna index src --progress
+
+# Index multiple directories at once
+codanna index src lib tests --progress
+
+# Use configured indexed paths
+codanna index --progress
+```
+
+**Behavior:**
+- Accepts multiple paths for indexing in a single operation
+- When run without arguments, uses folders from `indexed_paths` configuration
+- Automatically cleans up symbols from removed folders when using configuration
+- Backward compatible with single-path usage
+
+`codanna add-folder <PATH>`
+Add a folder to the indexed paths list
+
+**Arguments:**
+- `<PATH>` - Path to folder to add
+
+**Examples:**
+```bash
+# Add a folder to be indexed
+codanna add-folder /path/to/project
+
+# Add multiple folders
+codanna add-folder src
+codanna add-folder lib
+codanna add-folder tests
+```
+
+**Behavior:**
+- Adds folder to `indexed_paths` in configuration
+- Saves configuration to `.codanna/settings.toml`
+- Paths are canonicalized to absolute paths
+- Prevents duplicate entries
+- Does not automatically index the folder (run `codanna index` after)
+
+`codanna remove-folder <PATH>`
+Remove a folder from the indexed paths list
+
+**Arguments:**
+- `<PATH>` - Path to folder to remove
+
+**Examples:**
+```bash
+# Remove a folder from indexed paths
+codanna remove-folder /path/to/old-project
+
+# Remove by relative path (will be canonicalized)
+codanna remove-folder tests
+```
+
+**Behavior:**
+- Removes folder from `indexed_paths` in configuration
+- Saves configuration to `.codanna/settings.toml`
+- Does not automatically clean symbols (run `codanna clean` or `codanna index` after)
+- Path must exist in configuration or error is returned
+
+`codanna list-folders`
+List all folders that are being indexed
+
+**Examples:**
+```bash
+# List all indexed folders
+codanna list-folders
+```
+
+**Output:**
+```
+Indexed folders:
+  - /path/to/project1
+  - /path/to/project2
+  - /path/to/project3
+```
+
+Or if none configured:
+```
+Indexed folders:
+  (none configured)
+
+To add folders: codanna add-folder <path>
+```
+
+**Behavior:**
+- Displays all folders in `indexed_paths` configuration
+- Shows helpful message if empty
+- Useful for verifying configuration state
+
+`codanna clean`
+Remove symbols from folders no longer in indexed paths
+
+**Examples:**
+```bash
+# Clean up symbols from removed folders
+codanna clean
+```
+
+**Behavior:**
+- Compares current `indexed_paths` with files in index
+- Removes symbols from files not under any configured folder
+- Reports number of files cleaned
+- Saves updated index
+- Safe to run multiple times (idempotent)
+- Requires `indexed_paths` to be configured
+
+**Note:** Running `codanna index` automatically performs cleanup, so this command is optional in most workflows.
 
 `codanna retrieve <SUBCOMMAND>`
 Query indexed symbols, relationships, and dependencies
