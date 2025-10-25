@@ -18,6 +18,7 @@ pub mod io;
 pub mod mcp;
 pub mod parsing;
 pub mod plugins;
+pub mod profiles;
 pub mod project_resolver;
 pub mod relationship;
 pub mod retrieve;

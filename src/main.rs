@@ -333,6 +333,17 @@ enum Commands {
         #[command(subcommand)]
         action: PluginAction,
     },
+
+    /// Manage project profiles
+    #[command(
+        about = "Initialize and manage project profiles",
+        long_about = "Manage project profiles for provider-specific initialization.\n\nProfiles set up project structure, configuration files, and provider integration.",
+        after_help = "Examples:\n  codanna profile init claude\n  codanna profile install claude --source git@github.com:codanna/profiles.git\n  codanna profile list\n  codanna profile status"
+    )]
+    Profile {
+        #[command(subcommand)]
+        action: codanna::profiles::commands::ProfileAction,
+    },
 }
 
 /// Plugin management actions
@@ -2905,6 +2916,88 @@ async fn main() {
             if let Err(e) = result {
                 let code: codanna::io::exit_code::ExitCode = e.exit_code();
                 eprintln!("Plugin operation failed: {e}");
+                std::process::exit(i32::from(code));
+            }
+        }
+
+        Commands::Profile { action } => {
+            // Execute profile management command
+            use codanna::profiles;
+            use codanna::profiles::commands::{ProfileAction, ProviderAction};
+
+            let result = match action {
+                ProfileAction::Init {
+                    profile_name,
+                    source,
+                    force,
+                } => profiles::init_profile(&profile_name, source.as_deref(), force),
+                ProfileAction::Install {
+                    profile_name,
+                    source,
+                    r#ref,
+                    force,
+                } => {
+                    // Check if --source or --ref flags are provided
+                    if source.is_some() || r#ref.is_some() {
+                        // Legacy direct installation from git source (not yet implemented)
+                        eprintln!("Direct git source installation not yet implemented");
+                        eprintln!("Use provider-based installation instead:");
+                        eprintln!("  1. codanna profile provider add <source>");
+                        eprintln!("  2. codanna profile install {profile_name}");
+                        Err(codanna::profiles::error::ProfileError::InvalidManifest {
+                            reason: "Git source installation not yet implemented. Use provider registry.".to_string(),
+                        })
+                    } else {
+                        // Use registry-based installation (supports profile@provider syntax)
+                        codanna::profiles::install_profile_from_registry(&profile_name, force)
+                    }
+                }
+                ProfileAction::List { verbose, json } => {
+                    // TODO: Phase 4 - implement list command
+                    let _ = (verbose, json);
+                    eprintln!("Profile list not yet implemented");
+                    Err(codanna::profiles::error::ProfileError::InvalidManifest {
+                        reason: "List command not yet implemented".to_string(),
+                    })
+                }
+                ProfileAction::Status { verbose } => {
+                    // TODO: Phase 4 - implement status command
+                    let _ = verbose;
+                    eprintln!("Profile status not yet implemented");
+                    Err(codanna::profiles::error::ProfileError::InvalidManifest {
+                        reason: "Status command not yet implemented".to_string(),
+                    })
+                }
+                ProfileAction::Provider { action } => match action {
+                    ProviderAction::Add { source, id } => {
+                        profiles::add_provider(&source, id.as_deref())
+                    }
+                    ProviderAction::Remove { provider_id } => {
+                        profiles::remove_provider(&provider_id)
+                    }
+                    ProviderAction::List { verbose } => profiles::list_providers(verbose),
+                },
+                ProfileAction::Verify {
+                    profile_name,
+                    all,
+                    verbose,
+                } => {
+                    if all {
+                        profiles::verify_all_profiles(verbose)
+                    } else if let Some(name) = profile_name {
+                        profiles::verify_profile(&name, verbose)
+                    } else {
+                        eprintln!("Error: Must provide profile name or use --all");
+                        Err(profiles::error::ProfileError::InvalidManifest {
+                            reason: "Must provide profile name or use --all".to_string(),
+                        })
+                    }
+                }
+            };
+
+            if let Err(e) = result {
+                let code: codanna::io::exit_code::ExitCode = e.exit_code();
+                eprintln!("Profile operation failed: {e}");
                 std::process::exit(i32::from(code));
             }
         }
