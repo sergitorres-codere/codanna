@@ -1,6 +1,6 @@
 # PHP Grammar Analysis
 
-*Generated: 2025-10-23 22:08:17 UTC*
+*Generated: 2025-10-29 20:23:59 UTC*
 
 ## Statistics
 - Total nodes in grammar JSON: 161

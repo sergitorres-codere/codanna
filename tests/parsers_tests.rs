@@ -27,3 +27,15 @@ mod test_python_module_level_calls;
 
 #[path = "parsers/csharp/test_parser.rs"]
 mod test_csharp_parser;
+
+#[path = "parsers/gdscript/test_parser.rs"]
+mod test_gdscript_parser;
+
+#[path = "parsers/gdscript/test_resolution.rs"]
+mod test_gdscript_resolution;
+
+#[path = "parsers/gdscript/test_behavior_api.rs"]
+mod test_gdscript_behavior_api;
+
+#[path = "parsers/gdscript/test_import_extraction.rs"]
+mod test_gdscript_import_extraction;

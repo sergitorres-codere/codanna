@@ -96,7 +96,7 @@ pub struct IndexingConfig {
     pub ignore_patterns: Vec<String>,
 
     /// List of directories to index
-    /// This list is managed by the add-folder and remove-folder commands
+    /// This list is managed by the add-dir and remove-dir commands
     #[serde(default)]
     pub indexed_paths: Vec<PathBuf>,
 }
@@ -760,9 +760,9 @@ impl Settings {
                 result.push_str("\n# Additional patterns to ignore during indexing\n");
             } else if line.starts_with("indexed_paths = ") {
                 result.push_str("\n# List of directories to index\n");
-                result.push_str("# Add folders using: codanna add-folder <path>\n");
-                result.push_str("# Remove folders using: codanna remove-folder <path>\n");
-                result.push_str("# List all folders using: codanna list-folders\n");
+                result.push_str("# Add folders using: codanna add-dir <path>\n");
+                result.push_str("# Remove folders using: codanna remove-dir <path>\n");
+                result.push_str("# List all folders using: codanna list-dirs\n");
             } else if line == "[mcp]" {
                 result.push_str("\n[mcp]\n");
                 prev_line_was_section = true;
@@ -830,7 +830,7 @@ impl Settings {
             } else if line.starts_with("[languages.") {
                 if !in_languages_section {
                     result.push_str("\n# Language-specific settings\n");
-                    result.push_str("# Currently supported: Rust, Python, PHP, TypeScript, Go, C, C++, CSharp\n");
+                    result.push_str("# Currently supported: Rust, Python, PHP, TypeScript, Go, C, C++, CSharp, Gdscript\n");
                     in_languages_section = true;
                 }
                 result.push('\n');
