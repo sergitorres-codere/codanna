@@ -72,6 +72,45 @@ pub enum ProfileAction {
         verbose: bool,
     },
 
+    /// Sync team configuration
+    #[command(
+        about = "Register providers and install profiles from team configuration",
+        after_help = "Examples:\n  codanna profile sync\n  codanna profile sync --force"
+    )]
+    Sync {
+        /// Force installation even if profiles exist or files conflict
+        #[arg(short, long)]
+        force: bool,
+    },
+
+    /// Update an installed profile
+    #[command(
+        about = "Update an installed profile from its provider",
+        after_help = "Examples:\n  codanna profile update codanna\n  codanna profile update codanna --force"
+    )]
+    Update {
+        /// Profile name to update
+        profile_name: String,
+
+        /// Force update even if already at latest commit
+        #[arg(short, long)]
+        force: bool,
+    },
+
+    /// Remove an installed profile
+    #[command(
+        about = "Remove an installed profile from workspace",
+        after_help = "Examples:\n  codanna profile remove codanna\n  codanna profile remove codanna --verbose"
+    )]
+    Remove {
+        /// Profile name to remove
+        profile_name: String,
+
+        /// Show detailed removal information
+        #[arg(short, long)]
+        verbose: bool,
+    },
+
     /// Manage profile providers
     #[command(
         about = "Manage profile providers",

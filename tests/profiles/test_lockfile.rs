@@ -18,6 +18,9 @@ fn test_add_profile() {
         installed_at: "2025-01-11".to_string(),
         files: vec!["CLAUDE.md".to_string(), ".clauderc".to_string()],
         integrity: "abc123".to_string(),
+        commit: None,
+        provider_id: None,
+        source: None,
     };
 
     lockfile.add_profile(entry);
@@ -35,6 +38,9 @@ fn test_find_file_owner() {
         installed_at: "2025-01-11".to_string(),
         files: vec!["CLAUDE.md".to_string()],
         integrity: "def456".to_string(),
+        commit: None,
+        provider_id: None,
+        source: None,
     };
 
     lockfile.add_profile(entry);
@@ -56,6 +62,9 @@ fn test_serialize_with_integrity() {
         installed_at: "2025-01-11T00:00:00Z".to_string(),
         files: vec!["test.txt".to_string()],
         integrity: "sha256hash".to_string(),
+        commit: None,
+        provider_id: None,
+        source: None,
     };
 
     lockfile.add_profile(entry);

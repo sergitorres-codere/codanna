@@ -92,7 +92,14 @@ fn verify_profile_entry(
     }
 
     if verbose {
+        println!("  Calculated integrity: {actual}");
         println!("  Integrity OK ({} files)", entry.files.len());
+    } else {
+        println!(
+            "Profile '{}' verified ({} files)",
+            entry.name,
+            entry.files.len()
+        );
     }
 
     Ok(())
@@ -130,6 +137,9 @@ mod tests {
             installed_at: "2025-01-11".to_string(),
             files: vec!["test1.txt".to_string(), "test2.txt".to_string()],
             integrity,
+            commit: None,
+            provider_id: None,
+            source: None,
         };
 
         let mut lockfile = ProfileLockfile::new();
@@ -166,6 +176,9 @@ mod tests {
             installed_at: "2025-01-11".to_string(),
             files: vec!["test1.txt".to_string(), "test2.txt".to_string()],
             integrity,
+            commit: None,
+            provider_id: None,
+            source: None,
         };
 
         let mut lockfile = ProfileLockfile::new();
@@ -211,6 +224,9 @@ mod tests {
             installed_at: "2025-01-11".to_string(),
             files: vec!["test1.txt".to_string(), "test2.txt".to_string()],
             integrity,
+            commit: None,
+            provider_id: None,
+            source: None,
         };
 
         let mut lockfile = ProfileLockfile::new();
@@ -256,6 +272,9 @@ mod tests {
             installed_at: "2025-01-11".to_string(),
             files: vec!["profile1.txt".to_string()],
             integrity: integrity1,
+            commit: None,
+            provider_id: None,
+            source: None,
         });
 
         lockfile.add_profile(ProfileLockEntry {
@@ -264,6 +283,9 @@ mod tests {
             installed_at: "2025-01-11".to_string(),
             files: vec!["profile2.txt".to_string()],
             integrity: integrity2,
+            commit: None,
+            provider_id: None,
+            source: None,
         });
 
         lockfile.save(&lockfile_path).unwrap();
@@ -291,6 +313,9 @@ mod tests {
             installed_at: "2025-01-11".to_string(),
             files: vec!["test.txt".to_string()],
             integrity: String::new(), // Empty = legacy
+            commit: None,
+            provider_id: None,
+            source: None,
         };
 
         let mut lockfile = ProfileLockfile::new();

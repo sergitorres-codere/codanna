@@ -17,6 +17,9 @@ pub enum ProfileError {
     )]
     FileConflict { path: String, owner: String },
 
+    #[error("{}", format_multiple_conflicts(.conflicts))]
+    MultipleFileConflicts { conflicts: Vec<(String, String)> },
+
     #[error(
         "Profile '{profile}' failed integrity check\n  Expected: {expected}\n  Actual: {actual}\nSuggestion: Try removing and reinstalling the profile"
     )]
@@ -56,15 +59,41 @@ pub enum ProfileError {
     )]
     GitError { message: String },
 
+    #[error(
+        "Git operation failed: {operation}\nSuggestion: Check network connection and repository permissions"
+    )]
+    GitOperationFailed { operation: String },
+
     #[error("JSON parsing error: {0}\nSuggestion: Ensure the JSON file is well-formed")]
     JsonError(#[from] serde_json::Error),
 
     #[error("IO error: {0}\nSuggestion: Check file permissions and disk space")]
     IoError(#[from] io::Error),
+
+    #[error("Git2 error: {0}\nSuggestion: Check repository URL and network connection")]
+    Git2Error(#[from] git2::Error),
 }
 
 /// Result type for profile operations
 pub type ProfileResult<T> = Result<T, ProfileError>;
+
+/// Format multiple file conflicts into a user-friendly message
+fn format_multiple_conflicts(conflicts: &[(String, String)]) -> String {
+    let mut msg = String::from("File conflicts detected:\n\n");
+
+    for (path, owner) in conflicts {
+        let owner_display = if owner == "unknown" {
+            "exists (not tracked by any profile)".to_string()
+        } else {
+            format!("owned by profile '{owner}'")
+        };
+        msg.push_str(&format!("  {path} - {owner_display}\n"));
+    }
+
+    msg.push_str("\nUse --force to install profile-scoped versions alongside existing files.");
+    msg.push_str("\nYour original files will not be affected.");
+    msg
+}
 
 impl ProfileError {
     /// Map profile errors to CLI exit codes for consistent UX.
@@ -74,13 +103,17 @@ impl ProfileError {
                 ExitCode::ConfigError
             }
             ProfileError::FileConflict { .. }
+            | ProfileError::MultipleFileConflicts { .. }
             | ProfileError::IntegrityCheckFailed { .. }
             | ProfileError::AlreadyInstalled { .. } => ExitCode::BlockingError,
             ProfileError::NotInstalled { .. }
             | ProfileError::ProviderNotFound { .. }
             | ProfileError::ProfileNotFoundInProvider { .. }
             | ProfileError::ProfileNotFoundInAnyProvider { .. } => ExitCode::NotFound,
-            ProfileError::GitError { .. } | ProfileError::IoError(_) => ExitCode::GeneralError,
+            ProfileError::GitError { .. }
+            | ProfileError::GitOperationFailed { .. }
+            | ProfileError::Git2Error(_)
+            | ProfileError::IoError(_) => ExitCode::GeneralError,
         }
     }
 }

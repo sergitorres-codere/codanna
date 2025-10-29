@@ -2952,22 +2952,13 @@ async fn main() {
                         codanna::profiles::install_profile_from_registry(&profile_name, force)
                     }
                 }
-                ProfileAction::List { verbose, json } => {
-                    // TODO: Phase 4 - implement list command
-                    let _ = (verbose, json);
-                    eprintln!("Profile list not yet implemented");
-                    Err(codanna::profiles::error::ProfileError::InvalidManifest {
-                        reason: "List command not yet implemented".to_string(),
-                    })
-                }
-                ProfileAction::Status { verbose } => {
-                    // TODO: Phase 4 - implement status command
-                    let _ = verbose;
-                    eprintln!("Profile status not yet implemented");
-                    Err(codanna::profiles::error::ProfileError::InvalidManifest {
-                        reason: "Status command not yet implemented".to_string(),
-                    })
-                }
+                ProfileAction::List { verbose, json } => profiles::list_profiles(verbose, json),
+                ProfileAction::Status { verbose } => profiles::show_status(verbose),
+                ProfileAction::Sync { force } => profiles::sync_team_config(force),
+                ProfileAction::Update {
+                    profile_name,
+                    force,
+                } => profiles::update_profile(&profile_name, force),
                 ProfileAction::Provider { action } => match action {
                     ProviderAction::Add { source, id } => {
                         profiles::add_provider(&source, id.as_deref())
@@ -2977,6 +2968,10 @@ async fn main() {
                     }
                     ProviderAction::List { verbose } => profiles::list_providers(verbose),
                 },
+                ProfileAction::Remove {
+                    profile_name,
+                    verbose,
+                } => profiles::remove_profile(&profile_name, verbose),
                 ProfileAction::Verify {
                     profile_name,
                     all,

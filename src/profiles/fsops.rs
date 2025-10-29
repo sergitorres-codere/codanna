@@ -5,6 +5,7 @@ use super::lockfile::ProfileLockEntry;
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
+use walkdir::WalkDir;
 
 /// Calculate SHA-256 integrity hash for a set of files
 ///
@@ -26,6 +27,49 @@ pub fn calculate_integrity(file_paths: &[String]) -> ProfileResult<String> {
 
     let result = hasher.finalize();
     Ok(format!("{result:x}"))
+}
+
+/// Collect all files from a profile directory
+///
+/// Recursively walks the profile directory and returns relative paths to all files.
+/// Excludes:
+/// - Directories
+/// - .git directories and their contents
+/// - profile.json manifest file
+///
+/// Plugin reference: src/plugins/fsops.rs:47-105 (copy_plugin_payload)
+pub fn collect_all_files(profile_dir: &Path) -> ProfileResult<Vec<String>> {
+    let mut files = Vec::new();
+
+    for entry in WalkDir::new(profile_dir) {
+        let entry = entry.map_err(|e| ProfileError::IoError(std::io::Error::other(e)))?;
+
+        // Skip directories
+        if entry.file_type().is_dir() {
+            continue;
+        }
+
+        // Get relative path
+        let relative = entry
+            .path()
+            .strip_prefix(profile_dir)
+            .expect("walkdir entry should be under profile_dir");
+
+        // Skip .git directories
+        if relative.components().any(|c| c.as_os_str() == ".git") {
+            continue;
+        }
+
+        // Skip profile.json manifest
+        let normalized = relative.to_string_lossy().replace('\\', "/");
+        if normalized == "profile.json" {
+            continue;
+        }
+
+        files.push(normalized);
+    }
+
+    Ok(files)
 }
 
 /// Remove profile files and clean up empty directories
@@ -359,6 +403,9 @@ mod tests {
             installed_at: "2025-01-11".to_string(),
             files: vec!["test1.txt".to_string(), "subdir/test2.txt".to_string()],
             integrity: "abc123".to_string(),
+            commit: None,
+            provider_id: None,
+            source: None,
         };
 
         let backup = backup_profile(workspace, &entry).unwrap();
@@ -390,6 +437,9 @@ mod tests {
             installed_at: "2025-01-11".to_string(),
             files: vec!["exists.txt".to_string(), "missing.txt".to_string()],
             integrity: "abc123".to_string(),
+            commit: None,
+            provider_id: None,
+            source: None,
         };
 
         let backup = backup_profile(workspace, &entry).unwrap();
@@ -417,6 +467,9 @@ mod tests {
             installed_at: "2025-01-11".to_string(),
             files: vec!["test1.txt".to_string(), "subdir/test2.txt".to_string()],
             integrity: "abc123".to_string(),
+            commit: None,
+            provider_id: None,
+            source: None,
         };
 
         // Create backup
@@ -452,6 +505,9 @@ mod tests {
             installed_at: "2025-01-11".to_string(),
             files: vec!["deep/nested/file.txt".to_string()],
             integrity: "abc123".to_string(),
+            commit: None,
+            provider_id: None,
+            source: None,
         };
 
         // Create backup
@@ -490,6 +546,9 @@ mod tests {
                 "dir/file3.txt".to_string(),
             ],
             integrity: "xyz789".to_string(),
+            commit: None,
+            provider_id: None,
+            source: None,
         };
 
         // Backup

@@ -31,18 +31,18 @@ fn test_install_profile_creates_structure() {
     fs::create_dir_all(&workspace).unwrap();
 
     // Install
-    install_profile("claude", &profiles_dir, &workspace, false).unwrap();
+    install_profile("claude", &profiles_dir, &workspace, false, None, None, None).unwrap();
 
     // Verify file installed
     assert!(workspace.join("CLAUDE.md").exists());
 
-    // Verify manifest created
-    let manifest_path = workspace.join(".codanna/manifest.json");
-    assert!(manifest_path.exists());
-
     // Verify lockfile created
     let lockfile_path = workspace.join(".codanna/profiles.lock.json");
     assert!(lockfile_path.exists());
+
+    // Verify profile entry in lockfile
+    let lockfile = ProfileLockfile::load(&lockfile_path).unwrap();
+    assert!(lockfile.get_profile("claude").is_some());
 }
 
 #[test]
@@ -53,7 +53,15 @@ fn test_install_profile_not_found() {
     fs::create_dir_all(&profiles_dir).unwrap();
     fs::create_dir_all(&workspace).unwrap();
 
-    let result = install_profile("nonexistent", &profiles_dir, &workspace, false);
+    let result = install_profile(
+        "nonexistent",
+        &profiles_dir,
+        &workspace,
+        false,
+        None,
+        None,
+        None,
+    );
     assert!(result.is_err());
 }
 
@@ -77,11 +85,16 @@ fn test_install_profile_updates_manifest() {
     fs::create_dir_all(&workspace).unwrap();
 
     // Install
-    install_profile("claude", &profiles_dir, &workspace, false).unwrap();
+    install_profile("claude", &profiles_dir, &workspace, false, None, None, None).unwrap();
 
-    // Verify manifest content
-    let manifest_content = fs::read_to_string(workspace.join(".codanna/manifest.json")).unwrap();
-    assert!(manifest_content.contains("\"profile\": \"claude\""));
+    // Verify lockfile content
+    let lockfile_path = workspace.join(".codanna/profiles.lock.json");
+    let lockfile = ProfileLockfile::load(&lockfile_path).unwrap();
+
+    // Verify profile entry exists with correct name
+    let entry = lockfile.get_profile("claude").unwrap();
+    assert_eq!(entry.name, "claude");
+    assert_eq!(entry.version, "1.0.0");
 }
 
 #[test]
@@ -105,10 +118,10 @@ fn test_install_profile_already_installed() {
     fs::create_dir_all(&workspace).unwrap();
 
     // Install first time
-    install_profile("claude", &profiles_dir, &workspace, false).unwrap();
+    install_profile("claude", &profiles_dir, &workspace, false, None, None, None).unwrap();
 
     // Try to install again without force
-    let result = install_profile("claude", &profiles_dir, &workspace, false);
+    let result = install_profile("claude", &profiles_dir, &workspace, false, None, None, None);
     assert!(result.is_err());
     match result {
         Err(ProfileError::AlreadyInstalled { name, version }) => {
@@ -140,7 +153,7 @@ fn test_install_profile_with_force() {
     fs::create_dir_all(&workspace).unwrap();
 
     // Install first time
-    install_profile("claude", &profiles_dir, &workspace, false).unwrap();
+    install_profile("claude", &profiles_dir, &workspace, false, None, None, None).unwrap();
     let content1 = fs::read_to_string(workspace.join("CLAUDE.md")).unwrap();
     assert_eq!(content1, "# Original");
 
@@ -148,7 +161,7 @@ fn test_install_profile_with_force() {
     fs::write(claude_dir.join("CLAUDE.md"), "# Updated").unwrap();
 
     // Install again with force
-    install_profile("claude", &profiles_dir, &workspace, true).unwrap();
+    install_profile("claude", &profiles_dir, &workspace, true, None, None, None).unwrap();
     let content2 = fs::read_to_string(workspace.join("CLAUDE.md")).unwrap();
     assert_eq!(content2, "# Updated");
 }
@@ -174,7 +187,7 @@ fn test_install_profile_calculates_integrity() {
     fs::create_dir_all(&workspace).unwrap();
 
     // Install
-    install_profile("claude", &profiles_dir, &workspace, false).unwrap();
+    install_profile("claude", &profiles_dir, &workspace, false, None, None, None).unwrap();
 
     // Verify integrity was calculated
     let lockfile_path = workspace.join(".codanna/profiles.lock.json");
@@ -217,10 +230,28 @@ fn test_install_profile_conflict_creates_sidecar() {
     fs::create_dir_all(&workspace).unwrap();
 
     // Install profile A
-    install_profile("profile-a", &profiles_dir, &workspace, false).unwrap();
+    install_profile(
+        "profile-a",
+        &profiles_dir,
+        &workspace,
+        false,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
 
     // Install profile B with --force (should create sidecar for conflict)
-    install_profile("profile-b", &profiles_dir, &workspace, true).unwrap();
+    install_profile(
+        "profile-b",
+        &profiles_dir,
+        &workspace,
+        true,
+        None,
+        None,
+        None,
+    )
+    .unwrap();
 
     // Verify profile A file preserved
     let content_a = fs::read_to_string(workspace.join("CLAUDE.md")).unwrap();

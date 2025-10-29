@@ -1,6 +1,7 @@
 //! Lockfile management for tracking installed profiles
 
 use super::error::{ProfileError, ProfileResult};
+use super::provider_registry::ProviderSource;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
@@ -34,6 +35,21 @@ pub struct ProfileLockEntry {
     /// Uses default (empty string) for backwards compatibility with old lockfiles
     #[serde(default)]
     pub integrity: String,
+
+    /// Git commit SHA (if installed from git source)
+    /// Uses default (None) for backwards compatibility and local sources
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit: Option<String>,
+
+    /// Provider ID this profile came from
+    /// Uses default (None) for backwards compatibility with old lockfiles
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_id: Option<String>,
+
+    /// Source where this profile was installed from
+    /// Uses default (None) for backwards compatibility with old lockfiles
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<ProviderSource>,
 }
 
 impl ProfileLockfile {

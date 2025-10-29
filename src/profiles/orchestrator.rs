@@ -3,11 +3,14 @@
 //! Plugin reference: src/plugins/mod.rs:971-1107 (execute_install_with_plan)
 
 use super::error::{ProfileError, ProfileResult};
-use super::fsops::{ProfileBackup, backup_profile, calculate_integrity, restore_profile};
-use super::installer::ProfileInstaller;
+use super::fsops::{
+    ProfileBackup, backup_profile, calculate_integrity, collect_all_files, restore_profile,
+};
+use super::installer::{self, ProfileInstaller};
 use super::lockfile::{ProfileLockEntry, ProfileLockfile};
 use super::manifest::ProfileManifest;
-use super::project::ProjectManifest;
+use super::project::ProfilesConfig;
+use super::provider_registry::ProviderSource;
 use std::path::Path;
 
 /// Install a profile to a workspace with atomic operations
@@ -31,11 +34,13 @@ use std::path::Path;
 /// - `profiles_dir`: Directory containing profile definitions
 /// - `workspace`: Target workspace directory
 /// - `force`: Enable reinstall and sidecar creation for conflicts
+/// - `commit`: Optional git commit SHA if installed from git source
+/// - `provider_id`: Optional provider ID for team config tracking
 ///
 /// # Dependencies
 /// - ProfileManifest: Profile definition with files to install
 /// - ProfileInstaller: Handles file copying
-/// - ProjectManifest: Team contract tracking which profile is active
+/// - ProfilesConfig: Team contract tracking which profiles are active
 /// - ProfileLockfile: Tracks installed files for integrity checking
 ///
 /// Plugin reference: src/plugins/mod.rs:971-1107
@@ -44,6 +49,9 @@ pub fn install_profile(
     profiles_dir: &Path,
     workspace: &Path,
     force: bool,
+    commit: Option<String>,
+    provider_id: Option<&str>,
+    source: Option<ProviderSource>,
 ) -> ProfileResult<()> {
     let lockfile_path = workspace.join(".codanna/profiles.lock.json");
     let mut lockfile = ProfileLockfile::load(&lockfile_path)?;
@@ -76,13 +84,25 @@ pub fn install_profile(
         backup = Some(backup_profile(workspace, existing)?);
     }
 
-    // 3. Install files (with conflict resolution based on force flag)
+    // 3. Determine files to install
+    // If manifest.files is empty, install all files from profile directory
+    let files_to_install = if manifest.files.is_empty() {
+        collect_all_files(&profile_dir)?
+    } else {
+        manifest.files.clone()
+    };
+
+    // 4. Pre-flight check: Validate ALL conflicts before copying ANY files
+    // This ensures atomic behavior - we fail fast before touching the filesystem
+    installer::check_all_conflicts(workspace, &files_to_install, profile_name, &lockfile, force)?;
+
+    // 5. Install files (conflicts already validated, safe to proceed)
     let installer = ProfileInstaller::new();
     let provider_name = manifest.provider_name();
     let (installed_files, sidecars) = match installer.install_files(
         &profile_dir,
         workspace,
-        &manifest.files,
+        &files_to_install,
         profile_name,
         provider_name,
         &lockfile,
@@ -130,6 +150,9 @@ pub fn install_profile(
         installed_at: current_timestamp(),
         files: installed_files,
         integrity,
+        commit,
+        provider_id: provider_id.map(String::from),
+        source,
     };
 
     // 7. Update lockfile (with rollback on error)
@@ -142,11 +165,20 @@ pub fn install_profile(
         return Err(e);
     }
 
-    // 8. Update project manifest (with rollback on error)
-    let manifest_path = workspace.join(".codanna/manifest.json");
-    let mut project_manifest = ProjectManifest::load_or_create(&manifest_path)?;
-    project_manifest.profile = profile_name.to_string();
-    if let Err(e) = project_manifest.save(&manifest_path) {
+    // 8. Update team profiles configuration (with rollback on error)
+    let profiles_config_path = workspace.join(".codanna/profiles.json");
+    let mut profiles_config = ProfilesConfig::load(&profiles_config_path)?;
+
+    // Build profile reference (name@provider or just name)
+    let profile_ref = if let Some(provider) = provider_id {
+        format!("{profile_name}@{provider}")
+    } else {
+        profile_name.to_string()
+    };
+
+    profiles_config.add_profile(&profile_ref);
+
+    if let Err(e) = profiles_config.save(&profiles_config_path) {
         // Roll back lockfile
         lockfile.remove_profile(profile_name);
         let _ = lockfile.save(&lockfile_path);

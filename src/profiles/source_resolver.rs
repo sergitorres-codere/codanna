@@ -54,7 +54,7 @@ pub fn resolve_profile_source(
             let url = format!("https://github.com/{repo}.git");
             resolve_git_source(&url, profile_name)
         }
-        ProviderSource::Git { url } => resolve_git_source(url, profile_name),
+        ProviderSource::Url { url } => resolve_git_source(url, profile_name),
     }
 }
 
@@ -101,13 +101,8 @@ fn resolve_git_source(url: &str, profile_name: &str) -> ProfileResult<ResolvedPr
 }
 
 /// Clone git repository using git2
-///
-/// This is a stub for Task 9 (git2 integration).
-/// For now, returns an error indicating git cloning is not yet implemented.
-fn clone_repository(url: &str, _dest: &Path, _git_ref: Option<&str>) -> ProfileResult<String> {
-    Err(ProfileError::InvalidManifest {
-        reason: format!("Git cloning not yet implemented (Task 9)\nAttempted to clone: {url}"),
-    })
+fn clone_repository(url: &str, dest: &Path, git_ref: Option<&str>) -> ProfileResult<String> {
+    super::git::clone_repository(url, dest, git_ref)
 }
 
 #[cfg(test)]
@@ -171,20 +166,20 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_git_source_not_implemented() {
+    #[ignore] // Requires network
+    fn test_resolve_git_source_github() {
+        // This test requires an actual GitHub repo with proper structure
+        // Skip in normal test runs
         let source = ProviderSource::Github {
-            repo: "codanna/test".to_string(),
+            repo: "codanna/test-profiles".to_string(),
         };
 
         let result = resolve_profile_source(&source, "test-profile");
-        assert!(result.is_err());
-
-        match result.unwrap_err() {
-            ProfileError::InvalidManifest { reason } => {
-                assert!(reason.contains("Git cloning not yet implemented"));
-                assert!(reason.contains("Task 9"));
-            }
-            e => panic!("Expected InvalidManifest error, got: {e:?}"),
+        // Would succeed if repo exists with correct structure
+        // For now, just verify it attempts git cloning (not "not implemented" error)
+        if let Err(e) = result {
+            // Should be a git error or profile not found, not "not implemented"
+            assert!(!e.to_string().contains("not yet implemented"));
         }
     }
 

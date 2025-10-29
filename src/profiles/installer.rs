@@ -46,6 +46,55 @@ pub fn generate_sidecar_path(original: &Path, provider: &str) -> PathBuf {
     }
 }
 
+/// Pre-flight check: Validate all file conflicts before installing anything
+///
+/// This ensures atomic behavior - we either install everything or nothing.
+/// Inspired by plugin pattern in src/plugins/fsops.rs:9-44 (copy_plugin_files)
+///
+/// Collects ALL conflicts and returns them in a comprehensive error message.
+pub fn check_all_conflicts(
+    workspace: &Path,
+    files: &[String],
+    profile_name: &str,
+    lockfile: &ProfileLockfile,
+    force: bool,
+) -> ProfileResult<()> {
+    let mut conflicts = Vec::new();
+
+    for file_path in files {
+        let dest_path = workspace.join(file_path);
+
+        if dest_path.exists() {
+            match lockfile.find_file_owner(file_path) {
+                Some(owner) if owner == profile_name => {
+                    // We own it - OK to overwrite (upgrade scenario)
+                    continue;
+                }
+                Some(owner) => {
+                    // Different profile owns it
+                    if !force {
+                        conflicts.push((file_path.clone(), owner.to_string()));
+                    }
+                    // Force enabled - will use sidecar
+                }
+                None => {
+                    // File exists but unknown owner (user's file or orphaned)
+                    if !force {
+                        conflicts.push((file_path.clone(), "unknown".to_string()));
+                    }
+                    // Force enabled - will use sidecar
+                }
+            }
+        }
+    }
+
+    if !conflicts.is_empty() {
+        return Err(ProfileError::MultipleFileConflicts { conflicts });
+    }
+
+    Ok(())
+}
+
 /// Check for file conflicts before profile installation
 ///
 /// Verifies that no files will be overwritten unless they belong to the same profile

@@ -48,8 +48,8 @@ pub struct RegisteredProvider {
 pub enum ProviderSource {
     /// GitHub repository (owner/repo shorthand)
     Github { repo: String },
-    /// Git URL
-    Git { url: String },
+    /// Git URL (any git server: GitLab, Bitbucket, self-hosted, etc.)
+    Url { url: String },
     /// Local directory path
     Local { path: String },
 }
@@ -146,6 +146,14 @@ impl ProviderRegistry {
             .find(|p| p.profiles.contains_key(profile_name))
     }
 
+    /// Find provider ID and provider for a given profile
+    pub fn find_provider_with_id(&self, profile_name: &str) -> Option<(&str, &RegisteredProvider)> {
+        self.providers
+            .iter()
+            .find(|(_, p)| p.profiles.contains_key(profile_name))
+            .map(|(id, p)| (id.as_str(), p))
+    }
+
     /// List all available profiles across all providers
     pub fn list_all_profiles(&self) -> Vec<(String, String, &ProfileInfo)> {
         let mut profiles = Vec::new();
@@ -169,7 +177,7 @@ impl RegisteredProvider {
     pub fn git_url(&self) -> Option<String> {
         match &self.source {
             ProviderSource::Github { repo } => Some(format!("https://github.com/{repo}.git")),
-            ProviderSource::Git { url } => Some(url.clone()),
+            ProviderSource::Url { url } => Some(url.clone()),
             ProviderSource::Local { .. } => None,
         }
     }
@@ -196,9 +204,9 @@ impl ProviderSource {
         }
     }
 
-    /// Create a Git source from URL
+    /// Create a Url source from git URL
     pub fn from_git_url(url: &str) -> Self {
-        Self::Git {
+        Self::Url {
             url: url.to_string(),
         }
     }
@@ -389,10 +397,10 @@ mod tests {
     fn test_parse_git_url() {
         let source = ProviderSource::parse("https://github.com/codanna/claude-provider.git");
         match source {
-            ProviderSource::Git { url } => {
+            ProviderSource::Url { url } => {
                 assert_eq!(url, "https://github.com/codanna/claude-provider.git");
             }
-            _ => panic!("Expected Git source"),
+            _ => panic!("Expected Url source"),
         }
     }
 

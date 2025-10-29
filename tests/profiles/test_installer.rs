@@ -218,6 +218,9 @@ fn test_sidecar_for_different_profile() {
         installed_at: "2025-01-11".to_string(),
         files: vec!["CLAUDE.md".to_string()],
         integrity: "abc123".to_string(),
+        commit: None,
+        provider_id: None,
+        source: None,
     });
 
     let installer = ProfileInstaller::new();
@@ -265,6 +268,9 @@ fn test_same_profile_updates_without_sidecar() {
         installed_at: "2025-01-11".to_string(),
         files: vec!["CLAUDE.md".to_string()],
         integrity: "abc123".to_string(),
+        commit: None,
+        provider_id: None,
+        source: None,
     });
 
     let installer = ProfileInstaller::new();
