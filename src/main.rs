@@ -480,7 +480,7 @@ enum PluginAction {
 enum RetrieveQuery {
     /// Find a symbol by name
     #[command(
-        after_help = "Examples:\n  codanna retrieve symbol main\n  codanna retrieve symbol name:main --json\n  codanna retrieve symbol MyStruct --json | jq '.file'"
+        after_help = "Examples:\n  codanna retrieve symbol main\n  codanna retrieve symbol symbol_id:1771\n  codanna retrieve symbol name:main --json\n  codanna retrieve symbol MyStruct --json | jq '.file'"
     )]
     Symbol {
         /// Positional arguments (symbol name and/or key:value pairs)
@@ -1512,13 +1512,15 @@ async fn main() {
                     // Parse positional arguments for symbol name and key:value pairs
                     let (positional_name, params) = parse_positional_args(&args);
 
-                    // Determine symbol name (priority: positional > key:value)
+                    // Determine symbol name or symbol_id (priority: positional > key:value)
                     let final_name = positional_name
                         .or_else(|| params.get("name").cloned())
+                        .or_else(|| params.get("symbol_id").map(|id| format!("symbol_id:{id}")))
                         .unwrap_or_else(|| {
-                            eprintln!("Error: symbol requires a name");
+                            eprintln!("Error: symbol requires a name or symbol_id");
                             eprintln!("Usage: codanna retrieve symbol main");
                             eprintln!("   or: codanna retrieve symbol name:main");
+                            eprintln!("   or: codanna retrieve symbol symbol_id:1771");
                             std::process::exit(1);
                         });
 

@@ -16,7 +16,22 @@ pub fn retrieve_symbol(
     format: OutputFormat,
 ) -> ExitCode {
     let mut output = OutputManager::new(format);
-    let symbols = indexer.find_symbols_by_name(name, language);
+
+    // Check if name is a symbol_id (format: "symbol_id:123")
+    let symbols = if let Some(id_str) = name.strip_prefix("symbol_id:") {
+        // Direct symbol_id lookup
+        if let Ok(id) = id_str.parse::<u32>() {
+            match indexer.get_symbol(crate::SymbolId(id)) {
+                Some(sym) => vec![sym],
+                None => vec![],
+            }
+        } else {
+            vec![]
+        }
+    } else {
+        // Name-based lookup
+        indexer.find_symbols_by_name(name, language)
+    };
 
     if symbols.is_empty() {
         // Build not found output
