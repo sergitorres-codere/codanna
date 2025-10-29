@@ -5,6 +5,53 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.4] - 2025-10-29
+
+### Profile System
+
+Share workspace configurations (gitignore, hooks, documentation) across projects with version control.
+
+**Commands:**
+- `codanna profile sync` - Register providers and install team profiles
+- `codanna profile install <profile>` - Install individual profile from provider
+- `codanna profile remove <profile>` - Uninstall with directory cleanup
+- `codanna profile status/list/verify` - Inspection and validation
+- `codanna profile provider add/list/remove` - Provider registry management
+
+**Features:**
+- Three-tier configuration: global registry, team config, local lockfile
+- Atomic transactional installation with pre-flight validation and rollback
+- Provider registry supports GitHub, Git URL, and local directory sources
+- File ownership tracking with conflict resolution via sidecars
+- SHA-256 integrity verification
+- Team sync from .codanna/profiles.json with extraKnownProviders
+
+### Multi-Directory Indexing
+
+Index multiple directories with automatic sync mechanism.
+
+**Commands:**
+- `codanna add-dir <path>` - Add directory to indexed paths
+- `codanna remove-dir <path>` - Remove directory from indexed paths
+- `codanna list-dirs` - Display configured indexed directories
+- `codanna index [paths...]` - Accept multiple paths, use config when none provided
+
+**Features:**
+- Automatic sync on every command compares settings.toml with index metadata
+- settings.toml is source of truth, index metadata is derived state
+- New directories in config automatically indexed
+- Removed directories automatically cleaned (symbols, embeddings, metadata)
+- ConfigFileWatcher monitors settings.toml for changes in HTTP/HTTPS modes
+- FileWatcher tracks both config file and source file changes
+
+**Fixed:**
+- Batch management in remove_file now self-contained (calls start_batch before operations)
+
+### Documentation
+
+- CLI reference
+- Configuration documentation simplified
+
 ## [0.6.3] - 2025-10-24
 
 ### Changed
