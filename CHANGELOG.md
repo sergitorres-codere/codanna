@@ -5,6 +5,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.5] - 2025-10-29
+
+### Added
+
+**GDScript Language Support**
+- Added GDScript parser with tree-sitter integration for Godot game engine projects
+- Implemented StatefulBehavior architecture for cross-file symbol tracking
+- Added relative path resolution for GDScript imports (`./file.gd`, `../dir/file.gd`)
+- Implemented `res://` protocol handling for GDScript module paths
+- Added class hierarchy, export variables, and signal extraction
+- Created example files and audit reports for GDScript grammar
+- Added test suite with 850+ lines covering parser, behavior, imports, and resolution
+
+**Retrieve Command Enhancement**
+- Added `symbol_id` parameter support to `retrieve symbol` command
+- Enabled direct symbol lookup by ID without name ambiguity
+
+### Fixed
+
+**Index Command Workflow**
+- Fixed force flag to trigger complete re-index regardless of path source
+- Added automatic path persistence when CLI paths provided to `index` command
+- Prevented redundant auto-sync when force flag is present
+- Added indexed_paths cleanup in `remove_paths()` to maintain tracking state
+- Extracted `add_paths_to_settings()` helper for shared logic between `index` and `add-dir`
+
+**Test Infrastructure**
+- Fixed Windows file URL handling in marketplace resolution tests
+- Resolved path normalization issues for cross-platform compatibility
+
+**Configuration**
+- Updated settings file references to remove non-existent commands
+- Enabled GDScript in default language configuration
+
+### Technical Details
+
+- Total additions: 6,870 lines across 58 files
+- GDScript implementation: 2,000+ lines of parser and behavior code
+- Test coverage: 850+ lines of language-specific tests
+- Co-authored-by: nguyenchiencong (GDScript foundation)
+
 ## [0.6.4] - 2025-10-29
 
 ### Profile System

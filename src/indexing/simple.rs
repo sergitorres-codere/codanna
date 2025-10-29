@@ -565,12 +565,16 @@ impl SimpleIndexer {
     pub fn remove_file(&mut self, path: impl AsRef<Path>) -> IndexResult<()> {
         let path = path.as_ref();
         let path_display = path.display();
-        eprintln!("  remove_file called with path: {path_display}");
+        if self.settings.debug {
+            eprintln!("  remove_file called with path: {path_display}");
+        }
         let path_str = path.to_str().ok_or_else(|| IndexError::FileRead {
             path: path.to_path_buf(),
             source: std::io::Error::new(std::io::ErrorKind::InvalidInput, "Invalid UTF-8 in path"),
         })?;
-        eprintln!("  Querying index for path: '{path_str}'");
+        if self.settings.debug {
+            eprintln!("  Querying index for path: '{path_str}'");
+        }
 
         // Get the FileId for this file path
         let file_info =
@@ -581,7 +585,9 @@ impl SimpleIndexer {
                     cause: e.to_string(),
                 })?;
 
-        eprintln!("  get_file_info result: {file_info:?}");
+        if self.settings.debug {
+            eprintln!("  get_file_info result: {file_info:?}");
+        }
 
         let symbols_to_remove = if let Some(info) = file_info {
             let file_id = info.0;
@@ -615,7 +621,9 @@ impl SimpleIndexer {
             symbols
         } else {
             // File not in index, nothing to remove
-            eprintln!("  File not found in index: {path_str}");
+            if self.settings.debug {
+                eprintln!("  File not found in index: {path_str}");
+            }
             return Ok(());
         };
 
@@ -635,8 +643,10 @@ impl SimpleIndexer {
             }
         }
 
-        let symbol_count = symbols_to_remove.len();
-        eprintln!("  Removed {symbol_count} symbols from {path_str}");
+        if self.settings.debug {
+            let symbol_count = symbols_to_remove.len();
+            eprintln!("  Removed {symbol_count} symbols from {path_str}");
+        }
 
         // Commit the changes to persist them
         self.document_index
@@ -645,7 +655,9 @@ impl SimpleIndexer {
                 operation: "commit after removal".to_string(),
                 cause: e.to_string(),
             })?;
-        eprintln!("  Changes committed to index");
+        if self.settings.debug {
+            eprintln!("  Changes committed to index");
+        }
 
         // Rebuild symbol cache after file removal to remove stale entries
         if let Err(e) = self.build_symbol_cache() {
