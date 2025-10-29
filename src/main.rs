@@ -70,10 +70,12 @@ fn create_custom_help() -> String {
     } else {
         help.push_str(&format!("{}\n", style("Quick Start:").cyan().bold()));
     }
-    help.push_str("  $ codanna init                   # Initialize in current directory\n");
-    help.push_str("  $ codanna index src              # Index your source code\n");
-    help.push_str("  $ codanna serve --http --watch   # HTTP server with OAuth\n");
-    help.push_str("  $ codanna serve --https --watch  # HTTPS server with TLS\n\n");
+    help.push_str("  $ codanna init                      # Initialize in current directory\n");
+    help.push_str("  $ codanna index src lib            # Index multiple directories\n");
+    help.push_str("  $ codanna add-folder tests         # Add tests folder to indexed paths\n");
+    help.push_str("  $ codanna list-folders             # List all indexed folders\n");
+    help.push_str("  $ codanna serve --http --watch     # HTTP server with OAuth\n");
+    help.push_str("  $ codanna serve --https --watch    # HTTPS server with TLS\n\n");
 
     // About section
     help.push_str("Index code and query relationships, symbols, and dependencies.\n\n");
@@ -92,17 +94,21 @@ fn create_custom_help() -> String {
     } else {
         help.push_str(&format!("{}\n", style("Commands:").cyan().bold()));
     }
-    help.push_str("  init        Set up .codanna directory\n");
-    help.push_str("  index       Build searchable index from codebase\n");
-    help.push_str("  retrieve    Query symbols, relationships, and dependencies\n");
-    help.push_str("  serve       Start MCP server\n");
-    help.push_str("  config      Display active settings\n");
-    help.push_str("  mcp-test    Test MCP connection\n");
-    help.push_str("  mcp         Execute MCP tools directly\n");
-    help.push_str("  benchmark   Benchmark parser performance\n");
-    help.push_str("  parse       Output AST nodes in JSONL format\n");
-    help.push_str("  plugin      Manage Claude Code plugins\n");
-    help.push_str("  help        Print this message or the help of the given subcommand(s)\n\n");
+    help.push_str("  init          Set up .codanna directory\n");
+    help.push_str("  index         Build searchable index from codebase\n");
+    help.push_str("  add-folder    Add a folder to be indexed\n");
+    help.push_str("  remove-folder Remove a folder from indexed paths\n");
+    help.push_str("  list-folders  List all folders that are being indexed\n");
+    help.push_str("  clean         Clean up symbols from removed folders\n");
+    help.push_str("  retrieve      Query symbols, relationships, and dependencies\n");
+    help.push_str("  serve         Start MCP server\n");
+    help.push_str("  config        Display active settings\n");
+    help.push_str("  mcp-test      Test MCP connection\n");
+    help.push_str("  mcp           Execute MCP tools directly\n");
+    help.push_str("  benchmark     Benchmark parser performance\n");
+    help.push_str("  parse         Output AST nodes in JSONL format\n");
+    help.push_str("  plugin        Manage Claude Code plugins\n");
+    help.push_str("  help          Print this message or the help of the given subcommand(s)\n\n");
 
     help.push_str("See 'codanna help <command>' for more information on a specific command.\n\n");
 
@@ -166,8 +172,9 @@ enum Commands {
     /// Index source files or directories
     #[command(about = "Build searchable index from codebase")]
     Index {
-        /// Path to file or directory to index
-        path: PathBuf,
+        /// Paths to files or directories to index (multiple paths allowed)
+        #[arg(value_name = "PATH")]
+        paths: Vec<PathBuf>,
 
         /// Number of threads to use (overrides config)
         #[arg(short, long)]
@@ -189,6 +196,28 @@ enum Commands {
         #[arg(long)]
         max_files: Option<usize>,
     },
+
+    /// Add a folder to the indexed paths list
+    #[command(about = "Add a folder to be indexed")]
+    AddFolder {
+        /// Path to folder to add
+        path: PathBuf,
+    },
+
+    /// Remove a folder from the indexed paths list
+    #[command(about = "Remove a folder from indexed paths")]
+    RemoveFolder {
+        /// Path to folder to remove
+        path: PathBuf,
+    },
+
+    /// List all indexed folders
+    #[command(about = "List all folders that are being indexed")]
+    ListFolders,
+
+    /// Clean up symbols from removed folders
+    #[command(about = "Remove symbols from folders no longer in indexed paths")]
+    Clean,
 
     /// Query code relationships and dependencies
     #[command(
@@ -840,8 +869,7 @@ async fn main() {
     let mut indexer = if skip_index_load {
         SimpleIndexer::with_settings(settings.clone()) // Empty indexer, won't be used
     } else {
-        let force_recreate_index =
-            matches!(cli.command, Commands::Index { force: true, ref path, .. } if path.is_dir());
+        let force_recreate_index = matches!(cli.command, Commands::Index { force: true, ref paths, .. } if !paths.is_empty() && paths.iter().all(|p| p.is_dir()));
         if persistence.exists() && !force_recreate_index {
             if config.debug {
                 eprintln!(
@@ -1115,204 +1143,331 @@ async fn main() {
         }
 
         Commands::Index {
-            path,
+            paths,
             force,
             progress,
             dry_run,
             max_files,
             ..
         } => {
-            // Determine if path is a file or directory
-            if path.is_file() {
-                // Initialize project resolution providers even for single file
-                // (needed for proper alias resolution)
-                let provider_registry = create_provider_registry();
-                if let Err(e) = initialize_providers(&provider_registry, &config) {
-                    eprintln!("\n{e}");
+            // If no paths provided, use indexed_paths from config
+            let paths_to_index = if paths.is_empty() {
+                config.get_indexed_paths()
+            } else {
+                paths.clone()
+            };
 
-                    // Display recovery suggestions
-                    let suggestions = e.recovery_suggestions();
-                    if !suggestions.is_empty() {
-                        eprintln!("\nRecovery steps:");
-                        for suggestion in suggestions {
-                            eprintln!("  • {suggestion}");
-                        }
+            if paths_to_index.is_empty() {
+                eprintln!("Error: No paths specified and no indexed paths configured");
+                eprintln!("Usage: codanna index <path> [<path>...]");
+                eprintln!("   or: codanna add-folder <path> to configure indexed paths");
+                std::process::exit(1);
+            }
+
+            // Initialize project resolution providers before indexing
+            let provider_registry = create_provider_registry();
+            if let Err(e) = initialize_providers(&provider_registry, &config) {
+                eprintln!("\n{e}");
+
+                // Display recovery suggestions
+                let suggestions = e.recovery_suggestions();
+                if !suggestions.is_empty() {
+                    eprintln!("\nRecovery steps:");
+                    for suggestion in suggestions {
+                        eprintln!("  • {suggestion}");
                     }
-
-                    // Exit with ConfigError code
-                    use codanna::io::ExitCode;
-                    let exit_code = ExitCode::from_error(&e);
-                    std::process::exit(exit_code as i32);
                 }
 
-                // Single file indexing
-                match indexer.index_file_with_force(&path, force) {
-                    Ok(result) => {
-                        let language_name = path
-                            .extension()
-                            .and_then(|ext| ext.to_str())
-                            .and_then(|ext| {
-                                let registry = codanna::parsing::get_registry();
-                                registry.lock().ok().and_then(|r| {
-                                    r.get_by_extension(ext).map(|def| def.name().to_string())
+                // Exit with ConfigError code
+                use codanna::io::ExitCode;
+                let exit_code = ExitCode::from_error(&e);
+                std::process::exit(exit_code as i32);
+            }
+
+            // Clean up symbols from removed folders if using configured paths
+            if paths.is_empty() && !config.indexing.indexed_paths.is_empty() {
+                match indexer.clean_removed_folders(&config.indexing.indexed_paths) {
+                    Ok(count) if count > 0 => {
+                        println!("Cleaned {count} files from removed folders");
+                    }
+                    Ok(_) => {} // No files removed
+                    Err(e) => eprintln!("Warning: Failed to clean removed folders: {e}"),
+                }
+            }
+
+            // Process each path
+            for path in &paths_to_index {
+                if path.is_file() {
+                    // Single file indexing
+                    match indexer.index_file_with_force(path, force) {
+                        Ok(result) => {
+                            let language_name = path
+                                .extension()
+                                .and_then(|ext| ext.to_str())
+                                .and_then(|ext| {
+                                    let registry = codanna::parsing::get_registry();
+                                    registry.lock().ok().and_then(|r| {
+                                        r.get_by_extension(ext).map(|def| def.name().to_string())
+                                    })
                                 })
-                            })
-                            .unwrap_or_else(|| "unknown".to_string());
+                                .unwrap_or_else(|| "unknown".to_string());
 
-                        if result.is_cached() {
-                            println!(
-                                "Successfully loaded from cache: {} [{}]",
-                                path.display(),
-                                language_name
-                            );
-                        } else {
-                            println!(
-                                "Successfully indexed: {} [{}]",
-                                path.display(),
-                                language_name
-                            );
+                            if result.is_cached() {
+                                println!(
+                                    "Successfully loaded from cache: {} [{}]",
+                                    path.display(),
+                                    language_name
+                                );
+                            } else {
+                                println!(
+                                    "Successfully indexed: {} [{}]",
+                                    path.display(),
+                                    language_name
+                                );
+                            }
+                            println!("File ID: {}", result.file_id().value());
+
+                            // Get symbols for just this file
+                            let file_symbols = indexer.get_symbols_by_file(result.file_id());
+                            println!("Found {} symbols in this file", file_symbols.len());
+                            println!("Total symbols in index: {}", indexer.symbol_count());
+
+                            // Show summary of what was found in this file
+                            let functions = file_symbols
+                                .iter()
+                                .filter(|s| s.kind == SymbolKind::Function)
+                                .count();
+                            let methods = file_symbols
+                                .iter()
+                                .filter(|s| s.kind == SymbolKind::Method)
+                                .count();
+                            let structs = file_symbols
+                                .iter()
+                                .filter(|s| s.kind == SymbolKind::Struct)
+                                .count();
+                            let traits = file_symbols
+                                .iter()
+                                .filter(|s| s.kind == SymbolKind::Trait)
+                                .count();
+
+                            println!("  Functions: {functions}");
+                            println!("  Methods: {methods}");
+                            println!("  Structs: {structs}");
+                            println!("  Traits: {traits}");
                         }
-                        println!("File ID: {}", result.file_id().value());
+                        Err(e) => {
+                            eprintln!("Error indexing file {}: {e}", path.display());
 
-                        // Get symbols for just this file
-                        let file_symbols = indexer.get_symbols_by_file(result.file_id());
-                        println!("Found {} symbols in this file", file_symbols.len());
-                        println!("Total symbols in index: {}", indexer.symbol_count());
+                            // Display recovery suggestions
+                            let suggestions = e.recovery_suggestions();
+                            if !suggestions.is_empty() {
+                                eprintln!("\nSuggestions:");
+                                for suggestion in suggestions {
+                                    eprintln!("  • {suggestion}");
+                                }
+                            }
 
-                        // Show summary of what was found in this file
-                        let functions = file_symbols
-                            .iter()
-                            .filter(|s| s.kind == SymbolKind::Function)
-                            .count();
-                        let methods = file_symbols
-                            .iter()
-                            .filter(|s| s.kind == SymbolKind::Method)
-                            .count();
-                        let structs = file_symbols
-                            .iter()
-                            .filter(|s| s.kind == SymbolKind::Struct)
-                            .count();
-                        let traits = file_symbols
-                            .iter()
-                            .filter(|s| s.kind == SymbolKind::Trait)
-                            .count();
-
-                        println!("  Functions: {functions}");
-                        println!("  Methods: {methods}");
-                        println!("  Structs: {structs}");
-                        println!("  Traits: {traits}");
-
-                        // Save the index
-                        if config.debug {
-                            eprintln!(
-                                "DEBUG: Saving index with {} symbols",
-                                indexer.symbol_count()
-                            );
+                            std::process::exit(1);
                         }
+                    }
+                } else if path.is_dir() {
+                    // Directory indexing
+                    if let Some(max) = max_files {
+                        println!(
+                            "Indexing directory: {} (limited to {} files)",
+                            path.display(),
+                            max
+                        );
+                    } else {
+                        println!("Indexing directory: {}", path.display());
+                    }
+
+                    // Track this folder as indexed
+                    if let Err(e) = indexer.add_indexed_folder(path) {
+                        eprintln!("Warning: Failed to track indexed folder: {e}");
+                    }
+
+                    match indexer
+                        .index_directory_with_options(path, progress, dry_run, force, max_files)
+                    {
+                        Ok(stats) => {
+                            stats.display();
+                        }
+                        Err(e) => {
+                            eprintln!("Error indexing directory {}: {e}", path.display());
+
+                            // Display recovery suggestions
+                            let suggestions = e.recovery_suggestions();
+                            if !suggestions.is_empty() {
+                                eprintln!("\nSuggestions:");
+                                for suggestion in suggestions {
+                                    eprintln!("  • {suggestion}");
+                                }
+                            }
+
+                            std::process::exit(1);
+                        }
+                    }
+                } else {
+                    eprintln!("Error: Path does not exist: {}", path.display());
+                    std::process::exit(1);
+                }
+            }
+
+            // After processing all paths, save the index if not in dry-run mode
+            if !dry_run {
+                // Build symbol cache before saving
+                if let Err(e) = indexer.build_symbol_cache() {
+                    eprintln!("Warning: Failed to build symbol cache: {e}");
+                }
+
+                // Save the index
+                eprintln!(
+                    "\nSaving index with {} total symbols, {} total relationships...",
+                    indexer.symbol_count(),
+                    indexer.relationship_count()
+                );
+                match persistence.save(&indexer) {
+                    Ok(_) => {
+                        println!("Index saved to: {}", config.index_path.display());
+                    }
+                    Err(e) => {
+                        eprintln!("Error: Could not save index: {e}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+        }
+
+        Commands::AddFolder { path } => {
+            // Load the config file
+            let config_path = if let Some(custom_path) = &cli.config {
+                custom_path.clone()
+            } else {
+                Settings::find_workspace_config().unwrap_or_else(|| {
+                    eprintln!("Error: No configuration file found. Run 'codanna init' first.");
+                    std::process::exit(1);
+                })
+            };
+
+            // Load settings from file
+            let mut settings = Settings::load_from(&config_path).unwrap_or_else(|e| {
+                eprintln!("Error loading configuration: {e}");
+                std::process::exit(1);
+            });
+
+            // Add the folder
+            match settings.add_indexed_path(path.clone()) {
+                Ok(_) => {
+                    println!("Added folder to indexed paths: {}", path.display());
+
+                    // Save the updated configuration
+                    if let Err(e) = settings.save(&config_path) {
+                        eprintln!("Error saving configuration: {e}");
+                        std::process::exit(1);
+                    }
+
+                    println!("Configuration saved to: {}", config_path.display());
+                    println!("\nCurrent indexed paths:");
+                    for indexed_path in &settings.indexing.indexed_paths {
+                        println!("  - {}", indexed_path.display());
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        Commands::RemoveFolder { path } => {
+            // Load the config file
+            let config_path = if let Some(custom_path) = &cli.config {
+                custom_path.clone()
+            } else {
+                Settings::find_workspace_config().unwrap_or_else(|| {
+                    eprintln!("Error: No configuration file found. Run 'codanna init' first.");
+                    std::process::exit(1);
+                })
+            };
+
+            // Load settings from file
+            let mut settings = Settings::load_from(&config_path).unwrap_or_else(|e| {
+                eprintln!("Error loading configuration: {e}");
+                std::process::exit(1);
+            });
+
+            // Remove the folder
+            match settings.remove_indexed_path(&path) {
+                Ok(_) => {
+                    println!("Removed folder from indexed paths: {}", path.display());
+
+                    // Save the updated configuration
+                    if let Err(e) = settings.save(&config_path) {
+                        eprintln!("Error saving configuration: {e}");
+                        std::process::exit(1);
+                    }
+
+                    println!("Configuration saved to: {}", config_path.display());
+
+                    if settings.indexing.indexed_paths.is_empty() {
+                        println!("\nNo indexed paths configured.");
+                    } else {
+                        println!("\nRemaining indexed paths:");
+                        for indexed_path in &settings.indexing.indexed_paths {
+                            println!("  - {}", indexed_path.display());
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        Commands::ListFolders => {
+            println!("Indexed folders:");
+            if config.indexing.indexed_paths.is_empty() {
+                println!("  (none configured)");
+                println!("\nTo add folders: codanna add-folder <path>");
+            } else {
+                for path in &config.indexing.indexed_paths {
+                    println!("  - {}", path.display());
+                }
+            }
+        }
+
+        Commands::Clean => {
+            if config.indexing.indexed_paths.is_empty() {
+                eprintln!("No indexed paths configured. Use 'codanna add-folder <path>' first.");
+                std::process::exit(1);
+            }
+
+            println!("Cleaning symbols from removed folders...");
+            match indexer.clean_removed_folders(&config.indexing.indexed_paths) {
+                Ok(count) => {
+                    if count > 0 {
+                        println!("Successfully removed symbols from {count} files");
+
+                        // Save the updated index
                         match persistence.save(&indexer) {
                             Ok(_) => {
-                                println!("\nIndex saved to: {}", config.index_path.display());
-                                if config.debug {
-                                    eprintln!("DEBUG: Index saved successfully");
-                                }
+                                println!("Index saved to: {}", config.index_path.display());
                             }
-                            Err(e) => eprintln!("\nWarning: Could not save index: {e}"),
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("Error indexing file: {e}");
-
-                        // Display recovery suggestions
-                        let suggestions = e.recovery_suggestions();
-                        if !suggestions.is_empty() {
-                            eprintln!("\nSuggestions:");
-                            for suggestion in suggestions {
-                                eprintln!("  • {suggestion}");
+                            Err(e) => {
+                                eprintln!("Error saving index: {e}");
+                                std::process::exit(1);
                             }
                         }
-
-                        std::process::exit(1);
+                    } else {
+                        println!("No files to clean - all indexed files are under current folders");
                     }
                 }
-            } else if path.is_dir() {
-                // Initialize project resolution providers before indexing
-                let provider_registry = create_provider_registry();
-                if let Err(e) = initialize_providers(&provider_registry, &config) {
-                    eprintln!("\n{e}");
-
-                    // Display recovery suggestions
-                    let suggestions = e.recovery_suggestions();
-                    if !suggestions.is_empty() {
-                        eprintln!("\nRecovery steps:");
-                        for suggestion in suggestions {
-                            eprintln!("  • {suggestion}");
-                        }
-                    }
-
-                    // Exit with ConfigError code
-                    use codanna::io::ExitCode;
-                    let exit_code = ExitCode::from_error(&e);
-                    std::process::exit(exit_code as i32);
+                Err(e) => {
+                    eprintln!("Error cleaning removed folders: {e}");
+                    std::process::exit(1);
                 }
-
-                // Directory indexing
-                if let Some(max) = max_files {
-                    println!(
-                        "Indexing directory: {} (limited to {} files)",
-                        path.display(),
-                        max
-                    );
-                } else {
-                    println!("Indexing directory: {}", path.display());
-                }
-
-                match indexer
-                    .index_directory_with_options(&path, progress, dry_run, force, max_files)
-                {
-                    Ok(stats) => {
-                        stats.display();
-
-                        if !dry_run && stats.files_indexed > 0 {
-                            // Build symbol cache before saving
-                            if let Err(e) = indexer.build_symbol_cache() {
-                                eprintln!("Warning: Failed to build symbol cache: {e}");
-                            }
-
-                            // Save the index
-                            eprintln!(
-                                "\nSaving index with {} total symbols, {} total relationships...",
-                                indexer.symbol_count(),
-                                indexer.relationship_count()
-                            );
-                            match persistence.save(&indexer) {
-                                Ok(_) => {
-                                    println!("Index saved to: {}", config.index_path.display());
-                                }
-                                Err(e) => {
-                                    eprintln!("Error: Could not save index: {e}");
-                                    std::process::exit(1);
-                                }
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("Error indexing directory: {e}");
-
-                        // Display recovery suggestions
-                        let suggestions = e.recovery_suggestions();
-                        if !suggestions.is_empty() {
-                            eprintln!("\nSuggestions:");
-                            for suggestion in suggestions {
-                                eprintln!("  • {suggestion}");
-                            }
-                        }
-
-                        std::process::exit(1);
-                    }
-                }
-            } else {
-                eprintln!("Error: Path does not exist: {}", path.display());
-                std::process::exit(1);
             }
         }
 

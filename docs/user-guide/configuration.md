@@ -112,6 +112,109 @@ threads = 8  # Number of threads for parallel indexing
 max_file_size_mb = 10  # Skip files larger than this
 ```
 
+## Multi-Folder Indexing
+
+Index multiple directories simultaneously with persistent configuration.
+
+### Configuration
+
+```toml
+[indexing]
+indexed_paths = [
+    "/absolute/path/to/project1",
+    "/absolute/path/to/project2",
+    "/absolute/path/to/project3"
+]
+```
+
+### Managing Indexed Folders
+
+**Add folders:**
+```bash
+# Add individual folders
+codanna add-folder /path/to/project1
+codanna add-folder /path/to/project2
+
+# Or use relative paths (will be converted to absolute)
+codanna add-folder src
+codanna add-folder lib
+```
+
+**List configured folders:**
+```bash
+codanna list-folders
+```
+
+**Remove a folder:**
+```bash
+codanna remove-folder /path/to/project1
+```
+
+**Clean up symbols from removed folders:**
+```bash
+codanna clean
+```
+
+### Usage Examples
+
+**Multi-project workspace:**
+```bash
+# Configure folders
+codanna add-folder ~/workspace/project-api
+codanna add-folder ~/workspace/project-web
+codanna add-folder ~/workspace/shared-lib
+
+# Index all configured folders
+codanna index --progress
+```
+
+**Monorepo support:**
+```bash
+# Index specific packages
+codanna add-folder packages/backend
+codanna add-folder packages/frontend
+codanna add-folder packages/shared
+codanna index --progress
+```
+
+**Selective indexing:**
+```bash
+# Index only specific directories
+codanna index src lib tests --progress
+
+# Or configure for repeated indexing
+codanna add-folder src
+codanna add-folder lib
+codanna index --progress  # Uses configured paths
+```
+
+### Behavior
+
+**Default behavior:**
+- If no `indexed_paths` configured, `codanna index` requires explicit path arguments (backward compatible)
+- Paths are stored as canonical absolute paths
+- Duplicate paths are automatically prevented
+
+**Automatic cleanup:**
+- Running `codanna index` without arguments uses configured paths
+- Automatically removes symbols from folders no longer in configuration
+- Manual cleanup available via `codanna clean` command
+
+**Path canonicalization:**
+- Relative paths are converted to absolute
+- Symlinks are resolved to actual paths
+- Prevents duplicate entries for the same folder
+
+### Use Cases
+
+**Multi-project workspaces** - Index multiple related projects together for cross-project symbol resolution
+
+**Monorepo support** - Index different components separately while maintaining cross-references
+
+**Selective indexing** - Only index specific directories within large codebases
+
+**Dynamic workflows** - Add and remove folders as your project structure changes
+
 ## Ignore Patterns
 
 Codanna respects `.gitignore` and adds its own `.codannaignore`:

@@ -93,6 +93,8 @@ pub struct SimpleIndexer {
     file_languages: std::collections::HashMap<FileId, LanguageId>,
     /// Language behaviors with persistent state (imports, etc.)
     file_behaviors: std::collections::HashMap<FileId, Box<dyn crate::parsing::LanguageBehavior>>,
+    /// Indexed folder paths (canonicalized) to track which folders are currently indexed
+    indexed_folders: std::collections::HashSet<std::path::PathBuf>,
 }
 
 impl Default for SimpleIndexer {
@@ -144,6 +146,7 @@ impl SimpleIndexer {
             semantic_search: None,
             file_languages: std::collections::HashMap::new(),
             file_behaviors: std::collections::HashMap::new(),
+            indexed_folders: std::collections::HashSet::new(),
         };
 
         // Try to load symbol cache for fast lookups
@@ -187,6 +190,7 @@ impl SimpleIndexer {
             semantic_search: None,
             file_languages: std::collections::HashMap::new(),
             file_behaviors: std::collections::HashMap::new(),
+            indexed_folders: std::collections::HashSet::new(),
         };
 
         // Resolution system now handled through LanguageBehavior:
@@ -1935,6 +1939,87 @@ impl SimpleIndexer {
                 eprintln!("Warning: Failed to get indexed paths: {e}");
                 Vec::new()
             })
+    }
+
+    /// Track a folder as indexed (stores canonicalized path)
+    pub fn add_indexed_folder(&mut self, folder_path: &Path) -> IndexResult<()> {
+        let canonical = folder_path
+            .canonicalize()
+            .map_err(|e| IndexError::FileRead {
+                path: folder_path.to_path_buf(),
+                source: e,
+            })?;
+        self.indexed_folders.insert(canonical);
+        Ok(())
+    }
+
+    /// Get all currently tracked indexed folders
+    pub fn get_indexed_folders(&self) -> &std::collections::HashSet<PathBuf> {
+        &self.indexed_folders
+    }
+
+    /// Remove symbols from folders that are no longer in the indexed folders list
+    pub fn clean_removed_folders(&mut self, current_folders: &[PathBuf]) -> IndexResult<usize> {
+        // Canonicalize current folders
+        let canonical_folders: std::collections::HashSet<PathBuf> = current_folders
+            .iter()
+            .filter_map(|p| p.canonicalize().ok())
+            .collect();
+
+        // Get all indexed file paths
+        let all_files = self.get_all_indexed_paths();
+
+        let mut removed_count = 0;
+
+        // Find files that are no longer under any of the current folders
+        for file_path in all_files {
+            let file_canonical = match file_path.canonicalize() {
+                Ok(p) => p,
+                Err(_) => continue, // File may have been deleted
+            };
+
+            // Check if this file is under any of the current folders
+            let is_under_current_folder = canonical_folders
+                .iter()
+                .any(|folder| file_canonical.starts_with(folder));
+
+            if !is_under_current_folder {
+                // File is from a removed folder, delete all its documents (file, symbols, relationships, imports)
+                if let Err(e) = self
+                    .document_index
+                    .remove_file_documents(&file_path.to_string_lossy())
+                {
+                    debug_print!(
+                        self,
+                        "Failed to remove documents for {}: {}",
+                        file_path.display(),
+                        e
+                    );
+                } else {
+                    debug_print!(self, "Removed all documents from {}", file_path.display());
+                    removed_count += 1;
+                }
+            }
+        }
+
+        // Commit the deletions to Tantivy
+        if removed_count > 0 {
+            if let Err(e) = self.document_index.commit_batch() {
+                debug_print!(self, "Failed to commit deletions: {}", e);
+                return Err(IndexError::PersistenceError {
+                    path: self.settings.index_path.clone(),
+                    source: Box::new(e),
+                });
+            }
+
+            // Don't start a new batch here - let the next indexing operation do that.
+            // This ensures the reader has fully reloaded before any new operations.
+        }
+
+        // Update tracked folders
+        self.indexed_folders = canonical_folders;
+
+        Ok(removed_count)
     }
 
     /// Search documentation using natural language query

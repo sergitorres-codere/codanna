@@ -45,3 +45,6 @@ mod test_typescript_object_property_call;
 
 #[path = "integration/test_external_import_resolution.rs"]
 mod test_external_import_resolution;
+
+#[path = "integration/test_multi_folder_indexing.rs"]
+mod test_multi_folder_indexing;
