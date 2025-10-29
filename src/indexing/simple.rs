@@ -93,8 +93,8 @@ pub struct SimpleIndexer {
     file_languages: std::collections::HashMap<FileId, LanguageId>,
     /// Language behaviors with persistent state (imports, etc.)
     file_behaviors: std::collections::HashMap<FileId, Box<dyn crate::parsing::LanguageBehavior>>,
-    /// Indexed folder paths (canonicalized) to track which folders are currently indexed
-    indexed_folders: std::collections::HashSet<std::path::PathBuf>,
+    /// Indexed directory paths (canonicalized) to track which directories are currently indexed
+    indexed_paths: std::collections::HashSet<std::path::PathBuf>,
 }
 
 impl Default for SimpleIndexer {
@@ -146,7 +146,7 @@ impl SimpleIndexer {
             semantic_search: None,
             file_languages: std::collections::HashMap::new(),
             file_behaviors: std::collections::HashMap::new(),
-            indexed_folders: std::collections::HashSet::new(),
+            indexed_paths: std::collections::HashSet::new(),
         };
 
         // Try to load symbol cache for fast lookups
@@ -190,7 +190,7 @@ impl SimpleIndexer {
             semantic_search: None,
             file_languages: std::collections::HashMap::new(),
             file_behaviors: std::collections::HashMap::new(),
-            indexed_folders: std::collections::HashSet::new(),
+            indexed_paths: std::collections::HashSet::new(),
         };
 
         // Resolution system now handled through LanguageBehavior:
@@ -592,6 +592,14 @@ impl SimpleIndexer {
                 .find_symbols_by_file(file_id)
                 .map_err(|e| IndexError::TantivyError {
                     operation: "find_symbols_by_file".to_string(),
+                    cause: e.to_string(),
+                })?;
+
+            // Start batch for write operations
+            self.document_index
+                .start_batch()
+                .map_err(|e| IndexError::TantivyError {
+                    operation: "start_batch".to_string(),
                     cause: e.to_string(),
                 })?;
 
@@ -1941,85 +1949,140 @@ impl SimpleIndexer {
             })
     }
 
-    /// Track a folder as indexed (stores canonicalized path)
-    pub fn add_indexed_folder(&mut self, folder_path: &Path) -> IndexResult<()> {
-        let canonical = folder_path
-            .canonicalize()
-            .map_err(|e| IndexError::FileRead {
-                path: folder_path.to_path_buf(),
-                source: e,
-            })?;
-        self.indexed_folders.insert(canonical);
+    /// Track a directory as indexed (stores canonicalized path)
+    pub fn add_indexed_path(&mut self, dir_path: &Path) -> IndexResult<()> {
+        let canonical = dir_path.canonicalize().map_err(|e| IndexError::FileRead {
+            path: dir_path.to_path_buf(),
+            source: e,
+        })?;
+        self.indexed_paths.insert(canonical);
         Ok(())
     }
 
-    /// Get all currently tracked indexed folders
-    pub fn get_indexed_folders(&self) -> &std::collections::HashSet<PathBuf> {
-        &self.indexed_folders
+    /// Get all currently tracked indexed directories
+    pub fn get_indexed_paths(&self) -> &std::collections::HashSet<PathBuf> {
+        &self.indexed_paths
     }
 
-    /// Remove symbols from folders that are no longer in the indexed folders list
-    pub fn clean_removed_folders(&mut self, current_folders: &[PathBuf]) -> IndexResult<usize> {
-        // Canonicalize current folders
-        let canonical_folders: std::collections::HashSet<PathBuf> = current_folders
+    /// Sync indexed paths with config (settings.toml is source of truth)
+    ///
+    /// Compares stored indexed_paths with current config.
+    /// - Indexes new directories in config
+    /// - Removes symbols from directories not in config
+    ///
+    /// Returns (added_count, removed_count, files_indexed, symbols_found)
+    pub fn sync_with_config(
+        &mut self,
+        stored_paths: Option<Vec<PathBuf>>,
+        config_paths: &[PathBuf],
+    ) -> IndexResult<(usize, usize, usize, usize)> {
+        // Convert to sets for comparison (canonicalized)
+        let stored_set: std::collections::HashSet<PathBuf> = stored_paths
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|p| p.canonicalize().ok())
+            .collect();
+
+        let config_set: std::collections::HashSet<PathBuf> = config_paths
             .iter()
             .filter_map(|p| p.canonicalize().ok())
             .collect();
 
-        // Get all indexed file paths
-        let all_files = self.get_all_indexed_paths();
+        // Find new paths in config that aren't in stored state
+        let new_paths: Vec<PathBuf> = config_set.difference(&stored_set).cloned().collect();
 
-        let mut removed_count = 0;
+        // Find removed paths (in stored but not in config)
+        let removed_paths: Vec<PathBuf> = stored_set.difference(&config_set).cloned().collect();
 
-        // Find files that are no longer under any of the current folders
-        for file_path in all_files {
-            let file_canonical = match file_path.canonicalize() {
-                Ok(p) => p,
-                Err(_) => continue, // File may have been deleted
-            };
+        if new_paths.is_empty() && removed_paths.is_empty() {
+            return Ok((0, 0, 0, 0));
+        }
 
-            // Check if this file is under any of the current folders
-            let is_under_current_folder = canonical_folders
-                .iter()
-                .any(|folder| file_canonical.starts_with(folder));
+        eprintln!("Sync: Found {} new directories to index", new_paths.len());
+        for path in &new_paths {
+            eprintln!("  + {}", path.display());
+        }
 
-            if !is_under_current_folder {
-                // File is from a removed folder, delete all its documents (file, symbols, relationships, imports)
-                if let Err(e) = self
-                    .document_index
-                    .remove_file_documents(&file_path.to_string_lossy())
-                {
-                    debug_print!(
-                        self,
-                        "Failed to remove documents for {}: {}",
-                        file_path.display(),
-                        e
+        // Index new directories
+        let mut total_files = 0;
+        let mut total_symbols = 0;
+
+        for path in &new_paths {
+            eprintln!("Indexing new directory: {}", path.display());
+            match self.index_directory(path, false, false) {
+                Ok(stats) => {
+                    eprintln!(
+                        "  ✓ Indexed {} files, {} symbols",
+                        stats.files_indexed, stats.symbols_found
                     );
-                } else {
-                    debug_print!(self, "Removed all documents from {}", file_path.display());
-                    removed_count += 1;
+                    total_files += stats.files_indexed;
+                    total_symbols += stats.symbols_found;
+
+                    // Track this directory as indexed
+                    eprintln!("DEBUG: Tracking indexed path: {}", path.display());
+                    match self.add_indexed_path(path) {
+                        Ok(_) => {
+                            eprintln!(
+                                "DEBUG: Successfully tracked path (total: {})",
+                                self.indexed_paths.len()
+                            );
+                        }
+                        Err(e) => {
+                            eprintln!("  ✗ Failed to track indexed path: {e}");
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("  ✗ Failed to index {}: {e}", path.display());
                 }
             }
         }
 
-        // Commit the deletions to Tantivy
-        if removed_count > 0 {
-            if let Err(e) = self.document_index.commit_batch() {
-                debug_print!(self, "Failed to commit deletions: {}", e);
-                return Err(IndexError::PersistenceError {
-                    path: self.settings.index_path.clone(),
-                    source: Box::new(e),
-                });
+        // Clean up removed directories
+        let mut removed_file_count = 0;
+        if !removed_paths.is_empty() {
+            eprintln!("Sync: Found {} directories to remove", removed_paths.len());
+            for path in &removed_paths {
+                eprintln!("  - {}", path.display());
             }
 
-            // Don't start a new batch here - let the next indexing operation do that.
-            // This ensures the reader has fully reloaded before any new operations.
+            // Collect all files to remove first
+            let all_files = self.get_all_indexed_paths();
+            let mut files_to_remove = Vec::new();
+
+            for file_path in all_files {
+                if let Ok(file_canonical) = file_path.canonicalize() {
+                    for removed_path in &removed_paths {
+                        if file_canonical.starts_with(removed_path) {
+                            files_to_remove.push(file_path.clone());
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Remove each file (each manages its own batch/commit)
+            if !files_to_remove.is_empty() {
+                for file_path in &files_to_remove {
+                    if let Err(e) = self.remove_file(file_path) {
+                        eprintln!("  ✗ Failed to remove {}: {e}", file_path.display());
+                    } else {
+                        removed_file_count += 1;
+                    }
+                }
+
+                if removed_file_count > 0 {
+                    eprintln!("  ✓ Removed {removed_file_count} files from index");
+                }
+            }
         }
 
-        // Update tracked folders
-        self.indexed_folders = canonical_folders;
-
-        Ok(removed_count)
+        Ok((
+            new_paths.len(),
+            removed_paths.len(),
+            total_files,
+            total_symbols,
+        ))
     }
 
     /// Search documentation using natural language query

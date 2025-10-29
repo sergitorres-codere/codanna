@@ -14,6 +14,7 @@ use codanna::parsing::{
 use codanna::project_resolver::{
     providers::typescript::TypeScriptProvider, registry::SimpleProviderRegistry,
 };
+use codanna::storage::IndexMetadata;
 use codanna::types::SymbolCounter;
 use codanna::{IndexPersistence, Settings, SimpleIndexer, Symbol, SymbolKind};
 use serde::Serialize;
@@ -72,8 +73,8 @@ fn create_custom_help() -> String {
     }
     help.push_str("  $ codanna init                      # Initialize in current directory\n");
     help.push_str("  $ codanna index src lib            # Index multiple directories\n");
-    help.push_str("  $ codanna add-folder tests         # Add tests folder to indexed paths\n");
-    help.push_str("  $ codanna list-folders             # List all indexed folders\n");
+    help.push_str("  $ codanna add-dir tests            # Add tests directory to indexed paths\n");
+    help.push_str("  $ codanna list-dirs                # List all indexed directories\n");
     help.push_str("  $ codanna serve --http --watch     # HTTP server with OAuth\n");
     help.push_str("  $ codanna serve --https --watch    # HTTPS server with TLS\n\n");
 
@@ -96,10 +97,9 @@ fn create_custom_help() -> String {
     }
     help.push_str("  init          Set up .codanna directory\n");
     help.push_str("  index         Build searchable index from codebase\n");
-    help.push_str("  add-folder    Add a folder to be indexed\n");
-    help.push_str("  remove-folder Remove a folder from indexed paths\n");
-    help.push_str("  list-folders  List all folders that are being indexed\n");
-    help.push_str("  clean         Clean up symbols from removed folders\n");
+    help.push_str("  add-dir       Add a directory to be indexed\n");
+    help.push_str("  remove-dir    Remove a directory from indexed paths\n");
+    help.push_str("  list-dirs     List all directories that are being indexed\n");
     help.push_str("  retrieve      Query symbols, relationships, and dependencies\n");
     help.push_str("  serve         Start MCP server\n");
     help.push_str("  config        Display active settings\n");
@@ -197,27 +197,23 @@ enum Commands {
         max_files: Option<usize>,
     },
 
-    /// Add a folder to the indexed paths list
-    #[command(about = "Add a folder to be indexed")]
-    AddFolder {
-        /// Path to folder to add
+    /// Add a directory to the indexed paths list
+    #[command(about = "Add a directory to be indexed")]
+    AddDir {
+        /// Path to directory to add
         path: PathBuf,
     },
 
-    /// Remove a folder from the indexed paths list
-    #[command(about = "Remove a folder from indexed paths")]
-    RemoveFolder {
-        /// Path to folder to remove
+    /// Remove a directory from the indexed paths list
+    #[command(about = "Remove a directory from indexed paths")]
+    RemoveDir {
+        /// Path to directory to remove
         path: PathBuf,
     },
 
-    /// List all indexed folders
-    #[command(about = "List all folders that are being indexed")]
-    ListFolders,
-
-    /// Clean up symbols from removed folders
-    #[command(about = "Remove symbols from folders no longer in indexed paths")]
-    Clean,
+    /// List all indexed directories
+    #[command(about = "List all directories that are being indexed")]
+    ListDirs,
 
     /// Query code relationships and dependencies
     #[command(
@@ -950,6 +946,39 @@ async fn main() {
         }
     }
 
+    // Sync indexed paths with config - auto-index new directories
+    // This handles changes made while the index was not in use (e.g., add-dir command)
+    if !skip_index_load && persistence.exists() {
+        // Load stored indexed_paths from metadata
+        if let Ok(metadata) = IndexMetadata::load(&config.index_path) {
+            let stored_paths = metadata.indexed_paths.clone();
+
+            // Sync with current config (settings.toml is source of truth)
+            match indexer.sync_with_config(stored_paths, &config.indexing.indexed_paths) {
+                Ok((added, removed, files, symbols)) => {
+                    if added > 0 || removed > 0 {
+                        if added > 0 {
+                            eprintln!(
+                                "  ✓ Added {added} new directories ({files} files, {symbols} symbols)"
+                            );
+                        }
+                        if removed > 0 {
+                            eprintln!("  ✓ Removed {removed} directories from index");
+                        }
+
+                        // Save updated index
+                        if let Err(e) = persistence.save(&indexer) {
+                            eprintln!("Warning: Failed to save updated index: {e}");
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Warning: Failed to sync indexed paths: {e}");
+                }
+            }
+        }
+    }
+
     match cli.command {
         Commands::Init { .. } | Commands::Config => {
             // Already handled above
@@ -1085,6 +1114,11 @@ async fn main() {
                         eprintln!("Index watcher started with notification support");
                     }
 
+                    // Create notification broadcaster for file/config watchers
+                    use codanna::mcp::notifications::NotificationBroadcaster;
+                    let broadcaster =
+                        Arc::new(NotificationBroadcaster::new(100).with_debug(config.mcp.debug));
+
                     // If file watching is enabled in config, start the file system watcher
                     if config.file_watch.enabled {
                         use codanna::indexing::FileSystemWatcher;
@@ -1106,6 +1140,7 @@ async fn main() {
                         });
 
                         if let Ok(watcher) = watcher {
+                            let watcher = watcher.with_broadcaster(broadcaster.clone());
                             // Spawn file watcher in background
                             tokio::spawn(async move {
                                 if let Err(e) = watcher.watch().await {
@@ -1115,6 +1150,45 @@ async fn main() {
                             eprintln!(
                                 "File system watcher started - monitoring indexed files for changes"
                             );
+                        }
+                    }
+
+                    // Start config file watcher (watches settings.toml for indexed_paths changes)
+                    if watch || config.file_watch.enabled {
+                        use codanna::indexing::ConfigFileWatcher;
+                        use std::path::PathBuf;
+
+                        let config_watcher_indexer = server.get_indexer_arc();
+                        let config_watcher_broadcaster = broadcaster.clone();
+                        let settings_path = config
+                            .workspace_root
+                            .clone()
+                            .unwrap_or_else(|| {
+                                std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+                            })
+                            .join(".codanna/settings.toml");
+
+                        match ConfigFileWatcher::new(
+                            settings_path.clone(),
+                            config_watcher_indexer,
+                            config.mcp.debug,
+                        ) {
+                            Ok(config_watcher) => {
+                                let config_watcher =
+                                    config_watcher.with_broadcaster(config_watcher_broadcaster);
+                                tokio::spawn(async move {
+                                    if let Err(e) = config_watcher.watch().await {
+                                        eprintln!("Config watcher error: {e}");
+                                    }
+                                });
+                                eprintln!(
+                                    "Config watcher started - monitoring {}",
+                                    settings_path.display()
+                                );
+                            }
+                            Err(e) => {
+                                eprintln!("Failed to start config watcher: {e}");
+                            }
                         }
                     }
 
@@ -1160,7 +1234,7 @@ async fn main() {
             if paths_to_index.is_empty() {
                 eprintln!("Error: No paths specified and no indexed paths configured");
                 eprintln!("Usage: codanna index <path> [<path>...]");
-                eprintln!("   or: codanna add-folder <path> to configure indexed paths");
+                eprintln!("   or: codanna add-dir <path> to configure indexed paths");
                 std::process::exit(1);
             }
 
@@ -1182,17 +1256,6 @@ async fn main() {
                 use codanna::io::ExitCode;
                 let exit_code = ExitCode::from_error(&e);
                 std::process::exit(exit_code as i32);
-            }
-
-            // Clean up symbols from removed folders if using configured paths
-            if paths.is_empty() && !config.indexing.indexed_paths.is_empty() {
-                match indexer.clean_removed_folders(&config.indexing.indexed_paths) {
-                    Ok(count) if count > 0 => {
-                        println!("Cleaned {count} files from removed folders");
-                    }
-                    Ok(_) => {} // No files removed
-                    Err(e) => eprintln!("Warning: Failed to clean removed folders: {e}"),
-                }
             }
 
             // Process each path
@@ -1282,9 +1345,9 @@ async fn main() {
                         println!("Indexing directory: {}", path.display());
                     }
 
-                    // Track this folder as indexed
-                    if let Err(e) = indexer.add_indexed_folder(path) {
-                        eprintln!("Warning: Failed to track indexed folder: {e}");
+                    // Track this directory as indexed
+                    if let Err(e) = indexer.add_indexed_path(path) {
+                        eprintln!("Warning: Failed to track indexed directory: {e}");
                     }
 
                     match indexer
@@ -1339,7 +1402,7 @@ async fn main() {
             }
         }
 
-        Commands::AddFolder { path } => {
+        Commands::AddDir { path } => {
             // Load the config file
             let config_path = if let Some(custom_path) = &cli.config {
                 custom_path.clone()
@@ -1356,10 +1419,10 @@ async fn main() {
                 std::process::exit(1);
             });
 
-            // Add the folder
+            // Add the directory
             match settings.add_indexed_path(path.clone()) {
                 Ok(_) => {
-                    println!("Added folder to indexed paths: {}", path.display());
+                    println!("Added directory to indexed paths: {}", path.display());
 
                     // Save the updated configuration
                     if let Err(e) = settings.save(&config_path) {
@@ -1380,7 +1443,7 @@ async fn main() {
             }
         }
 
-        Commands::RemoveFolder { path } => {
+        Commands::RemoveDir { path } => {
             // Load the config file
             let config_path = if let Some(custom_path) = &cli.config {
                 custom_path.clone()
@@ -1397,10 +1460,10 @@ async fn main() {
                 std::process::exit(1);
             });
 
-            // Remove the folder
+            // Remove the directory
             match settings.remove_indexed_path(&path) {
                 Ok(_) => {
-                    println!("Removed folder from indexed paths: {}", path.display());
+                    println!("Removed directory from indexed paths: {}", path.display());
 
                     // Save the updated configuration
                     if let Err(e) = settings.save(&config_path) {
@@ -1426,47 +1489,14 @@ async fn main() {
             }
         }
 
-        Commands::ListFolders => {
-            println!("Indexed folders:");
+        Commands::ListDirs => {
+            println!("Indexed directories:");
             if config.indexing.indexed_paths.is_empty() {
                 println!("  (none configured)");
-                println!("\nTo add folders: codanna add-folder <path>");
+                println!("\nTo add directories: codanna add-dir <path>");
             } else {
                 for path in &config.indexing.indexed_paths {
                     println!("  - {}", path.display());
-                }
-            }
-        }
-
-        Commands::Clean => {
-            if config.indexing.indexed_paths.is_empty() {
-                eprintln!("No indexed paths configured. Use 'codanna add-folder <path>' first.");
-                std::process::exit(1);
-            }
-
-            println!("Cleaning symbols from removed folders...");
-            match indexer.clean_removed_folders(&config.indexing.indexed_paths) {
-                Ok(count) => {
-                    if count > 0 {
-                        println!("Successfully removed symbols from {count} files");
-
-                        // Save the updated index
-                        match persistence.save(&indexer) {
-                            Ok(_) => {
-                                println!("Index saved to: {}", config.index_path.display());
-                            }
-                            Err(e) => {
-                                eprintln!("Error saving index: {e}");
-                                std::process::exit(1);
-                            }
-                        }
-                    } else {
-                        println!("No files to clean - all indexed files are under current folders");
-                    }
-                }
-                Err(e) => {
-                    eprintln!("Error cleaning removed folders: {e}");
-                    std::process::exit(1);
                 }
             }
         }

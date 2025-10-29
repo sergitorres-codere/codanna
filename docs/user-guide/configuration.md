@@ -112,7 +112,7 @@ threads = 8  # Number of threads for parallel indexing
 max_file_size_mb = 10  # Skip files larger than this
 ```
 
-## Multi-Folder Indexing
+## Multi-Directory Indexing
 
 Index multiple directories simultaneously with persistent configuration.
 
@@ -127,83 +127,19 @@ indexed_paths = [
 ]
 ```
 
-### Managing Indexed Folders
+### Managing Indexed Directories
 
-**Add folders:**
 ```bash
-# Add individual folders
-codanna add-folder /path/to/project1
-codanna add-folder /path/to/project2
-
-# Or use relative paths (will be converted to absolute)
-codanna add-folder src
-codanna add-folder lib
+codanna add-dir /path/to/project
+codanna list-dirs
+codanna remove-dir /path/to/project
 ```
 
-**List configured folders:**
-```bash
-codanna list-folders
-```
-
-**Remove a folder:**
-```bash
-codanna remove-folder /path/to/project1
-```
-
-**Clean up symbols from removed folders:**
-```bash
-codanna clean
-```
-
-### Usage Examples
-
-**Multi-project workspace:**
-```bash
-# Configure folders
-codanna add-folder ~/workspace/project-api
-codanna add-folder ~/workspace/project-web
-codanna add-folder ~/workspace/shared-lib
-
-# Index all configured folders
-codanna index --progress
-```
-
-**Monorepo support:**
-```bash
-# Index specific packages
-codanna add-folder packages/backend
-codanna add-folder packages/frontend
-codanna add-folder packages/shared
-codanna index --progress
-```
-
-**Selective indexing:**
-```bash
-# Index only specific directories
-codanna index src lib tests --progress
-
-# Or configure for repeated indexing
-codanna add-folder src
-codanna add-folder lib
-codanna index --progress  # Uses configured paths
-```
-
-### Behavior
-
-**Default behavior:**
-- If no `indexed_paths` configured, `codanna index` requires explicit path arguments (backward compatible)
-- Paths are stored as canonical absolute paths
-- Duplicate paths are automatically prevented
-
-**Automatic cleanup:**
-- Running `codanna index` without arguments uses configured paths
-- Automatically removes symbols from folders no longer in configuration
-- Manual cleanup available via `codanna clean` command
-
-**Path canonicalization:**
-- Relative paths are converted to absolute
-- Symlinks are resolved to actual paths
-- Prevents duplicate entries for the same folder
+**Automatic Sync:**
+- Commands update settings.toml (source of truth)
+- Next command syncs index automatically
+- New paths → indexed
+- Removed paths → cleaned (symbols, embeddings, metadata)
 
 ### Use Cases
 
