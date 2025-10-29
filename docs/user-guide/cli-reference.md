@@ -16,6 +16,9 @@ Available for all commands:
 |---------|-------------|
 | `codanna init` | Set up .codanna directory with default configuration |
 | `codanna index` | Build searchable index from codebase |
+| `codanna add-dir` | Add a folder to be indexed |
+| `codanna remove-dir` | Remove a folder from indexed paths |
+| `codanna list-dirs` | List all folders that are being indexed |
 | `codanna retrieve` | Query symbols, relationships, and dependencies |
 | `codanna serve` | Start MCP server |
 | `codanna config` | Display active settings |
@@ -33,11 +36,12 @@ Set up .codanna directory with default configuration
 **Options:**
 - `-f, --force` - Force overwrite existing configuration
 
-`codanna index <PATH>`
+`codanna index [PATHS...]`
 Build searchable index from codebase
 
 **Arguments:**
-- `<PATH>` - Path to file or directory to index
+- `[PATHS...]` - Paths to files or directories to index (multiple paths allowed)
+- If no paths provided, uses `indexed_paths` from configuration (must be configured via `add-dir`)
 
 **Options:**
 - `-t, --threads <THREADS>` - Number of threads to use (overrides config)
@@ -45,6 +49,84 @@ Build searchable index from codebase
 - `-p, --progress` - Show progress during indexing
 - `--dry-run` - Dry run - show what would be indexed without indexing
 - `--max-files <MAX_FILES>` - Maximum number of files to index
+
+**Examples:**
+```bash
+# Index a single directory
+codanna index src --progress
+
+# Index multiple directories at once
+codanna index src lib tests --progress
+
+# Use configured indexed paths
+codanna index --progress
+```
+
+**Behavior:**
+- Accepts multiple paths for indexing in a single operation
+- When run without arguments, uses folders from `indexed_paths` configuration
+- Automatically cleans up symbols from removed folders when using configuration
+- Backward compatible with single-path usage
+
+`codanna add-dir <PATH>`
+Add a folder to indexed paths in settings.toml
+
+**Arguments:**
+- `<PATH>` - Path to folder (canonicalized to absolute)
+
+**Examples:**
+```bash
+codanna add-dir /path/to/project
+codanna add-dir src
+```
+
+**Behavior:**
+- Updates settings.toml (source of truth)
+- Prevents duplicate entries
+- Next command automatically indexes the folder
+
+`codanna remove-dir <PATH>`
+Remove a folder from indexed paths in settings.toml
+
+**Arguments:**
+- `<PATH>` - Path to folder (must exist in configuration)
+
+**Examples:**
+```bash
+codanna remove-dir /path/to/old-project
+codanna remove-dir tests
+```
+
+**Behavior:**
+- Updates settings.toml (source of truth)
+- Next command automatically removes symbols, embeddings, and metadata
+
+`codanna list-dirs`
+List configured indexed directories from settings.toml
+
+**Example:**
+```bash
+codanna list-dirs
+```
+
+## Automatic Sync Mechanism
+
+Every command compares settings.toml (source of truth) with index metadata:
+- New paths in config → automatically indexed
+- Removed paths → symbols, embeddings, and metadata cleaned
+
+**Example:**
+```bash
+codanna add-dir examples/typescript
+codanna retrieve symbol Button
+# ✓ Added 1 new directories (5 files, 127 symbols)
+
+codanna remove-dir examples/typescript
+codanna retrieve symbol Button
+# ✓ Removed 1 directories from index
+```
+
+Settings.toml can be edited manually - changes detected on next command.
 
 `codanna retrieve <SUBCOMMAND>`
 Query indexed symbols, relationships, and dependencies

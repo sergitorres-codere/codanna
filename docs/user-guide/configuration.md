@@ -112,6 +112,45 @@ threads = 8  # Number of threads for parallel indexing
 max_file_size_mb = 10  # Skip files larger than this
 ```
 
+## Multi-Directory Indexing
+
+Index multiple directories simultaneously with persistent configuration.
+
+### Configuration
+
+```toml
+[indexing]
+indexed_paths = [
+    "/absolute/path/to/project1",
+    "/absolute/path/to/project2",
+    "/absolute/path/to/project3"
+]
+```
+
+### Managing Indexed Directories
+
+```bash
+codanna add-dir /path/to/project
+codanna list-dirs
+codanna remove-dir /path/to/project
+```
+
+**Automatic Sync:**
+- Commands update settings.toml (source of truth)
+- Next command syncs index automatically
+- New paths → indexed
+- Removed paths → cleaned (symbols, embeddings, metadata)
+
+### Use Cases
+
+**Multi-project workspaces** - Index multiple related projects together for cross-project symbol resolution
+
+**Monorepo support** - Index different components separately while maintaining cross-references
+
+**Selective indexing** - Only index specific directories within large codebases
+
+**Dynamic workflows** - Add and remove folders as your project structure changes
+
 ## Ignore Patterns
 
 Codanna respects `.gitignore` and adds its own `.codannaignore`:
