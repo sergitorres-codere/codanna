@@ -710,6 +710,55 @@ fn initialize_providers(
     }
 }
 
+/// Add paths to settings.toml indexed_paths (idempotent)
+///
+/// Reusable helper for both `add-dir` and `index` commands.
+/// Loads settings, adds paths (with deduplication), saves back to file.
+///
+/// For `add-dir`: Returns error if path already exists (strict)
+/// For `index`: Silently skips existing paths (idempotent)
+fn add_paths_to_settings(
+    paths: &[PathBuf],
+    config_path: &Path,
+    strict: bool,
+) -> Result<(Settings, Vec<PathBuf>), String> {
+    // Load settings from file
+    let mut settings = Settings::load_from(config_path)
+        .map_err(|e| format!("Error loading configuration: {e}"))?;
+
+    let mut added_paths = Vec::new();
+
+    // Add each path (Settings::add_indexed_path handles deduplication)
+    for path in paths {
+        match settings.add_indexed_path(path.clone()) {
+            Ok(_) => {
+                added_paths.push(path.clone());
+            }
+            Err(e) if e.contains("already indexed") => {
+                // Path already exists
+                if strict {
+                    // add-dir is strict - return error
+                    return Err(e);
+                }
+                // index is idempotent - skip silently
+            }
+            Err(e) => {
+                // Other errors (invalid path, etc.) always propagate
+                return Err(format!("Error adding path {}: {e}", path.display()));
+            }
+        }
+    }
+
+    // Save only if we added new paths
+    if !added_paths.is_empty() {
+        settings
+            .save(config_path)
+            .map_err(|e| format!("Error saving configuration: {e}"))?;
+    }
+
+    Ok((settings, added_paths))
+}
+
 /// Entry point with tokio async runtime.
 ///
 /// Handles config initialization, index loading/creation, and command dispatch.
@@ -865,7 +914,8 @@ async fn main() {
     let mut indexer = if skip_index_load {
         SimpleIndexer::with_settings(settings.clone()) // Empty indexer, won't be used
     } else {
-        let force_recreate_index = matches!(cli.command, Commands::Index { force: true, ref paths, .. } if !paths.is_empty() && paths.iter().all(|p| p.is_dir()));
+        // Force flag always means fresh index, regardless of path source (CLI or settings.toml)
+        let force_recreate_index = matches!(cli.command, Commands::Index { force: true, .. });
         if persistence.exists() && !force_recreate_index {
             if config.debug {
                 eprintln!(
@@ -948,7 +998,9 @@ async fn main() {
 
     // Sync indexed paths with config - auto-index new directories
     // This handles changes made while the index was not in use (e.g., add-dir command)
-    if !skip_index_load && persistence.exists() {
+    // Skip sync if force flag is present (force means fresh start, not incremental)
+    let is_force_index = matches!(cli.command, Commands::Index { force: true, .. });
+    if !skip_index_load && persistence.exists() && !is_force_index {
         // Load stored indexed_paths from metadata
         if let Ok(metadata) = IndexMetadata::load(&config.index_path) {
             let stored_paths = metadata.indexed_paths.clone();
@@ -1224,19 +1276,58 @@ async fn main() {
             max_files,
             ..
         } => {
-            // If no paths provided, use indexed_paths from config
-            let paths_to_index = if paths.is_empty() {
-                config.get_indexed_paths()
-            } else {
-                paths.clone()
-            };
+            // Determine paths to index
+            let paths_to_index = if !paths.is_empty() {
+                // CLI paths provided - add them to settings.toml first
+                let config_path = if let Some(custom_path) = &cli.config {
+                    custom_path.clone()
+                } else {
+                    Settings::find_workspace_config().unwrap_or_else(|| {
+                        eprintln!("Error: No configuration file found. Run 'codanna init' first.");
+                        std::process::exit(1);
+                    })
+                };
 
-            if paths_to_index.is_empty() {
-                eprintln!("Error: No paths specified and no indexed paths configured");
-                eprintln!("Usage: codanna index <path> [<path>...]");
-                eprintln!("   or: codanna add-dir <path> to configure indexed paths");
-                std::process::exit(1);
-            }
+                match add_paths_to_settings(&paths, &config_path, false) {
+                    Ok((updated_settings, added_paths)) => {
+                        if !added_paths.is_empty() {
+                            eprintln!("Added {} path(s) to settings.toml", added_paths.len());
+                        }
+                        // Reload config to get updated indexed_paths
+                        config = updated_settings;
+                        paths.clone()
+                    }
+                    Err(e) => {
+                        eprintln!("Error updating settings: {e}");
+                        std::process::exit(1);
+                    }
+                }
+            } else {
+                // No CLI paths - use settings.toml indexed_paths
+                let config_paths = config.get_indexed_paths();
+
+                if config_paths.is_empty() {
+                    eprintln!("Error: No paths to index");
+                    eprintln!();
+                    eprintln!("Options:");
+                    eprintln!("  1. Provide paths: codanna index <path> [<path>...]");
+                    eprintln!("  2. Configure paths: codanna add-dir <path>");
+                    std::process::exit(1);
+                }
+
+                if !force {
+                    // No force, no explicit paths - sync already handled it
+                    // Save and exit (avoid redundant work)
+                    if let Err(e) = persistence.save(&indexer) {
+                        eprintln!("Error saving index: {e}");
+                        std::process::exit(1);
+                    }
+                    return;
+                }
+
+                // Force with config paths - will clear and re-index below
+                config_paths
+            };
 
             // Initialize project resolution providers before indexing
             let provider_registry = create_provider_registry();
@@ -1403,7 +1494,7 @@ async fn main() {
         }
 
         Commands::AddDir { path } => {
-            // Load the config file
+            // Find config file
             let config_path = if let Some(custom_path) = &cli.config {
                 custom_path.clone()
             } else {
@@ -1413,23 +1504,16 @@ async fn main() {
                 })
             };
 
-            // Load settings from file
-            let mut settings = Settings::load_from(&config_path).unwrap_or_else(|e| {
-                eprintln!("Error loading configuration: {e}");
-                std::process::exit(1);
-            });
-
-            // Add the directory
-            match settings.add_indexed_path(path.clone()) {
-                Ok(_) => {
+            // Use helper to add path and save (strict mode for add-dir)
+            match add_paths_to_settings(std::slice::from_ref(&path), &config_path, true) {
+                Ok((settings, added_paths)) => {
+                    // In strict mode, we know exactly one path was added (or error)
+                    assert_eq!(
+                        added_paths.len(),
+                        1,
+                        "Expected exactly one path to be added"
+                    );
                     println!("Added directory to indexed paths: {}", path.display());
-
-                    // Save the updated configuration
-                    if let Err(e) = settings.save(&config_path) {
-                        eprintln!("Error saving configuration: {e}");
-                        std::process::exit(1);
-                    }
-
                     println!("Configuration saved to: {}", config_path.display());
                     println!("\nCurrent indexed paths:");
                     for indexed_path in &settings.indexing.indexed_paths {

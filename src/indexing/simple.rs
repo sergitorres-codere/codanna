@@ -2075,6 +2075,11 @@ impl SimpleIndexer {
                     eprintln!("  ✓ Removed {removed_file_count} files from index");
                 }
             }
+
+            // Remove paths from tracked set after successful removal
+            for path in &removed_paths {
+                self.indexed_paths.remove(path);
+            }
         }
 
         Ok((

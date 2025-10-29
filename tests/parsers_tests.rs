@@ -33,3 +33,9 @@ mod test_gdscript_parser;
 
 #[path = "parsers/gdscript/test_resolution.rs"]
 mod test_gdscript_resolution;
+
+#[path = "parsers/gdscript/test_behavior_api.rs"]
+mod test_gdscript_behavior_api;
+
+#[path = "parsers/gdscript/test_import_extraction.rs"]
+mod test_gdscript_import_extraction;

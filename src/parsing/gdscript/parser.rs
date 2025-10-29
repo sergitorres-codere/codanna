@@ -166,6 +166,112 @@ impl GdscriptParser {
         }
     }
 
+    /// Recursively find imports (extends, preload, class_name) in the AST
+    fn find_imports_in_node(
+        &self,
+        node: Node,
+        code: &str,
+        file_id: FileId,
+        imports: &mut Vec<Import>,
+    ) {
+        match node.kind() {
+            "extends_statement" => {
+                // Module-level extends statement
+                if let Some(target) = node.named_child(0) {
+                    let path = self.text_for_node(code, target).trim().to_string();
+                    if !path.is_empty() {
+                        imports.push(Import {
+                            file_id,
+                            path,
+                            alias: None,
+                            is_glob: false,
+                            is_type_only: false,
+                        });
+                    }
+                }
+            }
+            "class_definition" => {
+                // Check for extends clause inside class
+                if let Some(extends_node) = node.child_by_field_name("extends") {
+                    if let Some(target) = extends_node.named_child(0) {
+                        let path = self.text_for_node(code, target).trim().to_string();
+                        if !path.is_empty() {
+                            imports.push(Import {
+                                file_id,
+                                path,
+                                alias: None,
+                                is_glob: false,
+                                is_type_only: false,
+                            });
+                        }
+                    }
+                }
+            }
+            "class_name_statement" => {
+                // class_name makes this symbol globally available
+                if let Some(name_node) = node.named_child(0) {
+                    let class_name = self.text_for_node(code, name_node).trim().to_string();
+                    if !class_name.is_empty() {
+                        imports.push(Import {
+                            file_id,
+                            path: class_name,
+                            alias: None,
+                            is_glob: true, // Globally visible
+                            is_type_only: false,
+                        });
+                    }
+                }
+            }
+            "call" => {
+                // Check if this is a preload() call
+                // Structure: call node has identifier child "preload" and arguments
+                if let Some(identifier_node) = node.child(0) {
+                    if identifier_node.kind() == "identifier" {
+                        let func_name = self.text_for_node(code, identifier_node).trim();
+                        if func_name == "preload" {
+                            // Find arguments node
+                            let mut cursor = node.walk();
+                            for child in node.children(&mut cursor) {
+                                if child.kind() == "arguments" {
+                                    // Get first string argument
+                                    if let Some(string_node) = child.named_child(0) {
+                                        let mut path = self
+                                            .text_for_node(code, string_node)
+                                            .trim()
+                                            .to_string();
+                                        // Remove quotes
+                                        if (path.starts_with('"') && path.ends_with('"'))
+                                            || (path.starts_with('\'') && path.ends_with('\''))
+                                        {
+                                            path = path[1..path.len() - 1].to_string();
+                                        }
+                                        if !path.is_empty() {
+                                            imports.push(Import {
+                                                file_id,
+                                                path,
+                                                alias: None,
+                                                is_glob: false,
+                                                is_type_only: false,
+                                            });
+                                        }
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        // Recursively process children
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            self.find_imports_in_node(child, code, file_id, imports);
+        }
+    }
+
     fn handle_class_definition(
         &mut self,
         node: Node,
@@ -693,8 +799,18 @@ impl LanguageParser for GdscriptParser {
         Vec::new()
     }
 
-    fn find_imports(&mut self, _code: &str, _file_id: FileId) -> Vec<Import> {
-        Vec::new()
+    fn find_imports(&mut self, code: &str, file_id: FileId) -> Vec<Import> {
+        let tree = match self.parser.parse(code, None) {
+            Some(tree) => tree,
+            None => return Vec::new(),
+        };
+
+        let root_node = tree.root_node();
+        let mut imports = Vec::new();
+
+        self.find_imports_in_node(root_node, code, file_id, &mut imports);
+
+        imports
     }
 
     fn language(&self) -> Language {
