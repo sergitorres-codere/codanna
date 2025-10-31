@@ -14,6 +14,7 @@ const ENEMY_FIXTURE: &str = include_str!("../fixtures/gdscript/enemies/enemy.gd"
 const HEAL_EFFECT_FIXTURE: &str = include_str!("../fixtures/gdscript/effects/heal_effect.gd");
 
 #[tokio::test(flavor = "current_thread")]
+#[ignore = "Downloads 86MB embedding model - unsuitable for CI/CD. Run with: cargo test -- --ignored"]
 async fn test_gdscript_semantic_search_and_analyze_impact() {
     let temp_dir = TempDir::new().expect("create temp dir");
     let workspace_root = temp_dir.path();
