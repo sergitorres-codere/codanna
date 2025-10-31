@@ -35,7 +35,7 @@ mod tests {
         println!("=== PHP Comprehensive Grammar Analysis ===\n");
 
         // 1. Load ALL nodes from grammar JSON
-        let grammar_json = fs::read_to_string("contributing/parsers/php/grammar-node-types.json")
+        let grammar_json = fs::read_to_string("contributing/parsers/php/node-types.json")
             .expect("Failed to read PHP grammar file");
         let grammar: Value =
             serde_json::from_str(&grammar_json).expect("Failed to parse grammar JSON");
@@ -178,7 +178,7 @@ mod tests {
         println!("=== Go Comprehensive Grammar Analysis ===\n");
 
         // 1. Load ALL nodes from grammar JSON
-        let grammar_json = fs::read_to_string("contributing/parsers/go/grammar-node-types.json")
+        let grammar_json = fs::read_to_string("contributing/parsers/go/node-types.json")
             .expect("Failed to read Go grammar file");
         let grammar: Value =
             serde_json::from_str(&grammar_json).expect("Failed to parse grammar JSON");
@@ -318,9 +318,8 @@ mod tests {
         println!("=== Python Comprehensive Grammar Analysis ===\n");
 
         // 1. Load ALL nodes from grammar JSON
-        let grammar_json =
-            fs::read_to_string("contributing/parsers/python/grammar-node-types.json")
-                .expect("Failed to read Python grammar file");
+        let grammar_json = fs::read_to_string("contributing/parsers/python/node-types.json")
+            .expect("Failed to read Python grammar file");
         let grammar: Value =
             serde_json::from_str(&grammar_json).expect("Failed to parse grammar JSON");
 
@@ -462,7 +461,7 @@ mod tests {
         println!("=== Rust Comprehensive Grammar Analysis ===\n");
 
         // 1. Load ALL nodes from grammar JSON
-        let grammar_json = fs::read_to_string("contributing/parsers/rust/grammar-node-types.json")
+        let grammar_json = fs::read_to_string("contributing/parsers/rust/node-types.json")
             .expect("Failed to read Rust grammar file");
         let grammar: Value =
             serde_json::from_str(&grammar_json).expect("Failed to parse grammar JSON");
@@ -605,9 +604,8 @@ mod tests {
         println!("=== TypeScript Comprehensive Grammar Analysis ===\n");
 
         // 1. Load ALL nodes from grammar JSON
-        let grammar_json =
-            fs::read_to_string("contributing/parsers/typescript/grammar-node-types.json")
-                .expect("Failed to read TypeScript grammar file");
+        let grammar_json = fs::read_to_string("contributing/parsers/typescript/node-types.json")
+            .expect("Failed to read TypeScript grammar file");
         let grammar: Value =
             serde_json::from_str(&grammar_json).expect("Failed to parse grammar JSON");
 
@@ -753,7 +751,7 @@ mod tests {
         println!("=== C Comprehensive Grammar Analysis ===\n");
 
         // 1. Load ALL nodes from grammar JSON
-        let grammar_json = fs::read_to_string("contributing/parsers/c/grammar-node-types.json")
+        let grammar_json = fs::read_to_string("contributing/parsers/c/node-types.json")
             .expect("Failed to read C grammar file");
         let grammar: Value =
             serde_json::from_str(&grammar_json).expect("Failed to parse grammar JSON");
@@ -893,7 +891,7 @@ mod tests {
         println!("=== C++ Comprehensive Grammar Analysis ===\n");
 
         // 1. Load ALL nodes from grammar JSON
-        let grammar_json = fs::read_to_string("contributing/parsers/cpp/grammar-node-types.json")
+        let grammar_json = fs::read_to_string("contributing/parsers/cpp/node-types.json")
             .expect("Failed to read C++ grammar file");
         let grammar: Value =
             serde_json::from_str(&grammar_json).expect("Failed to parse grammar JSON");
@@ -1038,7 +1036,7 @@ mod tests {
         fs::create_dir_all("contributing/parsers/gdscript")
             .expect("Failed to create GDScript parser output directory");
 
-        let grammar_path = "contributing/parsers/gdscript/grammar-node-types.json";
+        let grammar_path = "contributing/parsers/gdscript/node-types.json";
         let mut all_grammar_nodes = HashSet::new();
         let mut grammar_warning = None;
 
@@ -1066,7 +1064,7 @@ Run `tree-sitter generate` and copy node-types.json to {grammar_path}."
             },
             Err(err) => {
                 grammar_warning = Some(format!(
-                    "Missing grammar-node-types.json for GDScript ({err}). \
+                    "Missing node-types.json for GDScript ({err}). \
 Run `./contributing/tree-sitter/scripts/setup.sh gdscript` and copy \
 tree-sitter-gdscript/src/node-types.json to {grammar_path}."
                 ));
@@ -3118,9 +3116,8 @@ tree-sitter-gdscript/src/node-types.json to {grammar_path}."
         println!("=== C# Comprehensive Grammar Analysis ===\n");
 
         // 1. Load ALL nodes from grammar JSON
-        let grammar_json =
-            fs::read_to_string("contributing/parsers/csharp/grammar-node-types.json")
-                .expect("Failed to read C# grammar file");
+        let grammar_json = fs::read_to_string("contributing/parsers/csharp/node-types.json")
+            .expect("Failed to read C# grammar file");
         let grammar: Value =
             serde_json::from_str(&grammar_json).expect("Failed to parse grammar JSON");
 

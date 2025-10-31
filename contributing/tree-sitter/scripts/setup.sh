@@ -43,12 +43,37 @@ if [ -n "$LANG" ]; then
     GRAMMAR_NAME="tree-sitter-$LANG"
     dir="$GRAMMARS_DIR/$GRAMMAR_NAME"
 
+    # Determine project root (3 levels up from scripts/)
+    PROJECT_ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
+    PARSERS_DIR="$PROJECT_ROOT/contributing/parsers"
+
     if [ -d "$dir" ]; then
         echo "✓ $GRAMMAR_NAME already installed"
     else
         echo "→ Installing $GRAMMAR_NAME..."
         git clone --depth 1 "$REPO" "$dir"
         echo "✅ $GRAMMAR_NAME installed"
+    fi
+
+    # Copy node-types.json to parsers directory
+    SOURCE_FILE="$dir/src/node-types.json"
+    DEST_DIR="$PARSERS_DIR/$LANG"
+    DEST_FILE="$DEST_DIR/node-types.json"
+
+    if [ -f "$SOURCE_FILE" ]; then
+        mkdir -p "$DEST_DIR"
+        cp "$SOURCE_FILE" "$DEST_FILE"
+        echo "✅ Copied node-types.json to $DEST_FILE"
+    else
+        echo "⚠️  Warning: node-types.json not found at $SOURCE_FILE"
+        echo "   You may need to generate it with: cd $dir && tree-sitter generate"
+    fi
+
+    # Update grammar version lockfile
+    echo ""
+    LOCK_SCRIPT="$(dirname "$0")/update-grammar-lock.sh"
+    if [ -f "$LOCK_SCRIPT" ]; then
+        "$LOCK_SCRIPT"
     fi
 else
     # List available grammars

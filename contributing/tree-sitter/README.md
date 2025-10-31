@@ -47,6 +47,8 @@ All scripts are located in `contributing/tree-sitter/scripts/`:
 | Script | Purpose | Input | Example |
 |--------|---------|-------|---------|
 | `setup.sh` | Configure tree-sitter and install grammars | Language name | `./scripts/setup.sh typescript` |
+| `update-grammar-lock.sh` | Generate/update grammar version lockfile | None | `./scripts/update-grammar-lock.sh` |
+| `check-grammar-updates.sh` | Check for remote grammar updates | None | `./scripts/check-grammar-updates.sh` |
 | `explore-ast.sh` | Parse ANY file and display its AST | File path + mode | `./scripts/explore-ast.sh file.ts both` |
 | `compare-nodes.sh` | Compare codanna with tree-sitter | Language or file path | See below |
 
@@ -82,9 +84,63 @@ Parse files with codanna and/or tree-sitter:
 3. Tree-sitter automatically finds grammars based on the config
 4. File extensions determine which grammar to use (.ts → typescript, .py → python)
 
+## Grammar Version Tracking
+
+The project tracks tree-sitter grammar versions using a lockfile system to detect updates:
+
+### Lockfile System
+
+**Location**: `contributing/parsers/grammar-versions.lock`
+
+This JSON file tracks:
+- Commit hash of each grammar
+- Last update timestamp
+- ABI version (14 or 15)
+- Repository URL
+
+### Checking for Updates
+
+```bash
+# Check if remote grammars have updates
+./contributing/tree-sitter/scripts/check-grammar-updates.sh
+```
+
+This fetches from remote and compares without pulling.
+
+Output:
+```
+✓ c: Up to date (d8d0503)
+🔄 python: Update available (293fdc0 → a1b2c3d)
+   └─ 5 commits behind
+```
+
+### Updating Grammars
+
+When updates are available:
+
+```bash
+# Update all grammars
+for dir in contributing/tree-sitter/grammars/tree-sitter-*; do
+  (cd $dir && git pull)
+done
+
+# Update lockfile
+./contributing/tree-sitter/scripts/update-grammar-lock.sh
+```
+
+The lockfile automatically updates when running `setup.sh` too.
+
+### Why This Matters
+
+- **ABI version changes**: Some grammars may upgrade from ABI-14 to ABI-15
+- **Breaking changes**: Grammar updates can change node types
+- **node-types.json updates**: New node types may be added
+- **Cargo.toml sync**: tree-sitter crate versions need to match
+
 ## Notes
 
 - Grammars are cloned with `--depth 1` for speed
 - The grammars directory is gitignored
 - Each developer's tree-sitter config points to their local grammar directory
 - No environment variables or .env files needed - tree-sitter handles it
+- Lockfile automatically syncs with grammar commits
