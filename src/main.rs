@@ -1984,6 +1984,11 @@ async fn main() {
 
             // Collect data for get_calls if JSON output is requested
             let get_calls_data = if json && tool == "get_calls" {
+                let symbol_id = arguments
+                    .as_ref()
+                    .and_then(|m| m.get("symbol_id"))
+                    .and_then(|v| v.as_u64())
+                    .map(|id| id as u32);
                 let function_name = arguments
                     .as_ref()
                     .and_then(|m| m.get("function_name"))
@@ -1993,7 +1998,27 @@ async fn main() {
                     .and_then(|m| m.get("lang"))
                     .and_then(|v| v.as_str());
 
-                if let Some(func_name) = function_name {
+                if let Some(id) = symbol_id {
+                    use codanna::symbol::context::ContextIncludes;
+
+                    // Direct lookup by symbol ID
+                    if let Some(symbol) = indexer.get_symbol(codanna::SymbolId(id)) {
+                        let mut all_calls = Vec::new();
+
+                        let context = indexer.get_symbol_context(symbol.id, ContextIncludes::CALLS);
+                        if let Some(ctx) = context {
+                            if let Some(calls) = ctx.relationships.calls {
+                                for (called, metadata) in calls {
+                                    all_calls.push((called, metadata));
+                                }
+                            }
+                        }
+
+                        Some(all_calls)
+                    } else {
+                        None // Symbol not found
+                    }
+                } else if let Some(func_name) = function_name {
                     use codanna::symbol::context::ContextIncludes;
                     use std::collections::HashSet;
 
@@ -2042,6 +2067,11 @@ async fn main() {
 
             // Collect data for find_callers if JSON output is requested
             let find_callers_data = if json && tool == "find_callers" {
+                let symbol_id = arguments
+                    .as_ref()
+                    .and_then(|m| m.get("symbol_id"))
+                    .and_then(|v| v.as_u64())
+                    .map(|id| id as u32);
                 let function_name = arguments
                     .as_ref()
                     .and_then(|m| m.get("function_name"))
@@ -2051,7 +2081,16 @@ async fn main() {
                     .and_then(|m| m.get("lang"))
                     .and_then(|v| v.as_str());
 
-                if let Some(func_name) = function_name {
+                if let Some(id) = symbol_id {
+                    // Direct lookup by symbol ID
+                    if let Some(symbol) = indexer.get_symbol(codanna::SymbolId(id)) {
+                        let callers = indexer.get_calling_functions_with_metadata(symbol.id);
+                        let all_callers: Vec<_> = callers.into_iter().collect();
+                        Some(all_callers)
+                    } else {
+                        None // Symbol not found
+                    }
+                } else if let Some(func_name) = function_name {
                     use std::collections::HashSet;
 
                     // Find all functions with this name
@@ -2084,6 +2123,11 @@ async fn main() {
 
             // Collect data for analyze_impact if JSON output is requested
             let analyze_impact_data = if json && tool == "analyze_impact" {
+                let symbol_id = arguments
+                    .as_ref()
+                    .and_then(|m| m.get("symbol_id"))
+                    .and_then(|v| v.as_u64())
+                    .map(|id| id as u32);
                 let symbol_name = arguments
                     .as_ref()
                     .and_then(|m| m.get("symbol_name"))
@@ -2093,7 +2137,30 @@ async fn main() {
                     .and_then(|m| m.get("lang"))
                     .and_then(|v| v.as_str());
 
-                if let Some(sym_name) = symbol_name {
+                if let Some(id) = symbol_id {
+                    // Direct lookup by symbol ID
+                    if let Some(symbol) = indexer.get_symbol(codanna::SymbolId(id)) {
+                        let max_depth = arguments
+                            .as_ref()
+                            .and_then(|m| m.get("max_depth"))
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(3) as usize;
+
+                        let impacted_ids = indexer.get_impact_radius(symbol.id, Some(max_depth));
+
+                        // Convert SymbolIds to full Symbols
+                        let mut impacted_symbols = Vec::new();
+                        for impact_id in impacted_ids {
+                            if let Some(sym) = indexer.get_symbol(impact_id) {
+                                impacted_symbols.push(sym);
+                            }
+                        }
+
+                        Some(impacted_symbols)
+                    } else {
+                        None // Symbol not found
+                    }
+                } else if let Some(sym_name) = symbol_name {
                     use std::collections::HashSet;
 
                     // Find ALL symbols with this name (same as MCP handler)
@@ -2722,13 +2789,21 @@ async fn main() {
                             println!("{}", serde_json::to_string_pretty(&response).unwrap());
                         } else {
                             // Function not found
-                            let name = arguments
-                                .as_ref()
-                                .and_then(|m| m.get("function_name"))
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("unknown");
                             use codanna::io::format::JsonResponse;
-                            let response = JsonResponse::not_found("Function", name);
+                            let response = if let Some(id) = arguments
+                                .as_ref()
+                                .and_then(|m| m.get("symbol_id"))
+                                .and_then(|v| v.as_u64())
+                            {
+                                JsonResponse::not_found("Symbol", &format!("symbol_id:{id}"))
+                            } else {
+                                let name = arguments
+                                    .as_ref()
+                                    .and_then(|m| m.get("function_name"))
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("unknown");
+                                JsonResponse::not_found("Function", name)
+                            };
                             println!("{}", serde_json::to_string_pretty(&response).unwrap());
                             std::process::exit(3);
                         }
@@ -2756,13 +2831,21 @@ async fn main() {
                             println!("{}", serde_json::to_string_pretty(&response).unwrap());
                         } else {
                             // Function not found
-                            let name = arguments
-                                .as_ref()
-                                .and_then(|m| m.get("function_name"))
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("unknown");
                             use codanna::io::format::JsonResponse;
-                            let response = JsonResponse::not_found("Function", name);
+                            let response = if let Some(id) = arguments
+                                .as_ref()
+                                .and_then(|m| m.get("symbol_id"))
+                                .and_then(|v| v.as_u64())
+                            {
+                                JsonResponse::not_found("Symbol", &format!("symbol_id:{id}"))
+                            } else {
+                                let name = arguments
+                                    .as_ref()
+                                    .and_then(|m| m.get("function_name"))
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("unknown");
+                                JsonResponse::not_found("Function", name)
+                            };
                             println!("{}", serde_json::to_string_pretty(&response).unwrap());
                             std::process::exit(3);
                         }
@@ -2772,11 +2855,20 @@ async fn main() {
                             use codanna::io::format::JsonResponse;
                             if impacted.is_empty() {
                                 // No symbols would be impacted
-                                let name = arguments
+                                let identifier = if let Some(id) = arguments
                                     .as_ref()
-                                    .and_then(|m| m.get("symbol_name"))
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("unknown");
+                                    .and_then(|m| m.get("symbol_id"))
+                                    .and_then(|v| v.as_u64())
+                                {
+                                    format!("symbol_id:{id}")
+                                } else {
+                                    arguments
+                                        .as_ref()
+                                        .and_then(|m| m.get("symbol_name"))
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("unknown")
+                                        .to_string()
+                                };
                                 use codanna::io::guidance_engine::generate_guidance_from_config;
 
                                 // Create a proper struct for the empty case
@@ -2789,7 +2881,7 @@ async fn main() {
                                 }
 
                                 let impact_result = EmptyImpactResult {
-                                    symbol: name.to_string(),
+                                    symbol: identifier.clone(),
                                     impacted_count: 0,
                                     impacted_symbols: vec![],
                                     message:
@@ -2803,7 +2895,7 @@ async fn main() {
                                 if let Some(guidance) = generate_guidance_from_config(
                                     &guidance_config,
                                     "analyze_impact",
-                                    Some(name),
+                                    Some(&identifier),
                                     0,
                                 ) {
                                     response = response.with_system_message(&guidance);
@@ -2833,13 +2925,21 @@ async fn main() {
                             }
                         } else {
                             // Symbol not found
-                            let name = arguments
-                                .as_ref()
-                                .and_then(|m| m.get("symbol_name"))
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("unknown");
                             use codanna::io::format::JsonResponse;
-                            let response = JsonResponse::not_found("Symbol", name);
+                            let response = if let Some(id) = arguments
+                                .as_ref()
+                                .and_then(|m| m.get("symbol_id"))
+                                .and_then(|v| v.as_u64())
+                            {
+                                JsonResponse::not_found("Symbol", &format!("symbol_id:{id}"))
+                            } else {
+                                let name = arguments
+                                    .as_ref()
+                                    .and_then(|m| m.get("symbol_name"))
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("unknown");
+                                JsonResponse::not_found("Symbol", name)
+                            };
                             println!("{}", serde_json::to_string_pretty(&response).unwrap());
                             std::process::exit(3);
                         }

@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.7] - 2025-11-01
+
+### Fixed
+
+- MCP commands now support `symbol_id:N` syntax with JSON output
+- Added symbol_id parameter handling to find_callers JSON data collection
+- Added symbol_id parameter handling to get_calls JSON data collection
+- Added symbol_id parameter handling to analyze_impact JSON data collection
+- Updated error messages to show correct parameter (symbol_id vs name) when symbol not found
+- Fixed empty impact result to handle symbol_id in identifier string
+
+Closes #63
+
 ## [0.6.6] - 2025-10-31
 
 ### Added
