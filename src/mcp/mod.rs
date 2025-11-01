@@ -36,7 +36,13 @@ use serde_json;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 
-use crate::{IndexPersistence, Settings, SimpleIndexer, Symbol};
+use crate::{Settings, SimpleIndexer, Symbol};
+
+/// Generate guidance for MCP tool responses
+fn generate_mcp_guidance(settings: &Settings, tool: &str, result_count: usize) -> Option<String> {
+    use crate::io::guidance_engine::generate_guidance_from_config;
+    generate_guidance_from_config(&settings.guidance, tool, None, result_count)
+}
 
 /// Format a Unix timestamp as relative time (e.g., "2 hours ago")
 pub fn format_relative_time(timestamp: u64) -> String {
@@ -235,34 +241,6 @@ impl CodeIntelligenceServer {
         }
     }
 
-    pub async fn from_persistence(
-        settings: Arc<Settings>,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
-        let persistence = IndexPersistence::new(settings.index_path.clone());
-
-        let indexer = if persistence.exists() {
-            eprintln!(
-                "Loading existing index from {}",
-                settings.index_path.display()
-            );
-            match persistence.load_with_settings(settings.clone(), false) {
-                Ok(loaded) => {
-                    eprintln!("Loaded index with {} symbols", loaded.symbol_count());
-                    loaded
-                }
-                Err(e) => {
-                    eprintln!("Warning: Could not load index: {e}. Creating new index.");
-                    SimpleIndexer::with_settings(settings.clone())
-                }
-            }
-        } else {
-            eprintln!("No existing index found. Please run 'index' command first.");
-            SimpleIndexer::with_settings(settings.clone())
-        };
-
-        Ok(Self::new(indexer))
-    }
-
     #[tool(description = "Find a symbol by name in the indexed codebase")]
     pub async fn find_symbol(
         &self,
@@ -274,9 +252,14 @@ impl CodeIntelligenceServer {
         let symbols = indexer.find_symbols_by_name(&name, lang.as_deref());
 
         if symbols.is_empty() {
-            return Ok(CallToolResult::success(vec![Content::text(format!(
-                "No symbols found with name: {name}"
-            ))]));
+            let mut output = format!("No symbols found with name: {name}");
+            // Add guidance for no results
+            if let Some(guidance) = generate_mcp_guidance(indexer.settings(), "find_symbol", 0) {
+                output.push_str("\n\n---\n💡 ");
+                output.push_str(&guidance);
+                output.push('\n');
+            }
+            return Ok(CallToolResult::success(vec![Content::text(output)]));
         }
 
         let mut result = format!("Found {} symbol(s) named '{}':\n\n", symbols.len(), name);
@@ -376,6 +359,15 @@ impl CodeIntelligenceServer {
             }
         }
 
+        // Add system guidance
+        if let Some(guidance) =
+            generate_mcp_guidance(indexer.settings(), "find_symbol", symbols.len())
+        {
+            result.push_str("\n---\n💡 ");
+            result.push_str(&guidance);
+            result.push('\n');
+        }
+
         Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
@@ -448,16 +440,18 @@ impl CodeIntelligenceServer {
         let all_called_with_metadata = indexer.get_called_functions_with_metadata(symbol.id);
 
         if all_called_with_metadata.is_empty() {
-            return Ok(CallToolResult::success(vec![Content::text(format!(
-                "{identifier} doesn't call any functions"
-            ))]));
+            let mut output = format!("{identifier} doesn't call any functions");
+            // Add guidance for no results
+            if let Some(guidance) = generate_mcp_guidance(indexer.settings(), "get_calls", 0) {
+                output.push_str("\n\n---\n💡 ");
+                output.push_str(&guidance);
+                output.push('\n');
+            }
+            return Ok(CallToolResult::success(vec![Content::text(output)]));
         }
 
-        let mut result = format!(
-            "{} calls {} function(s):\n",
-            identifier,
-            all_called_with_metadata.len()
-        );
+        let result_count = all_called_with_metadata.len();
+        let mut result = format!("{identifier} calls {result_count} function(s):\n");
         for (callee, metadata) in all_called_with_metadata {
             // Parse metadata to extract receiver info and call site location
             let (call_display, call_line) = if let Some(ref meta) = metadata {
@@ -510,6 +504,15 @@ impl CodeIntelligenceServer {
                 result.push_str(&format!("     Signature: {sig}\n"));
             }
         }
+
+        // Add system guidance
+        if let Some(guidance) = generate_mcp_guidance(indexer.settings(), "get_calls", result_count)
+        {
+            result.push_str("\n---\n💡 ");
+            result.push_str(&guidance);
+            result.push('\n');
+        }
+
         Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
@@ -581,17 +584,19 @@ impl CodeIntelligenceServer {
         let all_callers_with_metadata = indexer.get_calling_functions_with_metadata(symbol.id);
 
         if all_callers_with_metadata.is_empty() {
-            return Ok(CallToolResult::success(vec![Content::text(format!(
-                "No functions call {identifier}"
-            ))]));
+            let mut output = format!("No functions call {identifier}");
+            // Add guidance for no results
+            if let Some(guidance) = generate_mcp_guidance(indexer.settings(), "find_callers", 0) {
+                output.push_str("\n\n---\n💡 ");
+                output.push_str(&guidance);
+                output.push('\n');
+            }
+            return Ok(CallToolResult::success(vec![Content::text(output)]));
         }
 
         // Build structured text response with rich metadata
-        let mut result = format!(
-            "{} function(s) call {}:\n",
-            all_callers_with_metadata.len(),
-            identifier
-        );
+        let result_count = all_callers_with_metadata.len();
+        let mut result = format!("{result_count} function(s) call {identifier}:\n");
 
         for (caller, metadata) in all_callers_with_metadata {
             // Parse metadata to extract receiver info and call site location
@@ -646,6 +651,15 @@ impl CodeIntelligenceServer {
             if let Some(ref sig) = caller.signature {
                 result.push_str(&format!("     Signature: {sig}\n"));
             }
+        }
+
+        // Add system guidance
+        if let Some(guidance) =
+            generate_mcp_guidance(indexer.settings(), "find_callers", result_count)
+        {
+            result.push_str("\n---\n💡 ");
+            result.push_str(&guidance);
+            result.push('\n');
         }
 
         Ok(CallToolResult::success(vec![Content::text(result)]))
@@ -722,9 +736,14 @@ impl CodeIntelligenceServer {
         let impacted = indexer.get_impact_radius(symbol.id, Some(max_depth as usize));
 
         if impacted.is_empty() {
-            return Ok(CallToolResult::success(vec![Content::text(format!(
-                "No symbols would be impacted by changing {identifier}"
-            ))]));
+            let mut output = format!("No symbols would be impacted by changing {identifier}");
+            // Add guidance for no results
+            if let Some(guidance) = generate_mcp_guidance(indexer.settings(), "analyze_impact", 0) {
+                output.push_str("\n\n---\n💡 ");
+                output.push_str(&guidance);
+                output.push('\n');
+            }
+            return Ok(CallToolResult::success(vec![Content::text(output)]));
         }
 
         let mut result = format!("Analyzing impact of changing: {identifier}\n");
@@ -744,10 +763,9 @@ impl CodeIntelligenceServer {
             ));
         }
 
+        let impact_count = impacted.len();
         result.push_str(&format!(
-            "Total impact: {} symbol(s) would be affected (max depth: {})\n",
-            impacted.len(),
-            max_depth
+            "Total impact: {impact_count} symbol(s) would be affected (max depth: {max_depth})\n"
         ));
 
         // Group by symbol kind
@@ -771,6 +789,15 @@ impl CodeIntelligenceServer {
                     sym.range.start_line + 1
                 ));
             }
+        }
+
+        // Add system guidance
+        if let Some(guidance) =
+            generate_mcp_guidance(indexer.settings(), "analyze_impact", impact_count)
+        {
+            result.push_str("\n---\n💡 ");
+            result.push_str(&guidance);
+            result.push('\n');
         }
 
         Ok(CallToolResult::success(vec![Content::text(result)]))
@@ -883,9 +910,17 @@ impl CodeIntelligenceServer {
         match results {
             Ok(results) => {
                 if results.is_empty() {
-                    return Ok(CallToolResult::success(vec![Content::text(format!(
-                        "No semantically similar documentation found for: {query}"
-                    ))]));
+                    let mut output =
+                        format!("No semantically similar documentation found for: {query}");
+                    // Add guidance for no results
+                    if let Some(guidance) =
+                        generate_mcp_guidance(indexer.settings(), "semantic_search_docs", 0)
+                    {
+                        output.push_str("\n\n---\n💡 ");
+                        output.push_str(&guidance);
+                        output.push('\n');
+                    }
+                    return Ok(CallToolResult::success(vec![Content::text(output)]));
                 }
 
                 let mut result = format!(
@@ -923,6 +958,15 @@ impl CodeIntelligenceServer {
                         result.push_str(&format!("   Signature: {sig}\n"));
                     }
 
+                    result.push('\n');
+                }
+
+                // Add system guidance
+                if let Some(guidance) =
+                    generate_mcp_guidance(indexer.settings(), "semantic_search_docs", results.len())
+                {
+                    result.push_str("\n---\n💡 ");
+                    result.push_str(&guidance);
                     result.push('\n');
                 }
 
@@ -991,9 +1035,16 @@ impl CodeIntelligenceServer {
         match search_results {
             Ok(results) => {
                 if results.is_empty() {
-                    return Ok(CallToolResult::success(vec![Content::text(format!(
-                        "No documentation found matching query: {query}"
-                    ))]));
+                    let mut output = format!("No documentation found matching query: {query}");
+                    // Add guidance for no results
+                    if let Some(guidance) =
+                        generate_mcp_guidance(indexer.settings(), "semantic_search_with_context", 0)
+                    {
+                        output.push_str("\n\n---\n💡 ");
+                        output.push_str(&guidance);
+                        output.push('\n');
+                    }
+                    return Ok(CallToolResult::success(vec![Content::text(output)]));
                 }
 
                 let mut output = String::new();
@@ -1269,6 +1320,17 @@ impl CodeIntelligenceServer {
                     output.push('\n');
                 }
 
+                // Add system guidance
+                if let Some(guidance) = generate_mcp_guidance(
+                    indexer.settings(),
+                    "semantic_search_with_context",
+                    results.len(),
+                ) {
+                    output.push_str("\n---\n💡 ");
+                    output.push_str(&guidance);
+                    output.push('\n');
+                }
+
                 Ok(CallToolResult::success(vec![Content::text(output)]))
             }
             Err(e) => Ok(CallToolResult::error(vec![Content::text(format!(
@@ -1311,9 +1373,16 @@ impl CodeIntelligenceServer {
         ) {
             Ok(results) => {
                 if results.is_empty() {
-                    return Ok(CallToolResult::success(vec![Content::text(format!(
-                        "No results found for query: {query}"
-                    ))]));
+                    let mut output = format!("No results found for query: {query}");
+                    // Add guidance for no results
+                    if let Some(guidance) =
+                        generate_mcp_guidance(indexer.settings(), "search_symbols", 0)
+                    {
+                        output.push_str("\n\n---\n💡 ");
+                        output.push_str(&guidance);
+                        output.push('\n');
+                    }
+                    return Ok(CallToolResult::success(vec![Content::text(output)]));
                 }
 
                 let mut result = format!(
@@ -1349,6 +1418,15 @@ impl CodeIntelligenceServer {
                     }
 
                     result.push_str(&format!("   Score: {:.2}\n", search_result.score));
+                    result.push('\n');
+                }
+
+                // Add system guidance
+                if let Some(guidance) =
+                    generate_mcp_guidance(indexer.settings(), "search_symbols", results.len())
+                {
+                    result.push_str("\n---\n💡 ");
+                    result.push_str(&guidance);
                     result.push('\n');
                 }
 

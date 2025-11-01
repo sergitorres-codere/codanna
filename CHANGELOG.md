@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.6] - 2025-10-31
+
+### Added
+
+**Documentation**
+- Created language-architecture.md with design principles and resolution patterns
+- Created language-patterns.md with implementation patterns from TypeScript/Rust
+- Created development README.md as documentation index
+- Updated language-support.md with accurate resolution implementation status
+
+**Grammar Version Tracking**
+- Added grammar-versions.lock to track tree-sitter grammar commits and ABI versions
+- Added update-grammar-lock.sh to generate/update lockfile automatically
+- Added check-grammar-updates.sh to detect remote grammar updates
+- Lockfile tracks commit hash, timestamp, ABI version, and repo URL for each grammar
+
+**GDScript Enhancement**
+- Added relationship tracking for GDScript (#62)
+
+**MCP Enhancement**
+- Added guidance messages to all MCP tool responses (find_symbol, get_calls, find_callers, analyze_impact, search_symbols, semantic_search_docs, semantic_search_with_context)
+
+### Changed
+
+- Renamed grammar-node-types.json to node-types.json across all languages
+- Updated setup.sh to copy node-types.json and update lockfile
+- Updated abi15_grammar_audit.rs to use new node-types.json filename
+- Moved `generate_mcp_guidance()` function to top of module for clarity
+
+### Fixed
+
+- Resolved clippy warning in method_call test data (changed vec![] to array)
+- Prevented CI model downloads by marking gdscript semantic search test as ignored
+
+### Removed
+
+- Removed unused `from_persistence()` method from MCP server
+- Removed `IndexPersistence` import from MCP module
+- Removed outdated parsers_api.md (superseded by new docs)
+
 ## [0.6.5] - 2025-10-29
 
 ### Added
