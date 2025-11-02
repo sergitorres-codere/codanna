@@ -109,3 +109,7 @@ path = "examples/simple_progress_demo.rs"
 [[bench]]
 name = "unified_output_bench"
 harness = false
+
+[[bench]]
+name = "kotlin_parser_bench"
+harness = false

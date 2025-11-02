@@ -10,9 +10,61 @@ use crate::parsing::{
 use crate::types::SymbolCounter;
 use crate::{FileId, Range, Symbol, SymbolKind, Visibility};
 use std::any::Any;
+use std::collections::HashSet;
+use std::sync::OnceLock;
 use tree_sitter::{Node, Parser};
 
+// Constants for commonly accessed node kinds
 const FILE_SCOPE: &str = "<file>";
+const NODE_CLASS_DECLARATION: &str = "class_declaration";
+const NODE_OBJECT_DECLARATION: &str = "object_declaration";
+const NODE_FUNCTION_DECLARATION: &str = "function_declaration";
+const NODE_PROPERTY_DECLARATION: &str = "property_declaration";
+const NODE_SECONDARY_CONSTRUCTOR: &str = "secondary_constructor";
+const NODE_PACKAGE_HEADER: &str = "package_header";
+const NODE_MULTILINE_COMMENT: &str = "multiline_comment";
+const NODE_LINE_COMMENT: &str = "line_comment";
+const NODE_TYPE_IDENTIFIER: &str = "type_identifier";
+const NODE_SIMPLE_IDENTIFIER: &str = "simple_identifier";
+const NODE_CLASS_BODY: &str = "class_body";
+const NODE_ENUM_CLASS_BODY: &str = "enum_class_body";
+const NODE_FUNCTION_BODY: &str = "function_body";
+const NODE_MODIFIERS: &str = "modifiers";
+const NODE_INTERFACE: &str = "interface";
+const NODE_ENUM: &str = "enum";
+const NODE_ENUM_ENTRY: &str = "enum_entry";
+const NODE_VARIABLE_DECLARATION: &str = "variable_declaration";
+const NODE_CALL_EXPRESSION: &str = "call_expression";
+const NODE_DELEGATION_SPECIFIER: &str = "delegation_specifier";
+const NODE_TYPE_REFERENCE: &str = "type_reference";
+const NODE_USER_TYPE: &str = "user_type";
+const NODE_SIMPLE_USER_TYPE: &str = "simple_user_type";
+const NODE_PARAMETER: &str = "parameter";
+const NODE_CLASS_PARAMETER: &str = "class_parameter";
+const NODE_FUNCTION_VALUE_PARAMETERS: &str = "function_value_parameters";
+const NODE_PRIMARY_CONSTRUCTOR: &str = "primary_constructor";
+
+// Lazy-initialized HashSet for primitive types
+static KOTLIN_PRIMITIVE_TYPES: OnceLock<HashSet<&'static str>> = OnceLock::new();
+
+fn get_primitive_types() -> &'static HashSet<&'static str> {
+    KOTLIN_PRIMITIVE_TYPES.get_or_init(|| {
+        let mut set = HashSet::new();
+        set.insert("Int");
+        set.insert("Long");
+        set.insert("Short");
+        set.insert("Byte");
+        set.insert("Float");
+        set.insert("Double");
+        set.insert("Boolean");
+        set.insert("Char");
+        set.insert("String");
+        set.insert("Unit");
+        set.insert("Any");
+        set.insert("Nothing");
+        set
+    })
+}
 
 /// Parser for Kotlin source files
 pub struct KotlinParser {
@@ -67,60 +119,85 @@ impl KotlinParser {
 
     /// Extract documentation comments (/** */ or //)
     fn doc_comment_for(&self, node: &Node, code: &str) -> Option<String> {
-        let mut comments = Vec::new();
+        // Use a String for in-place building to reduce allocations
+        let mut result = String::new();
+        let mut comment_count = 0;
         let mut current = node.prev_sibling();
+
+        // Helper closure to extract and clean a comment
+        let extract_comment = |raw: &str| -> Option<String> {
+            let trimmed = raw.trim();
+            if trimmed.starts_with("/**") {
+                // Multiline doc comment: /** ... */
+                let cleaned = trimmed
+                    .strip_prefix("/**")
+                    .and_then(|s| s.strip_suffix("*/"))
+                    .unwrap_or(trimmed)
+                    .trim();
+                Some(cleaned.to_string())
+            } else if trimmed.starts_with("///") {
+                // Single-line doc comment: ///
+                Some(trimmed.strip_prefix("///").unwrap_or(trimmed).trim().to_string())
+            } else {
+                None
+            }
+        };
 
         // Special case: if previous sibling is package_header, check its last child for comments
         if let Some(sibling) = current {
-            if sibling.kind() == "package_header" {
+            if sibling.kind() == NODE_PACKAGE_HEADER {
                 // Check last named children of package_header for comments
                 let mut cursor = sibling.walk();
                 for child in sibling.named_children(&mut cursor) {
-                    if child.kind() == "multiline_comment" || child.kind() == "line_comment" {
-                        let raw = self.text_for_node(code, child).trim();
-                        if raw.starts_with("/**") || raw.starts_with("///") {
-                            let cleaned = raw
-                                .trim_start_matches("/**")
-                                .trim_end_matches("*/")
-                                .trim_start_matches("///")
-                                .trim();
-                            comments.push(cleaned.to_string());
+                    let child_kind = child.kind();
+                    if child_kind == NODE_MULTILINE_COMMENT || child_kind == NODE_LINE_COMMENT {
+                        let raw = self.text_for_node(code, child);
+                        if let Some(cleaned) = extract_comment(raw) {
+                            if comment_count > 0 {
+                                result.push('\n');
+                            }
+                            result.push_str(&cleaned);
+                            comment_count += 1;
                         }
                     }
                 }
-                if !comments.is_empty() {
-                    return Some(comments.join("\n"));
+                if comment_count > 0 {
+                    return Some(result);
                 }
             }
         }
 
         // Standard case: check previous siblings for doc comments
+        // Collect in reverse order first
+        let mut temp_comments = Vec::new();
         current = node.prev_sibling();
         while let Some(sibling) = current {
+            let sibling_kind = sibling.kind();
             // Kotlin uses multiline_comment and line_comment node kinds
-            if sibling.kind() != "multiline_comment" && sibling.kind() != "line_comment" {
+            if sibling_kind != NODE_MULTILINE_COMMENT && sibling_kind != NODE_LINE_COMMENT {
                 break;
             }
 
-            let raw = self.text_for_node(code, sibling).trim();
-            if raw.starts_with("/**") || raw.starts_with("///") {
-                let cleaned = raw
-                    .trim_start_matches("/**")
-                    .trim_end_matches("*/")
-                    .trim_start_matches("///")
-                    .trim();
-                comments.push(cleaned.to_string());
+            let raw = self.text_for_node(code, sibling);
+            if let Some(cleaned) = extract_comment(raw) {
+                temp_comments.push(cleaned);
                 current = sibling.prev_sibling();
             } else {
                 break;
             }
         }
 
-        if comments.is_empty() {
+        if temp_comments.is_empty() {
             None
         } else {
-            comments.reverse();
-            Some(comments.join("\n"))
+            // Build result in correct order
+            for (i, comment) in temp_comments.iter().rev().enumerate() {
+                if i > 0 {
+                    result.push('\n');
+                }
+                result.push_str(&comment);
+            }
+            Some(result)
         }
     }
 
@@ -129,7 +206,7 @@ impl KotlinParser {
         // Look for modifiers node
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            if child.kind() == "modifiers" {
+            if child.kind() == NODE_MODIFIERS {
                 let modifiers_text = self.text_for_node(code, child);
                 if modifiers_text.contains("private") {
                     return Visibility::Private;
@@ -151,16 +228,16 @@ impl KotlinParser {
         // Collect modifiers
         for child in node.children(&mut cursor) {
             match child.kind() {
-                "modifiers" => {
+                NODE_MODIFIERS => {
                     sig_parts.push(self.text_for_node(code, child).to_string());
                 }
-                "simple_identifier" | "type_identifier" => {
+                NODE_SIMPLE_IDENTIFIER | NODE_TYPE_IDENTIFIER => {
                     sig_parts.push(self.text_for_node(code, child).to_string());
                 }
-                "function_value_parameters" | "class_parameters" => {
+                NODE_FUNCTION_VALUE_PARAMETERS | "class_parameters" => {
                     sig_parts.push(self.text_for_node(code, child).to_string());
                 }
-                "type" | "user_type" | "type_reference" => {
+                "type" | NODE_USER_TYPE | NODE_TYPE_REFERENCE => {
                     sig_parts.push(format!(": {}", self.text_for_node(code, child)));
                 }
                 _ => {}
@@ -186,31 +263,31 @@ impl KotlinParser {
         }
 
         match node.kind() {
-            "class_declaration" => {
+            NODE_CLASS_DECLARATION => {
                 self.handle_class_declaration(
                     node, code, file_id, symbols, counter, context, depth,
                 );
                 return;
             }
-            "object_declaration" => {
+            NODE_OBJECT_DECLARATION => {
                 self.handle_object_declaration(
                     node, code, file_id, symbols, counter, context, depth,
                 );
                 return;
             }
-            "function_declaration" => {
+            NODE_FUNCTION_DECLARATION => {
                 self.handle_function_declaration(
                     node, code, file_id, symbols, counter, context, depth,
                 );
                 return;
             }
-            "property_declaration" => {
+            NODE_PROPERTY_DECLARATION => {
                 self.handle_property_declaration(node, code, file_id, symbols, counter, context);
             }
-            "secondary_constructor" => {
+            NODE_SECONDARY_CONSTRUCTOR => {
                 self.handle_secondary_constructor(node, code, file_id, symbols, counter, context);
             }
-            "package_header" | "import_list" | "type_alias" => {
+            NODE_PACKAGE_HEADER | "import_list" | "type_alias" => {
                 self.register_node(&node);
             }
             _ => {}
@@ -247,11 +324,11 @@ impl KotlinParser {
         let mut is_enum = false;
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            if child.kind() == "interface" {
+            if child.kind() == NODE_INTERFACE {
                 is_interface = true;
                 self.register_node(&child); // Register the interface keyword node
                 break;
-            } else if child.kind() == "enum" {
+            } else if child.kind() == NODE_ENUM {
                 is_enum = true;
                 self.register_node(&child); // Register the enum keyword node
                 break;
@@ -262,7 +339,7 @@ impl KotlinParser {
         let mut class_name = None;
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            if child.kind() == "type_identifier" {
+            if child.kind() == NODE_TYPE_IDENTIFIER {
                 class_name = Some(self.text_for_node(code, child).trim().to_string());
                 break;
             }
@@ -305,14 +382,14 @@ impl KotlinParser {
         // Process class/interface/enum body
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            if child.kind() == "class_body" || child.kind() == "enum_class_body" {
-                if child.kind() == "enum_class_body" {
+            if child.kind() == NODE_CLASS_BODY || child.kind() == NODE_ENUM_CLASS_BODY {
+                if child.kind() == NODE_ENUM_CLASS_BODY {
                     self.register_node(&child); // Register enum_class_body
                 }
                 let mut body_cursor = child.walk();
                 for body_child in child.children(&mut body_cursor) {
                     // Extract enum entries as constants
-                    if is_enum && body_child.kind() == "enum_entry" {
+                    if is_enum && body_child.kind() == NODE_ENUM_ENTRY {
                         self.handle_enum_entry(body_child, code, file_id, symbols, counter);
                     } else {
                         self.extract_symbols_from_node(
@@ -349,7 +426,7 @@ impl KotlinParser {
         let mut object_name = None;
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            if child.kind() == "type_identifier" {
+            if child.kind() == NODE_TYPE_IDENTIFIER {
                 object_name = Some(self.text_for_node(code, child).trim().to_string());
                 break;
             }
@@ -382,7 +459,7 @@ impl KotlinParser {
         // Process object body
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            if child.kind() == "class_body" {
+            if child.kind() == NODE_CLASS_BODY {
                 let mut body_cursor = child.walk();
                 for body_child in child.children(&mut body_cursor) {
                     self.extract_symbols_from_node(
@@ -418,7 +495,7 @@ impl KotlinParser {
         let mut func_name = None;
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            if child.kind() == "simple_identifier" {
+            if child.kind() == NODE_SIMPLE_IDENTIFIER {
                 func_name = Some(self.text_for_node(code, child).trim().to_string());
                 break;
             }
@@ -457,7 +534,7 @@ impl KotlinParser {
         // Process function body
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            if child.kind() == "function_body" {
+            if child.kind() == NODE_FUNCTION_BODY {
                 let mut body_cursor = child.walk();
                 for body_child in child.children(&mut body_cursor) {
                     self.extract_symbols_from_node(
@@ -492,10 +569,10 @@ impl KotlinParser {
         let mut prop_name = None;
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            if child.kind() == "variable_declaration" {
+            if child.kind() == NODE_VARIABLE_DECLARATION {
                 let mut var_cursor = child.walk();
                 for var_child in child.children(&mut var_cursor) {
-                    if var_child.kind() == "simple_identifier" {
+                    if var_child.kind() == NODE_SIMPLE_IDENTIFIER {
                         prop_name = Some(self.text_for_node(code, var_child).trim().to_string());
                         break;
                     }
@@ -559,7 +636,7 @@ impl KotlinParser {
         let mut entry_name = None;
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            if child.kind() == "simple_identifier" {
+            if child.kind() == NODE_SIMPLE_IDENTIFIER {
                 entry_name = Some(self.text_for_node(code, child).trim().to_string());
                 break;
             }
@@ -620,7 +697,7 @@ impl KotlinParser {
         calls: &mut Vec<(&'a str, &'a str, Range)>,
         current_function: Option<&'a str>,
     ) {
-        if node.kind() == "call_expression" {
+        if node.kind() == NODE_CALL_EXPRESSION {
             if let Some(callee) = node.child(0) {
                 let caller = current_function.unwrap_or(FILE_SCOPE);
                 let callee_text = self.text_for_node(code, callee).trim();
@@ -631,12 +708,12 @@ impl KotlinParser {
         }
 
         // Track current function
-        let new_function = if node.kind() == "function_declaration" {
+        let new_function = if node.kind() == NODE_FUNCTION_DECLARATION {
             // Find the simple_identifier child (function name)
             let mut cursor = node.walk();
             let mut func_name = None;
             for child in node.children(&mut cursor) {
-                if child.kind() == "simple_identifier" {
+                if child.kind() == NODE_SIMPLE_IDENTIFIER {
                     func_name = Some(self.text_for_node(code, child).trim());
                     break;
                 }
@@ -663,13 +740,13 @@ impl KotlinParser {
         current_class: Option<&'a str>,
     ) {
         // Track current class
-        let new_class = if node.kind() == "class_declaration" || node.kind() == "object_declaration"
+        let new_class = if node.kind() == NODE_CLASS_DECLARATION || node.kind() == NODE_OBJECT_DECLARATION
         {
             // Find the type_identifier child (class name)
             let mut cursor = node.walk();
             let mut class_name = None;
             for child in node.children(&mut cursor) {
-                if child.kind() == "type_identifier" {
+                if child.kind() == NODE_TYPE_IDENTIFIER {
                     class_name = Some(self.text_for_node(code, child).trim());
                     break;
                 }
@@ -682,7 +759,7 @@ impl KotlinParser {
         let class_context = new_class.or(current_class);
 
         // Look for delegation specifiers (: SuperClass, Interface)
-        if node.kind() == "delegation_specifier" {
+        if node.kind() == NODE_DELEGATION_SPECIFIER {
             if let Some(derived) = class_context {
                 if let Some(type_node) = node.child(0) {
                     let base = self.text_for_node(code, type_node).trim();
@@ -710,12 +787,12 @@ impl KotlinParser {
         _current_context: Option<&'a str>,
     ) {
         match node.kind() {
-            "class_declaration" | "object_declaration" => {
+            NODE_CLASS_DECLARATION | NODE_OBJECT_DECLARATION => {
                 // Find the type_identifier child (class name)
                 let mut class_name = None;
                 let mut cursor = node.walk();
                 for child in node.children(&mut cursor) {
-                    if child.kind() == "type_identifier" {
+                    if child.kind() == NODE_TYPE_IDENTIFIER {
                         class_name = Some(self.text_for_node(code, child).trim());
                         break;
                     }
@@ -725,7 +802,7 @@ impl KotlinParser {
                     // Extract types from primary constructor parameters
                     let mut cursor = node.walk();
                     for child in node.children(&mut cursor) {
-                        if child.kind() == "primary_constructor" {
+                        if child.kind() == NODE_PRIMARY_CONSTRUCTOR {
                             self.extract_parameter_types(child, code, class_name, uses);
                         }
                     }
@@ -733,7 +810,7 @@ impl KotlinParser {
                     // Process class body recursively
                     let mut cursor = node.walk();
                     for child in node.children(&mut cursor) {
-                        if child.kind() == "class_body" {
+                        if child.kind() == NODE_CLASS_BODY {
                             let mut body_cursor = child.walk();
                             for body_child in child.children(&mut body_cursor) {
                                 self.extract_type_uses_recursive(body_child, code, uses, Some(class_name));
@@ -743,12 +820,12 @@ impl KotlinParser {
                 }
                 return;
             }
-            "function_declaration" => {
+            NODE_FUNCTION_DECLARATION => {
                 // Find the simple_identifier child (function name)
                 let mut func_name = None;
                 let mut cursor = node.walk();
                 for child in node.children(&mut cursor) {
-                    if child.kind() == "simple_identifier" {
+                    if child.kind() == NODE_SIMPLE_IDENTIFIER {
                         func_name = Some(self.text_for_node(code, child).trim());
                         break;
                     }
@@ -758,9 +835,9 @@ impl KotlinParser {
                     // Extract types from function parameters and return type
                     let mut cursor = node.walk();
                     for child in node.children(&mut cursor) {
-                        if child.kind() == "function_value_parameters" {
+                        if child.kind() == NODE_FUNCTION_VALUE_PARAMETERS {
                             self.extract_parameter_types(child, code, func_name, uses);
-                        } else if child.kind() == "user_type" || child.kind() == "type_reference" {
+                        } else if child.kind() == NODE_USER_TYPE || child.kind() == NODE_TYPE_REFERENCE {
                             // This is the return type
                             if let Some(type_name) = self.extract_type_name(child, code) {
                                 uses.push((func_name, type_name, self.node_to_range(child)));
@@ -770,20 +847,20 @@ impl KotlinParser {
                 }
                 return;
             }
-            "property_declaration" => {
+            NODE_PROPERTY_DECLARATION => {
                 // Property structure: property_declaration > variable_declaration > (simple_identifier, user_type)
                 let mut prop_name = None;
                 let mut prop_type = None;
 
                 let mut cursor = node.walk();
                 for child in node.children(&mut cursor) {
-                    if child.kind() == "variable_declaration" {
+                    if child.kind() == NODE_VARIABLE_DECLARATION {
                         // Extract name and type from variable_declaration
                         let mut var_cursor = child.walk();
                         for var_child in child.children(&mut var_cursor) {
-                            if var_child.kind() == "simple_identifier" && prop_name.is_none() {
+                            if var_child.kind() == NODE_SIMPLE_IDENTIFIER && prop_name.is_none() {
                                 prop_name = Some(self.text_for_node(code, var_child).trim());
-                            } else if (var_child.kind() == "user_type" || var_child.kind() == "type_reference") && prop_type.is_none() {
+                            } else if (var_child.kind() == NODE_USER_TYPE || var_child.kind() == NODE_TYPE_REFERENCE) && prop_type.is_none() {
                                 if let Some(type_name) = self.extract_type_name(var_child, code) {
                                     prop_type = Some((type_name, self.node_to_range(var_child)));
                                 }
@@ -818,11 +895,11 @@ impl KotlinParser {
     ) {
         let mut cursor = params_node.walk();
         for param in params_node.children(&mut cursor) {
-            if param.kind() == "parameter" || param.kind() == "class_parameter" {
+            if param.kind() == NODE_PARAMETER || param.kind() == NODE_CLASS_PARAMETER {
                 // Look for user_type or type_reference nodes within the parameter
                 let mut param_cursor = param.walk();
                 for child in param.children(&mut param_cursor) {
-                    if child.kind() == "user_type" || child.kind() == "type_reference" {
+                    if child.kind() == NODE_USER_TYPE || child.kind() == NODE_TYPE_REFERENCE {
                         if let Some(type_name) = self.extract_type_name(child, code) {
                             uses.push((context_name, type_name, self.node_to_range(child)));
                         }
@@ -834,33 +911,28 @@ impl KotlinParser {
 
     /// Extract a simple type name from a type node
     fn extract_type_name<'a>(&self, type_node: Node, code: &'a str) -> Option<&'a str> {
+        let primitives = get_primitive_types();
+
         // Handle different type node kinds
         match type_node.kind() {
-            "type_reference" | "user_type" | "simple_user_type" => {
+            NODE_TYPE_REFERENCE | NODE_USER_TYPE | NODE_SIMPLE_USER_TYPE => {
                 // Look for type_identifier or simple_identifier
                 let mut cursor = type_node.walk();
                 for child in type_node.children(&mut cursor) {
-                    if child.kind() == "type_identifier" || child.kind() == "simple_identifier" {
+                    let child_kind = child.kind();
+                    if child_kind == NODE_TYPE_IDENTIFIER || child_kind == NODE_SIMPLE_IDENTIFIER {
                         let type_name = self.text_for_node(code, child).trim();
-                        // Filter out primitive types
-                        if !matches!(
-                            type_name,
-                            "Int" | "Long" | "Short" | "Byte" | "Float" | "Double" | "Boolean"
-                                | "Char" | "String" | "Unit" | "Any" | "Nothing"
-                        ) {
+                        // Filter out primitive types using HashSet
+                        if !primitives.contains(type_name) {
                             return Some(type_name);
                         }
                     }
                 }
             }
-            "type_identifier" | "simple_identifier" => {
+            NODE_TYPE_IDENTIFIER | NODE_SIMPLE_IDENTIFIER => {
                 let type_name = self.text_for_node(code, type_node).trim();
-                // Filter out primitive types
-                if !matches!(
-                    type_name,
-                    "Int" | "Long" | "Short" | "Byte" | "Float" | "Double" | "Boolean" | "Char"
-                        | "String" | "Unit" | "Any" | "Nothing"
-                ) {
+                // Filter out primitive types using HashSet
+                if !primitives.contains(type_name) {
                     return Some(type_name);
                 }
             }
@@ -877,12 +949,12 @@ impl KotlinParser {
         defines: &mut Vec<(&'a str, &'a str, Range)>,
     ) {
         match node.kind() {
-            "class_declaration" | "object_declaration" => {
+            NODE_CLASS_DECLARATION | NODE_OBJECT_DECLARATION => {
                 // Find the type_identifier child (class name)
                 let mut class_name = None;
                 let mut cursor = node.walk();
                 for child in node.children(&mut cursor) {
-                    if child.kind() == "type_identifier" {
+                    if child.kind() == NODE_TYPE_IDENTIFIER {
                         class_name = Some(self.text_for_node(code, child).trim());
                         break;
                     }
@@ -893,14 +965,14 @@ impl KotlinParser {
                 // Extract methods from class body
                 let mut cursor = node.walk();
                 for child in node.children(&mut cursor) {
-                    if child.kind() == "class_body" {
+                    if child.kind() == NODE_CLASS_BODY {
                         let mut body_cursor = child.walk();
                         for body_child in child.children(&mut body_cursor) {
-                            if body_child.kind() == "function_declaration" {
+                            if body_child.kind() == NODE_FUNCTION_DECLARATION {
                                 // Find the simple_identifier child (method name)
                                 let mut method_cursor = body_child.walk();
                                 for method_child in body_child.children(&mut method_cursor) {
-                                    if method_child.kind() == "simple_identifier" {
+                                    if method_child.kind() == NODE_SIMPLE_IDENTIFIER {
                                         let method_name = self.text_for_node(code, method_child).trim();
                                         defines.push((class_name, method_name, self.node_to_range(body_child)));
                                         break;
