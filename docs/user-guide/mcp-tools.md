@@ -33,7 +33,7 @@ codanna mcp find_symbol main
 codanna mcp find_symbol Parser --json
 ```
 
-**Returns:** Symbol information including file path, line number, kind, and signature.
+**Returns:** Symbol information including file path, line number, kind, and signature. For ExternalType symbols (types from external assemblies/libraries), includes a helpful note explaining they're not defined in source code.
 
 ### `search_symbols`
 
@@ -42,7 +42,7 @@ Search symbols with full-text fuzzy matching.
 **Parameters:**
 - `query` (required) - Search query (supports fuzzy matching)
 - `limit` - Maximum number of results (default: 10)
-- `kind` - Filter by symbol kind (e.g., "Function", "Struct", "Trait")
+- `kind` - Filter by symbol kind (e.g., "Function", "Struct", "Trait", "ExternalType")
 - `module` - Filter by module path
 
 **Example:**

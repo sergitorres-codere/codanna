@@ -290,6 +290,15 @@ impl CodeIntelligenceServer {
                     result.push_str(&format!("Signature: {sig}\n"));
                 }
 
+                // Add note for external types
+                if symbol.kind == crate::SymbolKind::ExternalType {
+                    result.push_str("\nNote: This type is not defined in your source code. ");
+                    result.push_str("It's from an external assembly/library.\n");
+                    result.push_str(
+                        "Use 'search_symbols' to find all usages of this type in your codebase.\n",
+                    );
+                }
+
                 // Add documentation preview
                 if let Some(doc) = symbol.as_doc_comment() {
                     let doc_preview: Vec<&str> = doc.lines().take(3).collect();

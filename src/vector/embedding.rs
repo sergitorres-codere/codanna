@@ -531,6 +531,7 @@ pub fn create_symbol_text(
         crate::types::SymbolKind::Class => "class",
         crate::types::SymbolKind::Field => "field",
         crate::types::SymbolKind::Parameter => "parameter",
+        crate::types::SymbolKind::ExternalType => "external_type",
     };
 
     if let Some(sig) = signature {

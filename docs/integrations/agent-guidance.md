@@ -16,6 +16,14 @@ Workflow:
 3. find_symbol, get_calls, find_callers - Get specific details
 
 Start with semantic search, then narrow with specific queries.
+
+### Understanding ExternalType Symbols
+
+For compiled languages (C#, Java), Codanna tracks references to external types from libraries/assemblies even though their definitions aren't in your source code.
+
+- **ExternalType** symbols represent types from external dependencies (NuGet packages, DLLs, JARs)
+- When you find an ExternalType, use `search_symbols` to find all usages across your codebase
+- These are references only - the actual type definition is in an external library
 ```
 
 ## Claude Sub Agent

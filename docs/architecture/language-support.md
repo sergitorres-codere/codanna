@@ -37,6 +37,7 @@ From each supported language:
 - Call relationships
 - Type relationships
 - Documentation comments
+- External type references (for compiled languages like C# and Java)
 
 ## Performance
 
