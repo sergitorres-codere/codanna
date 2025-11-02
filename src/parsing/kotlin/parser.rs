@@ -68,10 +68,37 @@ impl KotlinParser {
     /// Extract documentation comments (/** */ or //)
     fn doc_comment_for(&self, node: &Node, code: &str) -> Option<String> {
         let mut comments = Vec::new();
-        let mut current = node.prev_named_sibling();
+        let mut current = node.prev_sibling();
 
+        // Special case: if previous sibling is package_header, check its last child for comments
+        if let Some(sibling) = current {
+            if sibling.kind() == "package_header" {
+                // Check last named children of package_header for comments
+                let mut cursor = sibling.walk();
+                for child in sibling.named_children(&mut cursor) {
+                    if child.kind() == "multiline_comment" || child.kind() == "line_comment" {
+                        let raw = self.text_for_node(code, child).trim();
+                        if raw.starts_with("/**") || raw.starts_with("///") {
+                            let cleaned = raw
+                                .trim_start_matches("/**")
+                                .trim_end_matches("*/")
+                                .trim_start_matches("///")
+                                .trim();
+                            comments.push(cleaned.to_string());
+                        }
+                    }
+                }
+                if !comments.is_empty() {
+                    return Some(comments.join("\n"));
+                }
+            }
+        }
+
+        // Standard case: check previous siblings for doc comments
+        current = node.prev_sibling();
         while let Some(sibling) = current {
-            if sibling.kind() != "comment" {
+            // Kotlin uses multiline_comment and line_comment node kinds
+            if sibling.kind() != "multiline_comment" && sibling.kind() != "line_comment" {
                 break;
             }
 
@@ -83,7 +110,7 @@ impl KotlinParser {
                     .trim_start_matches("///")
                     .trim();
                 comments.push(cleaned.to_string());
-                current = sibling.prev_named_sibling();
+                current = sibling.prev_sibling();
             } else {
                 break;
             }
