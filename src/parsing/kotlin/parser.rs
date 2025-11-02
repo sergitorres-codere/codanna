@@ -117,88 +117,104 @@ impl KotlinParser {
         &code[node.byte_range()]
     }
 
-    /// Extract documentation comments (/** */ or //)
+    /// Extract documentation comments (/** */ or //) - optimized version
+    /// Uses stack-allocated buffer and minimizes allocations
     fn doc_comment_for(&self, node: &Node, code: &str) -> Option<String> {
-        // Use a String for in-place building to reduce allocations
         let mut result = String::new();
-        let mut comment_count = 0;
+        let mut has_comment = false;
+
+        // Stack to collect comments in reverse order (we traverse backwards)
+        let mut comment_stack: [Option<&str>; 8] = [None; 8];
+        let mut stack_len = 0;
         let mut current = node.prev_sibling();
 
-        // Helper closure to extract and clean a comment
-        let extract_comment = |raw: &str| -> Option<String> {
-            let trimmed = raw.trim();
-            if trimmed.starts_with("/**") {
-                // Multiline doc comment: /** ... */
-                let cleaned = trimmed
-                    .strip_prefix("/**")
-                    .and_then(|s| s.strip_suffix("*/"))
-                    .unwrap_or(trimmed)
-                    .trim();
-                Some(cleaned.to_string())
-            } else if trimmed.starts_with("///") {
-                // Single-line doc comment: ///
-                Some(trimmed.strip_prefix("///").unwrap_or(trimmed).trim().to_string())
-            } else {
-                None
-            }
-        };
-
-        // Special case: if previous sibling is package_header, check its last child for comments
+        // Special case: if previous sibling is package_header, check its children for comments
         if let Some(sibling) = current {
             if sibling.kind() == NODE_PACKAGE_HEADER {
-                // Check last named children of package_header for comments
                 let mut cursor = sibling.walk();
                 for child in sibling.named_children(&mut cursor) {
                     let child_kind = child.kind();
                     if child_kind == NODE_MULTILINE_COMMENT || child_kind == NODE_LINE_COMMENT {
                         let raw = self.text_for_node(code, child);
-                        if let Some(cleaned) = extract_comment(raw) {
-                            if comment_count > 0 {
+                        if let Some(cleaned) = self.extract_comment_text(raw, &mut result) {
+                            if has_comment {
                                 result.push('\n');
                             }
-                            result.push_str(&cleaned);
-                            comment_count += 1;
+                            result.push_str(cleaned);
+                            has_comment = true;
                         }
                     }
                 }
-                if comment_count > 0 {
+                if has_comment {
                     return Some(result);
                 }
             }
         }
 
-        // Standard case: check previous siblings for doc comments
-        // Collect in reverse order first
-        let mut temp_comments = Vec::new();
+        // Standard case: traverse backwards through siblings collecting comments
         current = node.prev_sibling();
         while let Some(sibling) = current {
             let sibling_kind = sibling.kind();
-            // Kotlin uses multiline_comment and line_comment node kinds
             if sibling_kind != NODE_MULTILINE_COMMENT && sibling_kind != NODE_LINE_COMMENT {
                 break;
             }
 
             let raw = self.text_for_node(code, sibling);
-            if let Some(cleaned) = extract_comment(raw) {
-                temp_comments.push(cleaned);
-                current = sibling.prev_sibling();
-            } else {
-                break;
+            // Try to use stack allocation for small numbers of comments
+            if stack_len < comment_stack.len() {
+                if let Some(cleaned) = self.peek_comment_text(raw) {
+                    comment_stack[stack_len] = Some(cleaned);
+                    stack_len += 1;
+                    current = sibling.prev_sibling();
+                    continue;
+                }
+            }
+            break;
+        }
+
+        // Build result from stack (in reverse order to get correct ordering)
+        if stack_len > 0 {
+            for i in (0..stack_len).rev() {
+                if let Some(comment) = comment_stack[i] {
+                    if !result.is_empty() {
+                        result.push('\n');
+                    }
+                    result.push_str(comment);
+                    has_comment = true;
+                }
             }
         }
 
-        if temp_comments.is_empty() {
-            None
-        } else {
-            // Build result in correct order
-            for (i, comment) in temp_comments.iter().rev().enumerate() {
-                if i > 0 {
-                    result.push('\n');
-                }
-                result.push_str(&comment);
-            }
+        if has_comment {
             Some(result)
+        } else {
+            None
         }
+    }
+
+    /// Extract and clean comment text, writing directly to result buffer
+    /// Returns a reference to the cleaned text within the raw string when possible
+    fn extract_comment_text<'a>(&self, raw: &'a str, _result: &mut String) -> Option<&'a str> {
+        let trimmed = raw.trim();
+        if let Some(content) = trimmed.strip_prefix("/**").and_then(|s| s.strip_suffix("*/")) {
+            let cleaned = content.trim();
+            return Some(cleaned);
+        } else if let Some(content) = trimmed.strip_prefix("///") {
+            let cleaned = content.trim();
+            return Some(cleaned);
+        }
+        None
+    }
+
+    /// Peek at comment text without allocating - returns a reference when possible
+    fn peek_comment_text<'a>(&self, raw: &'a str) -> Option<&'a str> {
+        let trimmed = raw.trim();
+        if let Some(content) = trimmed.strip_prefix("/**").and_then(|s| s.strip_suffix("*/")) {
+            return Some(content.trim());
+        } else if let Some(content) = trimmed.strip_prefix("///") {
+            return Some(content.trim());
+        }
+        None
     }
 
     /// Determine visibility from modifiers
