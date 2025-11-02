@@ -51,3 +51,6 @@ mod test_kotlin_method_definitions;
 
 #[path = "parsers/kotlin/test_integration.rs"]
 mod test_kotlin_integration;
+
+#[path = "parsers/kotlin/test_interfaces_and_enums.rs"]
+mod test_kotlin_interfaces_and_enums;

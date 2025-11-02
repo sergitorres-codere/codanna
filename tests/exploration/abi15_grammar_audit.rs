@@ -21,7 +21,8 @@ mod tests {
     use codanna::io::format::format_utc_timestamp as get_formatted_timestamp;
     use codanna::parsing::{
         c::audit::CParserAudit, cpp::audit::CppParserAudit, csharp::audit::CSharpParserAudit,
-        gdscript::audit::GdscriptParserAudit, go::audit::GoParserAudit, php::audit::PhpParserAudit,
+        gdscript::audit::GdscriptParserAudit, go::audit::GoParserAudit,
+        kotlin::audit::KotlinParserAudit, php::audit::PhpParserAudit,
         python::audit::PythonParserAudit, rust::audit::RustParserAudit,
         typescript::audit::TypeScriptParserAudit,
     };
@@ -3405,6 +3406,302 @@ tree-sitter-gdscript/src/node-types.json to {grammar_path}."
                 ],
             ),
             ("COMMENT & DOCUMENTATION NODES", vec!["comment"]),
+        ];
+
+        // Output nodes organized by category
+        for (category_name, expected_nodes) in &node_categories {
+            output.push_str(&format!("=== {category_name} ===\n"));
+
+            for node_kind in expected_nodes {
+                if let Some(id) = node_registry.get(*node_kind) {
+                    if found_in_file.contains(*node_kind) {
+                        output.push_str(&format!("  ✓ {node_kind:<40} -> ID: {id}\n"));
+                    } else {
+                        output
+                            .push_str(&format!("  ✓ {node_kind:<40} -> ID: {id} (not verified)\n"));
+                    }
+                } else {
+                    output.push_str(&format!("  ✗ {node_kind:<40} NOT FOUND\n"));
+                }
+            }
+            output.push('\n');
+        }
+
+        // List any remaining nodes not in categories
+        let mut categorized = HashSet::new();
+        for (_, nodes) in &node_categories {
+            for node in nodes {
+                categorized.insert(node.to_string());
+            }
+        }
+
+        let mut uncategorized: Vec<_> = node_registry
+            .keys()
+            .filter(|k| !categorized.contains(*k))
+            .collect();
+        uncategorized.sort();
+
+        if !uncategorized.is_empty() {
+            output.push_str("--- UNCATEGORIZED NODES ---\n");
+            for node in uncategorized {
+                let id = node_registry[node];
+                output.push_str(&format!("  {node} (ID: {id})\n"));
+            }
+        }
+
+        output
+    }
+
+    #[test]
+    fn comprehensive_kotlin_analysis() {
+        println!("=== Kotlin Comprehensive Grammar Analysis ===\n");
+
+        // 1. Load ALL nodes from grammar JSON
+        let grammar_json = fs::read_to_string("contributing/parsers/kotlin/node-types.json")
+            .expect("Failed to read Kotlin grammar file");
+        let grammar: Value =
+            serde_json::from_str(&grammar_json).expect("Failed to parse grammar JSON");
+
+        let mut all_grammar_nodes = HashSet::new();
+        if let Value::Array(nodes) = &grammar {
+            for node in nodes {
+                if let (Some(Value::Bool(true)), Some(Value::String(node_type))) =
+                    (node.get("named"), node.get("type"))
+                {
+                    all_grammar_nodes.insert(node_type.clone());
+                }
+            }
+        }
+
+        // 2. Run the REAL parser audit to get everything at once
+        let audit = match KotlinParserAudit::audit_file("examples/kotlin/comprehensive.kt") {
+            Ok(audit) => audit,
+            Err(e) => {
+                println!("Warning: Failed to audit Kotlin file: {e}");
+                // Create empty audit for fallback
+                KotlinParserAudit {
+                    grammar_nodes: HashMap::new(),
+                    implemented_nodes: HashSet::new(),
+                    extracted_symbol_kinds: HashSet::new(),
+                }
+            }
+        };
+
+        // The audit already discovered all nodes in the example file!
+        let example_nodes: HashSet<String> = audit.grammar_nodes.keys().cloned().collect();
+
+        // Save the audit report
+        let report = audit.generate_report();
+        fs::write("contributing/parsers/kotlin/AUDIT_REPORT.md", &report)
+            .expect("Failed to write Kotlin audit report");
+
+        // 3. Generate comprehensive analysis comparing all three sources
+        let mut analysis = String::new();
+        analysis.push_str("# Kotlin Grammar Analysis\n\n");
+        analysis.push_str(&format!("*Generated: {}*\n\n", get_formatted_timestamp()));
+        analysis.push_str("## Statistics\n");
+        analysis.push_str(&format!(
+            "- Total nodes in grammar JSON: {}\n",
+            all_grammar_nodes.len()
+        ));
+        analysis.push_str(&format!(
+            "- Nodes found in comprehensive.kt: {}\n",
+            example_nodes.len()
+        ));
+        analysis.push_str(&format!(
+            "- Nodes handled by parser: {}\n",
+            audit.implemented_nodes.len()
+        ));
+        analysis.push_str(&format!(
+            "- Symbol kinds extracted: {}\n",
+            audit.extracted_symbol_kinds.len()
+        ));
+        analysis.push('\n');
+
+        // Categorize nodes
+        let mut in_grammar_only: Vec<_> = all_grammar_nodes.difference(&example_nodes).collect();
+        let mut in_example_not_handled: Vec<_> = example_nodes
+            .iter()
+            .filter(|n| !audit.implemented_nodes.contains(n.as_str()))
+            .collect();
+        let mut handled_well: Vec<_> = audit
+            .implemented_nodes
+            .iter()
+            .filter(|n| example_nodes.contains(n.as_str()))
+            .collect();
+
+        in_grammar_only.sort();
+        in_example_not_handled.sort();
+        handled_well.sort();
+
+        if !handled_well.is_empty() {
+            analysis.push_str("## ✅ Successfully Handled Nodes\n");
+            analysis.push_str("These nodes are in examples and handled by parser:\n");
+            for node in &handled_well {
+                analysis.push_str(&format!("- {node}\n"));
+            }
+            analysis.push('\n');
+        }
+
+        if !in_example_not_handled.is_empty() {
+            analysis.push_str("## ⚠️ Implementation Gaps\n");
+            analysis.push_str("These nodes appear in comprehensive.kt but aren't handled:\n");
+            for node in &in_example_not_handled {
+                analysis.push_str(&format!("- {node}\n"));
+            }
+            analysis.push('\n');
+        }
+
+        if !in_grammar_only.is_empty() {
+            analysis.push_str("## 📝 Missing from Examples\n");
+            analysis.push_str("These grammar nodes aren't in comprehensive.kt:\n");
+            for node in &in_grammar_only {
+                analysis.push_str(&format!("- {node}\n"));
+            }
+            analysis.push('\n');
+        }
+
+        // Add extracted symbol kinds info
+        if !audit.extracted_symbol_kinds.is_empty() {
+            analysis.push_str("## 🎯 Symbol Kinds Extracted\n");
+            let mut kinds: Vec<_> = audit.extracted_symbol_kinds.iter().collect();
+            kinds.sort();
+            for kind in kinds {
+                analysis.push_str(&format!("- {kind}\n"));
+            }
+            analysis.push('\n');
+        }
+
+        fs::write("contributing/parsers/kotlin/GRAMMAR_ANALYSIS.md", &analysis)
+            .expect("Failed to write Kotlin grammar analysis");
+
+        // Also generate node_discovery.txt
+        let node_discovery = generate_kotlin_node_discovery();
+        fs::write(
+            "contributing/parsers/kotlin/node_discovery.txt",
+            node_discovery,
+        )
+        .expect("Failed to write Kotlin node discovery");
+
+        println!("📄 Kotlin Analysis:");
+        println!("  - Grammar nodes: {}", all_grammar_nodes.len());
+        println!("  - Example nodes: {}", example_nodes.len());
+        println!("  - Handled nodes: {}", audit.implemented_nodes.len());
+        println!("  - Symbol kinds: {:?}", audit.extracted_symbol_kinds);
+        println!(
+            "  - Coverage: {:.1}%",
+            audit.implemented_nodes.len() as f32 / example_nodes.len() as f32 * 100.0
+        );
+        println!("✅ Kotlin AUDIT_REPORT.md saved");
+        println!("✅ Kotlin GRAMMAR_ANALYSIS.md saved");
+        println!("✅ Kotlin node_discovery.txt saved");
+    }
+
+    fn generate_kotlin_node_discovery() -> String {
+        let mut parser = Parser::new();
+        let language = tree_sitter_kotlin::language();
+        parser
+            .set_language(&language)
+            .expect("Failed to set Kotlin language");
+
+        let code = fs::read_to_string("examples/kotlin/comprehensive.kt")
+            .expect("Failed to read comprehensive.kt");
+
+        let tree = parser.parse(&code, None).expect("Failed to parse Kotlin");
+
+        let mut node_registry: HashMap<String, u16> = HashMap::new();
+        let mut found_in_file: HashSet<String> = HashSet::new();
+
+        fn collect_nodes(
+            node: Node,
+            registry: &mut HashMap<String, u16>,
+            found: &mut HashSet<String>,
+        ) {
+            let kind = node.kind();
+            registry.insert(kind.to_string(), node.kind_id());
+            found.insert(kind.to_string());
+
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                collect_nodes(child, registry, found);
+            }
+        }
+
+        collect_nodes(tree.root_node(), &mut node_registry, &mut found_in_file);
+
+        let mut output = String::new();
+        output.push_str("=== Kotlin Grammar Node Discovery ===\n");
+        output.push_str(&format!("Generated: {}\n\n", get_formatted_timestamp()));
+        output.push_str(&format!(
+            "Total unique node types found: {}\n\n",
+            node_registry.len()
+        ));
+
+        // Define key node categories for Kotlin
+        let node_categories = vec![
+            (
+                "CLASS & OBJECT DECLARATIONS",
+                vec![
+                    "class_declaration",
+                    "object_declaration",
+                    "interface_declaration",
+                    "enum_class",
+                    "data_class",
+                    "sealed_class",
+                    "companion_object",
+                ],
+            ),
+            (
+                "FUNCTION DECLARATIONS",
+                vec![
+                    "function_declaration",
+                    "primary_constructor",
+                    "secondary_constructor",
+                    "anonymous_function",
+                    "lambda_literal",
+                ],
+            ),
+            (
+                "PROPERTY & VARIABLE DECLARATIONS",
+                vec![
+                    "property_declaration",
+                    "variable_declaration",
+                    "class_parameter",
+                    "function_value_parameter",
+                ],
+            ),
+            (
+                "TYPE SYSTEM",
+                vec![
+                    "type_alias",
+                    "type_reference",
+                    "nullable_type",
+                    "user_type",
+                    "function_type",
+                    "type_projection",
+                ],
+            ),
+            (
+                "MODIFIERS & VISIBILITY",
+                vec![
+                    "modifiers",
+                    "visibility_modifier",
+                    "inheritance_modifier",
+                    "function_modifier",
+                    "property_modifier",
+                ],
+            ),
+            (
+                "EXPRESSIONS",
+                vec![
+                    "call_expression",
+                    "string_literal",
+                    "integer_literal",
+                    "boolean_literal",
+                    "binary_expression",
+                    "prefix_expression",
+                ],
+            ),
         ];
 
         // Output nodes organized by category
