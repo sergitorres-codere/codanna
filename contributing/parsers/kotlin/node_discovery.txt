@@ -1,12 +1,12 @@
 === Kotlin Grammar Node Discovery ===
-Generated: 2025-11-02 19:58:49 UTC
+Generated: 2025-11-02 20:14:10 UTC
 
 Total unique node types found: 150
 
 === CLASS & OBJECT DECLARATIONS ===
   ✓ class_declaration                        -> ID: 162
   ✓ object_declaration                       -> ID: 192
-  ✗ interface_declaration                    NOT FOUND
+  ✓ interface                                -> ID: 18
   ✗ enum_class                               NOT FOUND
   ✗ data_class                               NOT FOUND
   ✗ sealed_class                             NOT FOUND
@@ -117,7 +117,6 @@ Total unique node types found: 150
   infix (ID: 105)
   inline (ID: 106)
   inner (ID: 94)
-  interface (ID: 18)
   internal (ID: 100)
   interpolated_expression (ID: 357)
   interpolated_identifier (ID: 358)

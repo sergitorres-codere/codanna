@@ -110,7 +110,7 @@ impl KotlinParserAudit {
         let key_nodes = vec![
             "class_declaration",
             "object_declaration",
-            "interface_declaration",
+            "interface",
             "function_declaration",
             "property_declaration",
             "secondary_constructor",

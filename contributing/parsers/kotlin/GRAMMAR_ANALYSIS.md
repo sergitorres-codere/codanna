@@ -1,18 +1,21 @@
 # Kotlin Grammar Analysis
 
-*Generated: 2025-11-02 19:58:49 UTC*
+*Generated: 2025-11-02 20:14:10 UTC*
 
 ## Statistics
 - Total nodes in grammar JSON: 136
 - Nodes found in comprehensive.kt: 150
-- Nodes handled by parser: 8
-- Symbol kinds extracted: 5
+- Nodes handled by parser: 11
+- Symbol kinds extracted: 8
 
 ## ✅ Successfully Handled Nodes
 These nodes are in examples and handled by parser:
 - class_declaration
+- enum
+- enum_class_body
 - function_declaration
 - import_list
+- interface
 - object_declaration
 - package_header
 - property_declaration
@@ -69,8 +72,6 @@ These nodes appear in comprehensive.kt but aren't handled:
 - directly_assignable_expression
 - else
 - elvis_expression
-- enum
-- enum_class_body
 - enum_entry
 - equality_expression
 - explicit_delegation
@@ -95,7 +96,6 @@ These nodes appear in comprehensive.kt but aren't handled:
 - inline
 - inner
 - integer_literal
-- interface
 - internal
 - interpolated_expression
 - interpolated_identifier
@@ -218,8 +218,11 @@ These grammar nodes aren't in comprehensive.kt:
 
 ## 🎯 Symbol Kinds Extracted
 - Class
+- Constant
+- Enum
 - Field
 - Function
+- Interface
 - Method
 - Module
 

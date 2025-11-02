@@ -198,18 +198,6 @@ impl KotlinParser {
                 );
                 return;
             }
-            "interface" => {
-                self.handle_interface_declaration(
-                    node, code, file_id, symbols, counter, context, depth,
-                );
-                return;
-            }
-            "enum" => {
-                self.handle_enum_declaration(
-                    node, code, file_id, symbols, counter, context, depth,
-                );
-                return;
-            }
             "function_declaration" => {
                 self.handle_function_declaration(
                     node, code, file_id, symbols, counter, context, depth,
@@ -254,7 +242,23 @@ impl KotlinParser {
     ) {
         self.register_node(&node);
 
-        // Extract class name - find the type_identifier child
+        // Check if this is actually an interface or enum (keywords are children of class_declaration)
+        let mut is_interface = false;
+        let mut is_enum = false;
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if child.kind() == "interface" {
+                is_interface = true;
+                self.register_node(&child); // Register the interface keyword node
+                break;
+            } else if child.kind() == "enum" {
+                is_enum = true;
+                self.register_node(&child); // Register the enum keyword node
+                break;
+            }
+        }
+
+        // Extract class/interface name - find the type_identifier child
         let mut class_name = None;
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
@@ -276,7 +280,16 @@ impl KotlinParser {
         let signature = self.extract_signature(node, code);
         let doc_comment = self.doc_comment_for(&node, code);
 
-        let mut symbol = Symbol::new(symbol_id, class_name.as_str(), SymbolKind::Class, file_id, range);
+        // Determine symbol kind based on modifiers
+        let symbol_kind = if is_interface {
+            SymbolKind::Interface
+        } else if is_enum {
+            SymbolKind::Enum
+        } else {
+            SymbolKind::Class
+        };
+
+        let mut symbol = Symbol::new(symbol_id, class_name.as_str(), symbol_kind, file_id, range);
         symbol.visibility = visibility;
         symbol.signature = Some(signature.into());
         if let Some(doc) = doc_comment {
@@ -289,21 +302,29 @@ impl KotlinParser {
         context.set_current_class(Some(class_name.clone()));
         symbols.push(symbol);
 
-        // Process class body
+        // Process class/interface/enum body
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            if child.kind() == "class_body" {
+            if child.kind() == "class_body" || child.kind() == "enum_class_body" {
+                if child.kind() == "enum_class_body" {
+                    self.register_node(&child); // Register enum_class_body
+                }
                 let mut body_cursor = child.walk();
                 for body_child in child.children(&mut body_cursor) {
-                    self.extract_symbols_from_node(
-                        body_child,
-                        code,
-                        file_id,
-                        symbols,
-                        counter,
-                        context,
-                        depth + 1,
-                    );
+                    // Extract enum entries as constants
+                    if is_enum && body_child.kind() == "enum_entry" {
+                        self.handle_enum_entry(body_child, code, file_id, symbols, counter);
+                    } else {
+                        self.extract_symbols_from_node(
+                            body_child,
+                            code,
+                            file_id,
+                            symbols,
+                            counter,
+                            context,
+                            depth + 1,
+                        );
+                    }
                 }
                 break;
             }
@@ -524,152 +545,6 @@ impl KotlinParser {
         symbol.signature = Some(signature.into());
 
         symbols.push(symbol);
-    }
-
-    fn handle_interface_declaration(
-        &mut self,
-        node: Node,
-        code: &str,
-        file_id: FileId,
-        symbols: &mut Vec<Symbol>,
-        counter: &mut SymbolCounter,
-        context: &mut ParserContext,
-        depth: usize,
-    ) {
-        self.register_node(&node);
-
-        // Extract interface name - find the type_identifier child
-        let mut interface_name = None;
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if child.kind() == "type_identifier" {
-                interface_name = Some(self.text_for_node(code, child).trim().to_string());
-                break;
-            }
-        }
-
-        let interface_name = if let Some(name) = interface_name {
-            name
-        } else {
-            return;
-        };
-
-        let symbol_id = counter.next_id();
-        let range = self.node_to_range(node);
-        let visibility = self.determine_visibility(node, code);
-        let signature = self.extract_signature(node, code);
-        let doc_comment = self.doc_comment_for(&node, code);
-
-        let mut symbol = Symbol::new(symbol_id, interface_name.as_str(), SymbolKind::Interface, file_id, range);
-        symbol.visibility = visibility;
-        symbol.signature = Some(signature.into());
-        if let Some(doc) = doc_comment {
-            symbol.doc_comment = Some(doc.into());
-        }
-        symbol.scope_context = Some(crate::symbol::ScopeContext::ClassMember);
-
-        // Add to context
-        context.enter_scope(ScopeType::Class);
-        context.set_current_class(Some(interface_name.clone()));
-        symbols.push(symbol);
-
-        // Process interface body
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if child.kind() == "class_body" {
-                let mut body_cursor = child.walk();
-                for body_child in child.children(&mut body_cursor) {
-                    self.extract_symbols_from_node(
-                        body_child,
-                        code,
-                        file_id,
-                        symbols,
-                        counter,
-                        context,
-                        depth + 1,
-                    );
-                }
-                break;
-            }
-        }
-
-        context.exit_scope();
-    }
-
-    fn handle_enum_declaration(
-        &mut self,
-        node: Node,
-        code: &str,
-        file_id: FileId,
-        symbols: &mut Vec<Symbol>,
-        counter: &mut SymbolCounter,
-        context: &mut ParserContext,
-        depth: usize,
-    ) {
-        self.register_node(&node);
-
-        // Extract enum name - find the type_identifier child
-        let mut enum_name = None;
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if child.kind() == "type_identifier" {
-                enum_name = Some(self.text_for_node(code, child).trim().to_string());
-                break;
-            }
-        }
-
-        let enum_name = if let Some(name) = enum_name {
-            name
-        } else {
-            return;
-        };
-
-        let symbol_id = counter.next_id();
-        let range = self.node_to_range(node);
-        let visibility = self.determine_visibility(node, code);
-        let signature = self.extract_signature(node, code);
-        let doc_comment = self.doc_comment_for(&node, code);
-
-        let mut symbol = Symbol::new(symbol_id, enum_name.as_str(), SymbolKind::Enum, file_id, range);
-        symbol.visibility = visibility;
-        symbol.signature = Some(signature.into());
-        if let Some(doc) = doc_comment {
-            symbol.doc_comment = Some(doc.into());
-        }
-        symbol.scope_context = Some(crate::symbol::ScopeContext::ClassMember);
-
-        // Add to context
-        context.enter_scope(ScopeType::Class);
-        context.set_current_class(Some(enum_name.clone()));
-        symbols.push(symbol);
-
-        // Process enum body to extract enum entries
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if child.kind() == "enum_class_body" {
-                self.register_node(&child);
-                let mut body_cursor = child.walk();
-                for body_child in child.children(&mut body_cursor) {
-                    if body_child.kind() == "enum_entry" {
-                        self.handle_enum_entry(body_child, code, file_id, symbols, counter);
-                    } else {
-                        // Process other members like functions, properties
-                        self.extract_symbols_from_node(
-                            body_child,
-                            code,
-                            file_id,
-                            symbols,
-                            counter,
-                            context,
-                            depth + 1,
-                        );
-                    }
-                }
-                break;
-            }
-        }
-
-        context.exit_scope();
     }
 
     fn handle_enum_entry(

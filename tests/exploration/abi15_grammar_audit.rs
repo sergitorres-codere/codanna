@@ -3644,7 +3644,7 @@ tree-sitter-gdscript/src/node-types.json to {grammar_path}."
                 vec![
                     "class_declaration",
                     "object_declaration",
-                    "interface_declaration",
+                    "interface",
                     "enum_class",
                     "data_class",
                     "sealed_class",
