@@ -236,31 +236,102 @@ impl KotlinParser {
         Visibility::Public // Kotlin default is public
     }
 
-    /// Extract signature text for a node
+    /// Extract signature text for a node - optimized version
+    /// Builds string directly to avoid intermediate allocations
     fn extract_signature(&self, node: Node, code: &str) -> String {
+        // Pre-allocate with estimated size (most signatures are 50-150 chars)
+        let mut signature = String::with_capacity(100);
         let mut cursor = node.walk();
-        let mut sig_parts = Vec::new();
 
-        // Collect modifiers
         for child in node.children(&mut cursor) {
-            match child.kind() {
+            let child_kind = child.kind();
+            match child_kind {
                 NODE_MODIFIERS => {
-                    sig_parts.push(self.text_for_node(code, child).to_string());
+                    if !signature.is_empty() {
+                        signature.push(' ');
+                    }
+                    signature.push_str(self.text_for_node(code, child));
                 }
                 NODE_SIMPLE_IDENTIFIER | NODE_TYPE_IDENTIFIER => {
-                    sig_parts.push(self.text_for_node(code, child).to_string());
+                    if !signature.is_empty() {
+                        signature.push(' ');
+                    }
+                    signature.push_str(self.text_for_node(code, child));
                 }
                 NODE_FUNCTION_VALUE_PARAMETERS | "class_parameters" => {
-                    sig_parts.push(self.text_for_node(code, child).to_string());
+                    if !signature.is_empty() {
+                        signature.push(' ');
+                    }
+                    signature.push_str(self.text_for_node(code, child));
                 }
                 "type" | NODE_USER_TYPE | NODE_TYPE_REFERENCE => {
-                    sig_parts.push(format!(": {}", self.text_for_node(code, child)));
+                    signature.push_str(": ");
+                    signature.push_str(self.text_for_node(code, child));
                 }
                 _ => {}
             }
         }
 
-        sig_parts.join(" ")
+        signature
+    }
+
+    /// Extract signature and metadata in a single pass - used for functions
+    /// Returns (name, visibility, signature_parts, body_node)
+    fn extract_function_info<'a>(
+        &self,
+        node: Node<'a>,
+        code: &str,
+    ) -> (Option<String>, Visibility, String, Option<Node<'a>>) {
+        let mut func_name = None;
+        let mut visibility = Visibility::Public;
+        let mut signature = String::with_capacity(100);
+        let mut body_node = None;
+        let mut cursor = node.walk();
+
+        for child in node.children(&mut cursor) {
+            let child_kind = child.kind();
+            match child_kind {
+                NODE_SIMPLE_IDENTIFIER if func_name.is_none() => {
+                    func_name = Some(self.text_for_node(code, child).trim().to_string());
+                    if !signature.is_empty() {
+                        signature.push(' ');
+                    }
+                    signature.push_str(self.text_for_node(code, child));
+                }
+                NODE_MODIFIERS => {
+                    let modifiers_text = self.text_for_node(code, child);
+                    // Extract visibility inline
+                    if modifiers_text.contains("private") {
+                        visibility = Visibility::Private;
+                    } else if modifiers_text.contains("protected") {
+                        visibility = Visibility::Module;
+                    } else if modifiers_text.contains("internal") {
+                        visibility = Visibility::Crate;
+                    }
+                    // Add to signature
+                    if !signature.is_empty() {
+                        signature.push(' ');
+                    }
+                    signature.push_str(modifiers_text);
+                }
+                NODE_FUNCTION_VALUE_PARAMETERS => {
+                    if !signature.is_empty() {
+                        signature.push(' ');
+                    }
+                    signature.push_str(self.text_for_node(code, child));
+                }
+                "type" | NODE_USER_TYPE | NODE_TYPE_REFERENCE => {
+                    signature.push_str(": ");
+                    signature.push_str(self.text_for_node(code, child));
+                }
+                NODE_FUNCTION_BODY => {
+                    body_node = Some(child);
+                }
+                _ => {}
+            }
+        }
+
+        (func_name, visibility, signature, body_node)
     }
 
     /// Process AST recursively and collect symbols
@@ -507,15 +578,8 @@ impl KotlinParser {
     ) {
         self.register_node(&node);
 
-        // Extract function name - find the simple_identifier child
-        let mut func_name = None;
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if child.kind() == NODE_SIMPLE_IDENTIFIER {
-                func_name = Some(self.text_for_node(code, child).trim().to_string());
-                break;
-            }
-        }
+        // Extract all function info in a single pass
+        let (func_name, visibility, signature, body_node) = self.extract_function_info(node, code);
 
         let func_name = if let Some(name) = func_name {
             name
@@ -525,8 +589,6 @@ impl KotlinParser {
 
         let symbol_id = counter.next_id();
         let range = self.node_to_range(node);
-        let visibility = self.determine_visibility(node, code);
-        let signature = self.extract_signature(node, code);
         let doc_comment = self.doc_comment_for(&node, code);
 
         // Determine if it's a method or top-level function
@@ -547,12 +609,12 @@ impl KotlinParser {
         context.set_current_function(Some(func_name.clone()));
         symbols.push(symbol);
 
-        // Process function body
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if child.kind() == NODE_FUNCTION_BODY {
-                let mut body_cursor = child.walk();
-                for body_child in child.children(&mut body_cursor) {
+        // Lazy body traversal: Only traverse if body contains declarations
+        // This optimization skips traversing function bodies that don't define nested symbols
+        if let Some(body) = body_node {
+            if self.body_contains_declarations(body) {
+                let mut body_cursor = body.walk();
+                for body_child in body.children(&mut body_cursor) {
                     self.extract_symbols_from_node(
                         body_child,
                         code,
@@ -563,11 +625,31 @@ impl KotlinParser {
                         depth + 1,
                     );
                 }
-                break;
             }
         }
 
         context.exit_scope();
+    }
+
+    /// Check if a function body contains any declaration nodes
+    /// This allows us to skip traversing bodies that only contain expressions
+    #[inline]
+    fn body_contains_declarations(&self, body: Node) -> bool {
+        let mut cursor = body.walk();
+        for child in body.children(&mut cursor) {
+            let kind = child.kind();
+            // Quick check for common declaration types
+            if matches!(
+                kind,
+                NODE_CLASS_DECLARATION
+                    | NODE_FUNCTION_DECLARATION
+                    | NODE_PROPERTY_DECLARATION
+                    | NODE_OBJECT_DECLARATION
+            ) {
+                return true;
+            }
+        }
+        false
     }
 
     fn handle_property_declaration(
