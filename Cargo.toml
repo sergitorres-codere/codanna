@@ -51,6 +51,7 @@ tree-sitter-go = "0.25.0" # Upgraded to ABI-15
 tree-sitter-gdscript = "5.0.1"
 tree-sitter-java = "0.23.5"
 tree-sitter-javascript = "0.25.0"
+tree-sitter-kotlin = { git = "https://github.com/fwcd/tree-sitter-kotlin", branch = "main" }
 tree-sitter-php = "0.24.1"
 tree-sitter-python = "0.25.0"
 tree-sitter-rust = "0.24.0"

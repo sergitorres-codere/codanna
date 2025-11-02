@@ -48,3 +48,6 @@ mod test_external_import_resolution;
 
 #[path = "integration/test_gdscript_mcp.rs"]
 mod test_gdscript_mcp;
+
+#[path = "integration/test_kotlin_semantic_search.rs"]
+mod test_kotlin_semantic_search;
