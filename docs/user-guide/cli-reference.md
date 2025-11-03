@@ -27,6 +27,7 @@ Available for all commands:
 | `codanna benchmark` | Benchmark parser performance |
 | `codanna parse` | Output AST nodes in JSONL format |
 | `codanna plugin` | Manage Claude Code plugins |
+| `codanna profile` | Manage workspace profiles and providers |
 
 ## Command Details
 
@@ -288,6 +289,205 @@ codanna help plugin <subcommand>
 codanna plugin <subcommand> --help
 ```
 
+---
+
+## Profile System
+
+### Workflow Overview
+
+Profiles provide reusable configurations, hooks, and commands for projects. The system uses a provider registry for centralized profile distribution.
+
+| Step | Command | Description |
+|------|---------|-------------|
+| **1. Register Provider** | `codanna profile provider add <source>` | Add profile source to global registry |
+| **2. Install Profile** | `codanna profile install <name>` | Install profile to workspace |
+| **3. Update Profile** | `codanna profile update <name>` | Update to latest version |
+| **4. Check Status** | `codanna profile status` | View installed profiles |
+
+### Provider Sources
+
+Three source types supported:
+
+| Type | Format | Example |
+|------|--------|---------|
+| **GitHub Shorthand** | `owner/repo` | `bartolli/codanna-profiles` |
+| **Git URL** | Full URL | `https://github.com/bartolli/codanna-profiles` |
+| **Local Path** | File path | `/Users/name/my-profiles` or `./local-profiles` |
+
+### Provider Management
+
+`codanna profile provider add <source> [--id <name>]`
+Register a provider in global registry
+
+**Arguments:**
+- `<source>` - Provider source (GitHub shorthand, git URL, or local path)
+
+**Options:**
+- `--id <name>` - Custom provider ID (defaults to derived from source)
+
+**Examples:**
+```bash
+codanna profile provider add bartolli/codanna-profiles
+codanna profile provider add https://github.com/org/profiles.git
+codanna profile provider add /Users/name/my-profiles --id custom
+```
+
+`codanna profile provider remove <provider-id>`
+Remove provider from global registry
+
+**Examples:**
+```bash
+codanna profile provider remove codanna-profiles
+```
+
+`codanna profile provider list [--verbose]`
+List registered providers
+
+**Options:**
+- `-v, --verbose` - Show available profiles from each provider
+
+**Example:**
+```bash
+codanna profile provider list --verbose
+```
+
+### Profile Management
+
+`codanna profile install <name> [-f, --force]`
+Install profile to current workspace
+
+**Arguments:**
+- `<name>` - Profile name to install
+
+**Options:**
+- `-f, --force` - Force installation even if profile exists
+
+**Examples:**
+```bash
+codanna profile install codanna
+codanna profile install codanna --force
+```
+
+`codanna profile update <name> [-f, --force]`
+Update installed profile to latest version
+
+**Arguments:**
+- `<name>` - Profile name to update
+
+**Options:**
+- `-f, --force` - Force update even if already at latest
+
+**Examples:**
+```bash
+codanna profile update codanna
+```
+
+`codanna profile remove <name> [-v, --verbose]`
+Remove profile from workspace
+
+**Arguments:**
+- `<name>` - Profile name to remove
+
+**Options:**
+- `-v, --verbose` - Show detailed removal information
+
+**Examples:**
+```bash
+codanna profile remove codanna
+codanna profile remove codanna --verbose
+```
+
+`codanna profile list [-v, --verbose] [--json]`
+List available profiles
+
+**Options:**
+- `-v, --verbose` - Show detailed information
+- `--json` - Output in JSON format
+
+**Examples:**
+```bash
+codanna profile list
+codanna profile list --verbose --json
+```
+
+`codanna profile status [-v, --verbose]`
+Show installed profiles for current workspace
+
+**Options:**
+- `-v, --verbose` - Show file tracking details
+
+**Examples:**
+```bash
+codanna profile status
+codanna profile status --verbose
+```
+
+`codanna profile sync [-f, --force]`
+Install profiles from team configuration
+
+**Options:**
+- `-f, --force` - Force installation even if conflicts exist
+
+**Examples:**
+```bash
+codanna profile sync
+codanna profile sync --force
+```
+
+`codanna profile verify [<name>] [--all] [-v, --verbose]`
+Verify profile integrity
+
+**Arguments:**
+- `[name]` - Profile name to verify (optional with --all)
+
+**Options:**
+- `--all` - Verify all installed profiles
+- `-v, --verbose` - Show detailed verification information
+
+**Examples:**
+```bash
+codanna profile verify codanna
+codanna profile verify --all
+codanna profile verify --all --verbose
+```
+
+### Profile Workflow Example
+
+```bash
+# 1. Register a provider
+codanna profile provider add bartolli/codanna-profiles
+
+# 2. List available profiles
+codanna profile list --verbose
+
+# 3. Install a profile
+codanna profile install codanna
+
+# 4. Check status
+codanna profile status
+
+# 5. Update later
+codanna profile update codanna
+
+# 6. Verify integrity
+codanna profile verify codanna
+```
+
+### Profile Structure
+
+Providers contain profiles in this structure:
+```
+.codanna-profile/
+├── provider.json          # Provider metadata
+└── profiles/
+    └── profile-name/
+        ├── profile.json   # Profile manifest
+        ├── .claude/       # Claude Code configs
+        └── CLAUDE.md      # Project instructions
+```
+
+---
+
 ## Exit Codes
 
 - `0` - Success
@@ -299,5 +499,7 @@ codanna plugin <subcommand> --help
 - All retrieve commands support `--json` flag for structured output
 - MCP tools support both positional and key:value arguments
 - Plugin command manages codanna extensions
+- Profile command manages workspace configurations and provider registry
 - Use `--dry-run` with index, plugin add, and plugin remove to preview without making changes
 - Language filtering available in semantic search: `lang:rust`, `lang:typescript`, etc.
+- Profiles are stored globally (`~/.codanna/providers.json`) and installed per workspace (`.codanna/profiles.lock.json`)
