@@ -185,18 +185,17 @@ impl KotlinParser {
             }
         }
 
-        if has_comment {
-            Some(result)
-        } else {
-            None
-        }
+        if has_comment { Some(result) } else { None }
     }
 
     /// Extract and clean comment text, writing directly to result buffer
     /// Returns a reference to the cleaned text within the raw string when possible
     fn extract_comment_text<'a>(&self, raw: &'a str, _result: &mut String) -> Option<&'a str> {
         let trimmed = raw.trim();
-        if let Some(content) = trimmed.strip_prefix("/**").and_then(|s| s.strip_suffix("*/")) {
+        if let Some(content) = trimmed
+            .strip_prefix("/**")
+            .and_then(|s| s.strip_suffix("*/"))
+        {
             let cleaned = content.trim();
             return Some(cleaned);
         } else if let Some(content) = trimmed.strip_prefix("///") {
@@ -209,7 +208,10 @@ impl KotlinParser {
     /// Peek at comment text without allocating - returns a reference when possible
     fn peek_comment_text<'a>(&self, raw: &'a str) -> Option<&'a str> {
         let trimmed = raw.trim();
-        if let Some(content) = trimmed.strip_prefix("/**").and_then(|s| s.strip_suffix("*/")) {
+        if let Some(content) = trimmed
+            .strip_prefix("/**")
+            .and_then(|s| s.strip_suffix("*/"))
+        {
             return Some(content.trim());
         } else if let Some(content) = trimmed.strip_prefix("///") {
             return Some(content.trim());
@@ -461,6 +463,10 @@ impl KotlinParser {
         }
         symbol.scope_context = Some(crate::symbol::ScopeContext::ClassMember);
 
+        // Save parent context before entering new scope
+        let saved_function = context.current_function().map(|s| s.to_string());
+        let saved_class = context.current_class().map(|s| s.to_string());
+
         // Add to context
         context.enter_scope(ScopeType::Class);
         context.set_current_class(Some(class_name.clone()));
@@ -495,6 +501,10 @@ impl KotlinParser {
         }
 
         context.exit_scope();
+
+        // Restore parent context
+        context.set_current_function(saved_function);
+        context.set_current_class(saved_class);
     }
 
     fn handle_object_declaration(
@@ -531,13 +541,23 @@ impl KotlinParser {
         let signature = self.extract_signature(node, code);
         let doc_comment = self.doc_comment_for(&node, code);
 
-        let mut symbol = Symbol::new(symbol_id, object_name.as_str(), SymbolKind::Class, file_id, range);
+        let mut symbol = Symbol::new(
+            symbol_id,
+            object_name.as_str(),
+            SymbolKind::Class,
+            file_id,
+            range,
+        );
         symbol.visibility = visibility;
         symbol.signature = Some(signature.into());
         if let Some(doc) = doc_comment {
             symbol.doc_comment = Some(doc.into());
         }
         symbol.scope_context = Some(crate::symbol::ScopeContext::ClassMember);
+
+        // Save parent context before entering new scope
+        let saved_function = context.current_function().map(|s| s.to_string());
+        let saved_class = context.current_class().map(|s| s.to_string());
 
         context.enter_scope(ScopeType::Class);
         context.set_current_class(Some(object_name.clone()));
@@ -564,6 +584,10 @@ impl KotlinParser {
         }
 
         context.exit_scope();
+
+        // Restore parent context
+        context.set_current_function(saved_function);
+        context.set_current_class(saved_class);
     }
 
     fn handle_function_declaration(
@@ -605,6 +629,10 @@ impl KotlinParser {
             symbol.doc_comment = Some(doc.into());
         }
 
+        // Save parent context before entering new scope
+        let saved_function = context.current_function().map(|s| s.to_string());
+        let saved_class = context.current_class().map(|s| s.to_string());
+
         context.enter_scope(ScopeType::function());
         context.set_current_function(Some(func_name.clone()));
         symbols.push(symbol);
@@ -629,6 +657,10 @@ impl KotlinParser {
         }
 
         context.exit_scope();
+
+        // Restore parent context
+        context.set_current_function(saved_function);
+        context.set_current_class(saved_class);
     }
 
     /// Check if a function body contains any declaration nodes
@@ -691,7 +723,13 @@ impl KotlinParser {
         let signature = self.extract_signature(node, code);
         let doc_comment = self.doc_comment_for(&node, code);
 
-        let mut symbol = Symbol::new(symbol_id, prop_name.as_str(), SymbolKind::Field, file_id, range);
+        let mut symbol = Symbol::new(
+            symbol_id,
+            prop_name.as_str(),
+            SymbolKind::Field,
+            file_id,
+            range,
+        );
         symbol.visibility = visibility;
         symbol.signature = Some(signature.into());
         if let Some(doc) = doc_comment {
@@ -750,7 +788,13 @@ impl KotlinParser {
         let range = self.node_to_range(node);
         let signature = self.extract_signature(node, code);
 
-        let mut symbol = Symbol::new(symbol_id, entry_name.as_str(), SymbolKind::Constant, file_id, range);
+        let mut symbol = Symbol::new(
+            symbol_id,
+            entry_name.as_str(),
+            SymbolKind::Constant,
+            file_id,
+            range,
+        );
         symbol.signature = Some(signature.into());
         symbol.visibility = Visibility::Public; // Enum entries are always public
 
@@ -838,21 +882,21 @@ impl KotlinParser {
         current_class: Option<&'a str>,
     ) {
         // Track current class
-        let new_class = if node.kind() == NODE_CLASS_DECLARATION || node.kind() == NODE_OBJECT_DECLARATION
-        {
-            // Find the type_identifier child (class name)
-            let mut cursor = node.walk();
-            let mut class_name = None;
-            for child in node.children(&mut cursor) {
-                if child.kind() == NODE_TYPE_IDENTIFIER {
-                    class_name = Some(self.text_for_node(code, child).trim());
-                    break;
+        let new_class =
+            if node.kind() == NODE_CLASS_DECLARATION || node.kind() == NODE_OBJECT_DECLARATION {
+                // Find the type_identifier child (class name)
+                let mut cursor = node.walk();
+                let mut class_name = None;
+                for child in node.children(&mut cursor) {
+                    if child.kind() == NODE_TYPE_IDENTIFIER {
+                        class_name = Some(self.text_for_node(code, child).trim());
+                        break;
+                    }
                 }
-            }
-            class_name
-        } else {
-            None
-        };
+                class_name
+            } else {
+                None
+            };
 
         let class_context = new_class.or(current_class);
 
@@ -911,7 +955,12 @@ impl KotlinParser {
                         if child.kind() == NODE_CLASS_BODY {
                             let mut body_cursor = child.walk();
                             for body_child in child.children(&mut body_cursor) {
-                                self.extract_type_uses_recursive(body_child, code, uses, Some(class_name));
+                                self.extract_type_uses_recursive(
+                                    body_child,
+                                    code,
+                                    uses,
+                                    Some(class_name),
+                                );
                             }
                         }
                     }
@@ -935,7 +984,9 @@ impl KotlinParser {
                     for child in node.children(&mut cursor) {
                         if child.kind() == NODE_FUNCTION_VALUE_PARAMETERS {
                             self.extract_parameter_types(child, code, func_name, uses);
-                        } else if child.kind() == NODE_USER_TYPE || child.kind() == NODE_TYPE_REFERENCE {
+                        } else if child.kind() == NODE_USER_TYPE
+                            || child.kind() == NODE_TYPE_REFERENCE
+                        {
                             // This is the return type
                             if let Some(type_name) = self.extract_type_name(child, code) {
                                 uses.push((func_name, type_name, self.node_to_range(child)));
@@ -958,7 +1009,10 @@ impl KotlinParser {
                         for var_child in child.children(&mut var_cursor) {
                             if var_child.kind() == NODE_SIMPLE_IDENTIFIER && prop_name.is_none() {
                                 prop_name = Some(self.text_for_node(code, var_child).trim());
-                            } else if (var_child.kind() == NODE_USER_TYPE || var_child.kind() == NODE_TYPE_REFERENCE) && prop_type.is_none() {
+                            } else if (var_child.kind() == NODE_USER_TYPE
+                                || var_child.kind() == NODE_TYPE_REFERENCE)
+                                && prop_type.is_none()
+                            {
                                 if let Some(type_name) = self.extract_type_name(var_child, code) {
                                     prop_type = Some((type_name, self.node_to_range(var_child)));
                                 }
@@ -1071,8 +1125,13 @@ impl KotlinParser {
                                 let mut method_cursor = body_child.walk();
                                 for method_child in body_child.children(&mut method_cursor) {
                                     if method_child.kind() == NODE_SIMPLE_IDENTIFIER {
-                                        let method_name = self.text_for_node(code, method_child).trim();
-                                        defines.push((class_name, method_name, self.node_to_range(body_child)));
+                                        let method_name =
+                                            self.text_for_node(code, method_child).trim();
+                                        defines.push((
+                                            class_name,
+                                            method_name,
+                                            self.node_to_range(body_child),
+                                        ));
                                         break;
                                     }
                                 }

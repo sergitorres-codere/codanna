@@ -236,7 +236,6 @@ impl LanguageBehavior for KotlinBehavior {
             Visibility::Public => true,
         }
     }
-
 }
 
 #[cfg(test)]

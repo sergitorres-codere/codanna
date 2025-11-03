@@ -151,7 +151,7 @@ enum class Priority(val level: Int, val label: String) {
         .collect();
 
     assert!(
-        methods.len() >= 1,
+        !methods.is_empty(),
         "Should find at least 1 method in Priority enum"
     );
 
@@ -199,7 +199,10 @@ class ConsolePrinter : Printer {
     assert_eq!(classes.len(), 1, "Should find 1 class");
 
     let console_printer = classes.iter().find(|s| s.name.as_ref() == "ConsolePrinter");
-    assert!(console_printer.is_some(), "Should find ConsolePrinter class");
+    assert!(
+        console_printer.is_some(),
+        "Should find ConsolePrinter class"
+    );
 }
 
 #[test]

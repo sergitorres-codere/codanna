@@ -6,8 +6,8 @@
 use super::{
     CBehavior, CParser, CSharpBehavior, CSharpParser, CppBehavior, CppParser, GdscriptBehavior,
     GdscriptParser, GoBehavior, GoParser, KotlinBehavior, KotlinParser, Language, LanguageBehavior,
-    LanguageId, LanguageParser, PhpBehavior, PhpParser, PythonBehavior, PythonParser,
-    RustBehavior, RustParser, TypeScriptBehavior, TypeScriptParser, get_registry,
+    LanguageId, LanguageParser, PhpBehavior, PhpParser, PythonBehavior, PythonParser, RustBehavior,
+    RustParser, TypeScriptBehavior, TypeScriptParser, get_registry,
 };
 use crate::{IndexError, IndexResult, Settings};
 use std::sync::Arc;

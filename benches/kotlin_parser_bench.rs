@@ -13,8 +13,8 @@
 //! 4. Performance on specific Kotlin language constructs
 //! 5. Scalability with systematically generated test data
 
-use codanna::parsing::kotlin::KotlinParser;
 use codanna::parsing::LanguageParser;
+use codanna::parsing::kotlin::KotlinParser;
 use codanna::types::{FileId, SymbolCounter};
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
@@ -51,7 +51,8 @@ fn bench_kotlin_symbol_extraction(c: &mut Criterion) {
                 b.iter(|| {
                     let mut symbol_counter = SymbolCounter::new();
                     let file_id = FileId::new(1).expect("Failed to create file ID");
-                    let symbols = parser.parse(std::hint::black_box(code), file_id, &mut symbol_counter);
+                    let symbols =
+                        parser.parse(std::hint::black_box(code), file_id, &mut symbol_counter);
                     std::hint::black_box(symbols)
                 });
             },
@@ -80,7 +81,8 @@ fn bench_kotlin_memory_usage(c: &mut Criterion) {
                     let mut parser = KotlinParser::new().expect("Failed to create Kotlin parser");
                     let mut symbol_counter = SymbolCounter::new();
                     let file_id = FileId::new(1).expect("Failed to create file ID");
-                    let symbols = parser.parse(std::hint::black_box(code), file_id, &mut symbol_counter);
+                    let symbols =
+                        parser.parse(std::hint::black_box(code), file_id, &mut symbol_counter);
                     std::hint::black_box(symbols)
                 });
             },
@@ -131,7 +133,8 @@ fn bench_kotlin_language_constructs(c: &mut Criterion) {
                 b.iter(|| {
                     let mut symbol_counter = SymbolCounter::new();
                     let file_id = FileId::new(1).expect("Failed to create file ID");
-                    let symbols = parser.parse(std::hint::black_box(code), file_id, &mut symbol_counter);
+                    let symbols =
+                        parser.parse(std::hint::black_box(code), file_id, &mut symbol_counter);
                     std::hint::black_box(symbols)
                 });
             },
@@ -161,7 +164,8 @@ fn bench_scalable_test_data(c: &mut Criterion) {
                 b.iter(|| {
                     let mut symbol_counter = SymbolCounter::new();
                     let file_id = FileId::new(1).expect("Failed to create file ID");
-                    let symbols = parser.parse(std::hint::black_box(code), file_id, &mut symbol_counter);
+                    let symbols =
+                        parser.parse(std::hint::black_box(code), file_id, &mut symbol_counter);
                     std::hint::black_box(symbols.len()) // Return count to avoid large memory allocations
                 });
             },
@@ -735,7 +739,8 @@ fn create_many_enums(count: usize) -> String {
 
 /// Generate scalable Kotlin code for systematic performance testing
 fn generate_scalable_kotlin_code(target_symbols: usize) -> String {
-    let mut code = String::from("package com.example.scalable\n\nimport java.time.LocalDateTime\n\n");
+    let mut code =
+        String::from("package com.example.scalable\n\nimport java.time.LocalDateTime\n\n");
 
     // Calculate distribution of symbols
     let functions = target_symbols / 4;
@@ -775,9 +780,7 @@ fn generate_scalable_kotlin_code(target_symbols: usize) -> String {
     // Add class with many methods
     code.push_str("class MethodContainer {\n");
     for i in 0..methods {
-        code.push_str(&format!(
-            "    fun method{i}(): String = \"method_{i}\"\n"
-        ));
+        code.push_str(&format!("    fun method{i}(): String = \"method_{i}\"\n"));
     }
     code.push_str("}\n\n");
 

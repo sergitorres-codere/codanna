@@ -45,7 +45,10 @@ class AuroraCurrencyRepository(
 
     println!("\n=== Type Usage ===");
     for (context, used_type, range) in &uses {
-        println!("  {} uses {} at line {}", context, used_type, range.start_line);
+        println!(
+            "  {} uses {} at line {}",
+            context, used_type, range.start_line
+        );
     }
 
     let use_pairs: Vec<(String, String)> = uses
@@ -55,11 +58,17 @@ class AuroraCurrencyRepository(
 
     // This is the key fix - constructor parameter types should now be tracked
     assert!(
-        use_pairs.contains(&("AuroraCurrencyRepository".to_string(), "PgClient".to_string())),
+        use_pairs.contains(&(
+            "AuroraCurrencyRepository".to_string(),
+            "PgClient".to_string()
+        )),
         "Should detect PgClient usage in AuroraCurrencyRepository constructor - THIS WAS THE BUG!"
     );
     assert!(
-        use_pairs.contains(&("AuroraCurrencyRepository".to_string(), "ReadWritePgClient".to_string())),
+        use_pairs.contains(&(
+            "AuroraCurrencyRepository".to_string(),
+            "ReadWritePgClient".to_string()
+        )),
         "Should detect ReadWritePgClient usage in AuroraCurrencyRepository constructor - THIS WAS THE BUG!"
     );
 
@@ -68,7 +77,10 @@ class AuroraCurrencyRepository(
 
     println!("\n=== Method Definitions ===");
     for (definer, method, range) in &defines {
-        println!("  {} defines {} at line {}", definer, method, range.start_line);
+        println!(
+            "  {} defines {} at line {}",
+            definer, method, range.start_line
+        );
     }
 
     let define_pairs: Vec<(String, String)> = defines
@@ -85,7 +97,10 @@ class AuroraCurrencyRepository(
         "Should detect execute method in ReadWritePgClient"
     );
     assert!(
-        define_pairs.contains(&("AuroraCurrencyRepository".to_string(), "updateCurrencyCollections".to_string())),
+        define_pairs.contains(&(
+            "AuroraCurrencyRepository".to_string(),
+            "updateCurrencyCollections".to_string()
+        )),
         "Should detect updateCurrencyCollections method in AuroraCurrencyRepository"
     );
 
@@ -94,7 +109,10 @@ class AuroraCurrencyRepository(
 
     println!("\n=== Inheritance ===");
     for (derived, base, range) in &extends {
-        println!("  {} extends {} at line {}", derived, base, range.start_line);
+        println!(
+            "  {} extends {} at line {}",
+            derived, base, range.start_line
+        );
     }
 
     let extend_pairs: Vec<(String, String)> = extends
@@ -127,7 +145,10 @@ class PermissionSet
 
     println!("Found {} type uses:", uses.len());
     for (context, used_type, range) in &uses {
-        println!("  {} uses {} at line {}", context, used_type, range.start_line);
+        println!(
+            "  {} uses {} at line {}",
+            context, used_type, range.start_line
+        );
     }
 
     let use_pairs: Vec<(String, String)> = uses

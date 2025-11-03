@@ -33,7 +33,10 @@ class AuroraCurrencyRepository(
 
     println!("Found {} type uses:", uses.len());
     for (context, used_type, range) in &uses {
-        println!("  {} uses {} at line {}", context, used_type, range.start_line);
+        println!(
+            "  {} uses {} at line {}",
+            context, used_type, range.start_line
+        );
     }
 
     // Test that constructor parameters are tracked
@@ -43,11 +46,17 @@ class AuroraCurrencyRepository(
         .collect();
 
     assert!(
-        use_pairs.contains(&("AuroraCurrencyRepository".to_string(), "PgClient".to_string())),
+        use_pairs.contains(&(
+            "AuroraCurrencyRepository".to_string(),
+            "PgClient".to_string()
+        )),
         "Should detect PgClient usage in AuroraCurrencyRepository constructor"
     );
     assert!(
-        use_pairs.contains(&("AuroraCurrencyRepository".to_string(), "ReadWritePgClient".to_string())),
+        use_pairs.contains(&(
+            "AuroraCurrencyRepository".to_string(),
+            "ReadWritePgClient".to_string()
+        )),
         "Should detect ReadWritePgClient usage in AuroraCurrencyRepository constructor"
     );
 }
@@ -71,7 +80,10 @@ class UserService {
 
     println!("Found {} type uses:", uses.len());
     for (context, used_type, range) in &uses {
-        println!("  {} uses {} at line {}", context, used_type, range.start_line);
+        println!(
+            "  {} uses {} at line {}",
+            context, used_type, range.start_line
+        );
     }
 
     let use_pairs: Vec<(String, String)> = uses
@@ -121,7 +133,10 @@ class Application {
 
     println!("Found {} type uses:", uses.len());
     for (context, used_type, range) in &uses {
-        println!("  {} uses {} at line {}", context, used_type, range.start_line);
+        println!(
+            "  {} uses {} at line {}",
+            context, used_type, range.start_line
+        );
     }
 
     let use_pairs: Vec<(String, String)> = uses

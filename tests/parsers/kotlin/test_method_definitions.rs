@@ -24,7 +24,10 @@ class UserService {
 
     println!("Found {} method definitions:", defines.len());
     for (definer, method, range) in &defines {
-        println!("  {} defines {} at line {}", definer, method, range.start_line);
+        println!(
+            "  {} defines {} at line {}",
+            definer, method, range.start_line
+        );
     }
 
     let define_pairs: Vec<(String, String)> = defines
@@ -65,7 +68,10 @@ object DatabaseConfig {
 
     println!("Found {} method definitions:", defines.len());
     for (definer, method, range) in &defines {
-        println!("  {} defines {} at line {}", definer, method, range.start_line);
+        println!(
+            "  {} defines {} at line {}",
+            definer, method, range.start_line
+        );
     }
 
     let define_pairs: Vec<(String, String)> = defines
@@ -74,11 +80,17 @@ object DatabaseConfig {
         .collect();
 
     assert!(
-        define_pairs.contains(&("DatabaseConfig".to_string(), "getConnectionString".to_string())),
+        define_pairs.contains(&(
+            "DatabaseConfig".to_string(),
+            "getConnectionString".to_string()
+        )),
         "Should detect getConnectionString method in DatabaseConfig object"
     );
     assert!(
-        define_pairs.contains(&("DatabaseConfig".to_string(), "getMaxConnections".to_string())),
+        define_pairs.contains(&(
+            "DatabaseConfig".to_string(),
+            "getMaxConnections".to_string()
+        )),
         "Should detect getMaxConnections method in DatabaseConfig object"
     );
 }
@@ -104,7 +116,10 @@ class OuterClass {
 
     println!("Found {} method definitions:", defines.len());
     for (definer, method, range) in &defines {
-        println!("  {} defines {} at line {}", definer, method, range.start_line);
+        println!(
+            "  {} defines {} at line {}",
+            definer, method, range.start_line
+        );
     }
 
     let define_pairs: Vec<(String, String)> = defines

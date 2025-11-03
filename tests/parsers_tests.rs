@@ -54,3 +54,6 @@ mod test_kotlin_integration;
 
 #[path = "parsers/kotlin/test_interfaces_and_enums.rs"]
 mod test_kotlin_interfaces_and_enums;
+
+#[path = "parsers/kotlin/test_nested_scopes.rs"]
+mod test_kotlin_nested_scopes;

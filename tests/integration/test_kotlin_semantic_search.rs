@@ -258,7 +258,7 @@ async fn test_kotlin_semantic_search_and_dependency_injection() {
     println!("   - Found AuroraCurrencyRepository via semantic search");
     println!("   - Found ReadWritePgClient via semantic search");
     println!("   - Verified symbol indexing for Kotlin classes");
-    println!("   - Created {} embeddings for Kotlin symbols", embedding_count);
+    println!("   - Created {embedding_count} embeddings for Kotlin symbols");
 }
 
 #[tokio::test(flavor = "current_thread")]
