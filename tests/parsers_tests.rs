@@ -42,3 +42,18 @@ mod test_gdscript_import_extraction;
 
 #[path = "parsers/gdscript/test_relationships.rs"]
 mod test_gdscript_relationships;
+
+#[path = "parsers/kotlin/test_type_usage.rs"]
+mod test_kotlin_type_usage;
+
+#[path = "parsers/kotlin/test_method_definitions.rs"]
+mod test_kotlin_method_definitions;
+
+#[path = "parsers/kotlin/test_integration.rs"]
+mod test_kotlin_integration;
+
+#[path = "parsers/kotlin/test_interfaces_and_enums.rs"]
+mod test_kotlin_interfaces_and_enums;
+
+#[path = "parsers/kotlin/test_nested_scopes.rs"]
+mod test_kotlin_nested_scopes;
