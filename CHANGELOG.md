@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.8] - 2025-11-03
+
+### Added
+
+- Kotlin language support with symbol extraction for classes, objects, functions, properties, and interfaces
+- Context save/restore pattern in Kotlin parser for handle_class_declaration, handle_object_declaration, and handle_function_declaration
+- Test suite for Kotlin nested scope handling (test_nested_scopes.rs with 3 tests)
+- Pinned tree-sitter-kotlin dependency to commit 57fb4560 for reproducible builds
+- Kotlin to supported languages list in README.md
+- Kotlin implementation status in language-support.md
+
+### Fixed
+
+- Nested scope context loss in Kotlin parser where methods after nested classes would lose parent class context
+- Clippy len_zero warning in test_interfaces_and_enums.rs
+- Clippy uninlined_format_args warning in test_kotlin_semantic_search.rs
+
 ## [0.6.7] - 2025-11-01
 
 ### Fixed

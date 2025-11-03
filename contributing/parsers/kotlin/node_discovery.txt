@@ -1,5 +1,5 @@
 === Kotlin Grammar Node Discovery ===
-Generated: 2025-11-02 20:14:10 UTC
+Generated: 2025-11-03 17:26:58 UTC
 
 Total unique node types found: 150
 

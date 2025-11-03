@@ -12,11 +12,17 @@
 //!
 //! Run with: cargo test abi15_grammar_audit -- --nocapture
 
+// Alias for tree-sitter-kotlin dependency (matches src/lib.rs)
+extern crate tree_sitter_kotlin_codanna as tree_sitter_kotlin;
+
 // Import the common utilities at the module level
 mod abi15_exploration_common;
 
 #[cfg(test)]
 mod tests {
+    // Alias for tree-sitter-kotlin dependency (matches src/lib.rs)
+    use super::tree_sitter_kotlin;
+
     // Import the timestamp utility from the main codebase
     use codanna::io::format::format_utc_timestamp as get_formatted_timestamp;
     use codanna::parsing::{
