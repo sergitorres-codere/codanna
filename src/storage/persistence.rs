@@ -36,12 +36,14 @@ impl IndexPersistence {
 
         // Update indexed paths for sync detection on next load
         let indexed_paths: Vec<PathBuf> = indexer.get_indexed_paths().iter().cloned().collect();
-        eprintln!(
-            "DEBUG: Saving {} indexed paths to metadata",
-            indexed_paths.len()
-        );
-        for path in &indexed_paths {
-            eprintln!("  - {}", path.display());
+        if indexer.settings().debug {
+            eprintln!(
+                "DEBUG: Saving {} indexed paths to metadata",
+                indexed_paths.len()
+            );
+            for path in &indexed_paths {
+                eprintln!("  - {}", path.display());
+            }
         }
         metadata.update_indexed_paths(indexed_paths);
 

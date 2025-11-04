@@ -2040,6 +2040,7 @@ impl SimpleIndexer {
         &mut self,
         stored_paths: Option<Vec<PathBuf>>,
         config_paths: &[PathBuf],
+        progress: bool,
     ) -> IndexResult<(usize, usize, usize, usize)> {
         // Convert to sets for comparison (canonicalized)
         let stored_set: std::collections::HashSet<PathBuf> = stored_paths
@@ -2074,7 +2075,7 @@ impl SimpleIndexer {
 
         for path in &new_paths {
             eprintln!("Indexing new directory: {}", path.display());
-            match self.index_directory(path, false, false) {
+            match self.index_directory(path, progress, false) {
                 Ok(stats) => {
                     eprintln!(
                         "  ✓ Indexed {} files, {} symbols",
@@ -2084,13 +2085,17 @@ impl SimpleIndexer {
                     total_symbols += stats.symbols_found;
 
                     // Track this directory as indexed
-                    eprintln!("DEBUG: Tracking indexed path: {}", path.display());
+                    if self.settings.debug {
+                        eprintln!("DEBUG: Tracking indexed path: {}", path.display());
+                    }
                     match self.add_indexed_path(path) {
                         Ok(_) => {
-                            eprintln!(
-                                "DEBUG: Successfully tracked path (total: {})",
-                                self.indexed_paths.len()
-                            );
+                            if self.settings.debug {
+                                eprintln!(
+                                    "DEBUG: Successfully tracked path (total: {})",
+                                    self.indexed_paths.len()
+                                );
+                            }
                         }
                         Err(e) => {
                             eprintln!("  ✗ Failed to track indexed path: {e}");
@@ -2128,12 +2133,45 @@ impl SimpleIndexer {
 
             // Remove each file (each manages its own batch/commit)
             if !files_to_remove.is_empty() {
+                let progress_view = if files_to_remove.len() > 1 {
+                    let options = ProgressBarOptions::default()
+                        .with_style(ProgressBarStyle::VerticalSolid)
+                        .with_width(28);
+                    let bar = Arc::new(ProgressBar::with_options(
+                        files_to_remove.len() as u64,
+                        "files",
+                        "removed",
+                        "failed",
+                        options,
+                    ));
+                    let status = StatusLine::new(Arc::clone(&bar));
+                    Some((bar, status))
+                } else {
+                    None
+                };
+
                 for file_path in &files_to_remove {
+                    let mut success = false;
                     if let Err(e) = self.remove_file(file_path) {
                         eprintln!("  ✗ Failed to remove {}: {e}", file_path.display());
                     } else {
                         removed_file_count += 1;
+                        success = true;
                     }
+
+                    if let Some((bar, _)) = &progress_view {
+                        bar.inc();
+                        if success {
+                            bar.add_extra1(1);
+                        } else {
+                            bar.add_extra2(1);
+                        }
+                    }
+                }
+
+                if let Some((bar, status)) = progress_view {
+                    drop(status);
+                    eprintln!("{bar}");
                 }
 
                 if removed_file_count > 0 {

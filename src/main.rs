@@ -718,9 +718,16 @@ fn initialize_providers(
 /// For `add-dir`: Returns error if path already exists (strict)
 /// For `index`: Silently skips existing paths (idempotent)
 #[derive(Debug)]
+enum SkipReason {
+    CoveredBy(PathBuf),
+    AlreadyPresent,
+    FileNotPersisted,
+}
+
+#[derive(Debug)]
 struct SkippedPath {
     path: PathBuf,
-    covered_by: Option<PathBuf>,
+    reason: SkipReason,
 }
 
 #[derive(Default)]
@@ -805,6 +812,20 @@ fn add_paths_to_settings(
 
     // Add each path (Settings::add_indexed_path handles deduplication)
     for path in paths {
+        if path.is_file() {
+            if strict {
+                return Err(format!(
+                    "Path must be a directory (got file): {}",
+                    path.display()
+                ));
+            }
+            skipped_paths.push(SkippedPath {
+                path: path.clone(),
+                reason: SkipReason::FileNotPersisted,
+            });
+            continue;
+        }
+
         match settings.add_indexed_path(path.clone()) {
             Ok(_) => {
                 added_paths.push(path.clone());
@@ -816,17 +837,17 @@ fn add_paths_to_settings(
                     return Err(e);
                 }
                 // index is idempotent - report and skip
-                let covered_by = path.canonicalize().ok().and_then(|canonical| {
+                let reason = path.canonicalize().ok().and_then(|canonical| {
                     settings
                         .indexing
                         .indexed_paths
                         .iter()
                         .find(|existing| canonical.starts_with(existing.as_path()))
-                        .cloned()
+                        .map(|existing| SkipReason::CoveredBy(existing.clone()))
                 });
                 skipped_paths.push(SkippedPath {
                     path: path.clone(),
-                    covered_by,
+                    reason: reason.unwrap_or(SkipReason::AlreadyPresent),
                 });
             }
             Err(e) => {
@@ -1097,6 +1118,9 @@ async fn main() {
     // This handles changes made while the index was not in use (e.g., add-dir command)
     // Skip sync if force flag is present (force means fresh start, not incremental)
     let is_force_index = matches!(cli.command, Commands::Index { force: true, .. });
+
+    // Extract progress flag from Index command for sync operations
+    let show_progress = matches!(cli.command, Commands::Index { progress: true, .. });
     if let Some(report) = &seed_report {
         if is_force_index {
             if !report.newly_seeded.is_empty() {
@@ -1145,33 +1169,77 @@ async fn main() {
             }
         }
     }
+    // Track whether sync made changes (for later check); None means sync did not run
+    let mut sync_made_changes: Option<bool> = None;
+
     if !skip_index_load && persistence.exists() && !is_force_index {
         // Load stored indexed_paths from metadata
-        if let Ok(metadata) = IndexMetadata::load(&config.index_path) {
-            let stored_paths = metadata.indexed_paths.clone();
+        match IndexMetadata::load(&config.index_path) {
+            Ok(metadata) => {
+                let stored_paths = metadata.indexed_paths.clone();
 
-            // Sync with current config (settings.toml is source of truth)
-            match indexer.sync_with_config(stored_paths, &config.indexing.indexed_paths) {
-                Ok((added, removed, files, symbols)) => {
-                    if added > 0 || removed > 0 {
-                        if added > 0 {
-                            eprintln!(
-                                "  ✓ Added {added} new directories ({files} files, {symbols} symbols)"
-                            );
-                        }
-                        if removed > 0 {
-                            eprintln!("  ✓ Removed {removed} directories from index");
-                        }
+                // Sync with current config (settings.toml is source of truth)
+                match indexer.sync_with_config(
+                    stored_paths,
+                    &config.indexing.indexed_paths,
+                    show_progress,
+                ) {
+                    Ok((added, removed, files, symbols)) => {
+                        if added > 0 || removed > 0 {
+                            sync_made_changes = Some(true);
+                            if added > 0 {
+                                eprintln!(
+                                    "  ✓ Added {added} new directories ({files} files, {symbols} symbols)"
+                                );
+                            }
+                            if removed > 0 {
+                                eprintln!("  ✓ Removed {removed} directories from index");
+                            }
 
-                        // Save updated index
-                        if let Err(e) = persistence.save(&indexer) {
-                            eprintln!("Warning: Failed to save updated index: {e}");
+                            // Save updated index
+                            if let Err(e) = persistence.save(&indexer) {
+                                eprintln!("Warning: Failed to save updated index: {e}");
+                            }
+                        } else {
+                            sync_made_changes = Some(false);
                         }
                     }
+                    Err(e) => {
+                        eprintln!("\nFailed to sync indexed paths: {e}");
+                        let suggestions = e.recovery_suggestions();
+                        if !suggestions.is_empty() {
+                            eprintln!("\nRecovery steps:");
+                            for suggestion in suggestions {
+                                eprintln!("  • {suggestion}");
+                            }
+                        }
+                        use codanna::io::ExitCode;
+                        let exit_code = ExitCode::from_error(&e);
+                        std::process::exit(exit_code as i32);
+                    }
                 }
-                Err(e) => {
-                    eprintln!("Warning: Failed to sync indexed paths: {e}");
+            }
+            Err(e) => {
+                eprintln!("\nWarning: Could not load index metadata; skipping sync: {e}");
+                if config.debug {
+                    eprintln!(
+                        "  (Expected path: {})",
+                        config.index_path.join("metadata.json").display()
+                    );
                 }
+
+                eprintln!("\nRecovery steps:");
+                let suggestions = e.recovery_suggestions();
+                if suggestions.is_empty() {
+                    eprintln!("  • Run 'codanna index' to rebuild metadata");
+                } else {
+                    for suggestion in suggestions {
+                        eprintln!("  • {suggestion}");
+                    }
+                }
+                eprintln!("  • Or use 'codanna index --force' for a full rebuild");
+
+                sync_made_changes = None;
             }
         }
     }
@@ -1439,17 +1507,20 @@ async fn main() {
                             eprintln!("Added {} path(s) to settings.toml", added_paths.len());
                         }
                         for skipped in &skipped_paths {
-                            if let Some(parent) = &skipped.covered_by {
-                                println!(
+                            match &skipped.reason {
+                                SkipReason::CoveredBy(parent) => println!(
                                     "Skipping {} (already covered by {})",
                                     skipped.path.display(),
                                     parent.display()
-                                );
-                            } else {
-                                println!(
+                                ),
+                                SkipReason::AlreadyPresent => println!(
                                     "Skipping {} (already present in indexed paths)",
                                     skipped.path.display()
-                                );
+                                ),
+                                SkipReason::FileNotPersisted => println!(
+                                    "Skipping {} (indexed file is tracked ad-hoc and not stored in settings)",
+                                    skipped.path.display()
+                                ),
                             }
                         }
                         // Reload config to get updated indexed_paths
@@ -1475,12 +1546,22 @@ async fn main() {
                 }
 
                 if !force {
-                    // No force, no explicit paths - sync already handled it
-                    // Save and exit (avoid redundant work)
-                    println!("Index already up to date (no changes detected).");
-                    if let Err(e) = persistence.save(&indexer) {
-                        eprintln!("Error saving index: {e}");
-                        std::process::exit(1);
+                    match sync_made_changes {
+                        Some(false) => {
+                            println!("Index already up to date (no changes detected).");
+                            if let Err(e) = persistence.save(&indexer) {
+                                eprintln!("Error saving index: {e}");
+                                std::process::exit(1);
+                            }
+                        }
+                        Some(true) => {
+                            // Sync already performed work and saved the index above.
+                        }
+                        None => {
+                            println!(
+                                "Skipping incremental update (metadata unavailable); index already up to date."
+                            );
+                        }
                     }
                     return;
                 }
@@ -3598,11 +3679,13 @@ mod add_paths_tests {
         let skipped = &skipped_paths[0];
         assert_eq!(skipped.path, child);
         let parent_canonical = parent.canonicalize().unwrap();
-        assert_eq!(
-            skipped.covered_by.as_ref(),
-            Some(&parent_canonical),
-            "Expected skipped path to report coverage by parent"
-        );
+        match &skipped.reason {
+            SkipReason::CoveredBy(parent) => assert_eq!(
+                parent, &parent_canonical,
+                "Expected skipped path to report coverage by parent"
+            ),
+            other => panic!("Unexpected skip reason: {other:?}"),
+        }
     }
 
     #[test]
@@ -3668,6 +3751,33 @@ mod add_paths_tests {
         );
         assert_eq!(report.missing_paths.len(), 1);
         assert_eq!(report.missing_paths[0], missing);
+    }
+
+    #[test]
+    fn test_add_paths_to_settings_skips_files_without_persisting() {
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("settings.toml");
+        let file_path = temp_dir.path().join("single.rs");
+        fs::write(&file_path, "fn main() {}\n").unwrap();
+
+        Settings::default()
+            .save(&config_path)
+            .expect("failed to write initial config");
+
+        let (settings, added, skipped) =
+            add_paths_to_settings(std::slice::from_ref(&file_path), &config_path, false)
+                .expect("file addition should succeed");
+        assert!(added.is_empty(), "file should not be persisted in config");
+        assert_eq!(skipped.len(), 1);
+        assert_eq!(skipped[0].path, file_path);
+        assert!(matches!(skipped[0].reason, SkipReason::FileNotPersisted));
+
+        let reloaded = Settings::load_from(&config_path).expect("config reload failed");
+        assert!(
+            reloaded.indexing.indexed_paths.is_empty(),
+            "file path should not be stored in indexed_paths"
+        );
+        drop(settings); // ensure no unused warnings
     }
 }
 /// Run parser performance benchmarks
