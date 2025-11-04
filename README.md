@@ -27,11 +27,29 @@ Give your code assistant the ability to see through your codebase—understandin
 <h3 align="left"></h3>
 
 > [!NOTE]
-> **New Feature: Plugin System!**  
-> Share reusable custom commands, agents, and scripts across your projects. 
-> Plugins are based on CC manifest but project-scoped and live in your `.claude/` directory.
+> **New Feature: Profiles!**
+> Package hooks, commands, skills, and agents for different project types and custom workflows. More control than plugins, not tied to Claude Code manifest.
+>
+> The `claude` profile includes Research-Agent (renamed from codanna-navigator), `/codanna:x-ray` and `/codanna:symbol` commands, and hooks for read size limits and skill suggestions.
 
-See [Plugin Documentation](docs/plugins/) for installation, updates, and creating your own plugins.
+**Quick Profile Install (0.6.8+):**
+```bash
+# Initialize with latest settings
+codanna init --force
+
+# Add provider and install profile
+codanna profile provider add bartolli/codanna-profiles
+codanna profile install claude@codanna-profiles
+
+# Install hook system
+npm --prefix .claude/hooks/codanna install
+```
+
+**Local customization**: Clone [codanna-profiles](https://github.com/bartolli/codanna-profiles) and create profiles for your project types.
+
+See [Profile Documentation](docs/profiles/) for details.
+
+**Also available: Plugins** - Claude Code manifest format for CC-specific workflows. See [Plugin Documentation](docs/plugins/).
 
 ## What It Solves
 
@@ -64,7 +82,9 @@ cargo install codanna --all-features
 codanna init
 
 # Index your code
-codanna index src --progress
+codanna index . --progress                  # Index current directory
+codanna index src tests --progress          # Index specific directories
+codanna add-dir src --progress              # Add directory to settings for indexing
 
 # Ask real questions
 codanna mcp semantic_search_docs query:"where do we resolve symbol references" limit:3
@@ -79,7 +99,8 @@ codanna mcp semantic_search_docs query:"where do we resolve symbol references" l
 - **Relationship tracking** - Call graphs, implementations, dependencies
 - **Multi-language** - Rust, Python, TypeScript, Kotlin, Go, PHP, C, C++, C#, GDScript
 - **MCP protocol** - Native integration with Claude and other AI assistants
-- **Plugin system** - Project-scoped commands, agents, and scripts
+- **Profiles** - Package configs for different project types and custom workflows
+- **Plugins** - Claude Code manifest format for project-scoped commands and agents
 - **<10ms lookups** - Memory-mapped caches for instant responses
 
 
@@ -89,7 +110,7 @@ codanna mcp semantic_search_docs query:"where do we resolve symbol references" l
 - **[Getting Started](docs/getting-started/)** - Installation and first steps
 - **[User Guide](docs/user-guide/)** - CLI commands, tools, configuration
 - **[Integrations](docs/integrations/)** - Claude, Codex, HTTP/HTTPS servers
-- **[Plugins](docs/plugins/)** - Extend Claude Code with custom commands and agents
+- **[Profiles](docs/profiles/)** - Package hooks, commands, skills, and agents
 
 ### Master
 - **[Advanced](docs/advanced/)** - Unix piping, slash commands, performance

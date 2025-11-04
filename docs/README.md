@@ -26,7 +26,10 @@ Unix piping, custom commands, project resolution, performance benchmarks.
 Guidelines for adding languages, fixing bugs, and submitting PRs.
 
 **[Plugins](plugins/)**
-Plugin system for extending Claude Code with custom commands and servers.
+Plugin system for extending Claude Code, follows CC-manifest.
+
+**[Profiles](profiles/)**
+Package hooks, commands, skills, and agents for different project types and custom workflows.
 
 **[Reference](reference/)**
 API specifications and configuration schemas.
