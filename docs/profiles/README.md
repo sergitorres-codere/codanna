@@ -27,7 +27,7 @@ Codanna profiles let teams package reusable configuration, hooks, and commands. 
    ```
 3. **Install to the current workspace**
    ```bash
-   codanna profile install codanna
+   codanna profile install claude
    ```
 4. **Inspect installed profiles**
    ```bash
@@ -35,8 +35,8 @@ Codanna profiles let teams package reusable configuration, hooks, and commands. 
    ```
 5. **Update or verify as the project evolves**
    ```bash
-   codanna profile update codanna
-   codanna profile verify codanna
+   codanna profile update claude
+   codanna profile verify claude
    ```
 
 ---
@@ -54,7 +54,7 @@ Codanna profiles let teams package reusable configuration, hooks, and commands. 
 ```bash
 codanna profile provider add bartolli/codanna-profiles
 codanna profile provider add https://github.com/org/profiles.git
-codanna profile provider add ./my-profiles --id custom
+codanna profile provider add ./my-profiles
 ```
 
 ### Remove / Inspect Providers
@@ -80,9 +80,9 @@ codanna profile provider list --verbose
 
 Examples:
 ```bash
-codanna profile install codanna
-codanna profile update codanna --force
-codanna profile remove codanna --verbose
+codanna profile install claude
+codanna profile update claude --force
+codanna profile remove claude --verbose
 codanna profile sync --force
 codanna profile verify --all --verbose
 ```
