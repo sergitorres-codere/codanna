@@ -55,7 +55,11 @@ impl IndexPersistence {
         metadata.save(&self.base_path)?;
 
         // Update project registry with latest metadata
-        self.update_project_registry(&metadata)?;
+        if let Err(err) = self.update_project_registry(&metadata) {
+            eprintln!(
+                "Note: Skipped project registry update ({err}). The index itself was saved successfully; registry metadata will refresh once permissions allow writing to ~/.codanna."
+            );
+        }
 
         // Save semantic search if enabled
         if indexer.has_semantic_search() {

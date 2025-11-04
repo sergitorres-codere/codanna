@@ -717,16 +717,91 @@ fn initialize_providers(
 ///
 /// For `add-dir`: Returns error if path already exists (strict)
 /// For `index`: Silently skips existing paths (idempotent)
+#[derive(Debug)]
+struct SkippedPath {
+    path: PathBuf,
+    covered_by: Option<PathBuf>,
+}
+
+#[derive(Default)]
+struct SeedReport {
+    newly_seeded: Vec<PathBuf>,
+    missing_paths: Vec<PathBuf>,
+}
+
+fn seed_indexer_with_config_paths(
+    indexer: &mut SimpleIndexer,
+    config_paths: &[PathBuf],
+    debug: bool,
+) -> SeedReport {
+    let mut report = SeedReport::default();
+
+    if config_paths.is_empty() {
+        return report;
+    }
+
+    // Collect existing tracked paths once to avoid repeated borrow issues
+    let mut existing: std::collections::HashSet<PathBuf> =
+        indexer.get_indexed_paths().iter().cloned().collect();
+
+    for path in config_paths {
+        if !path.exists() {
+            report.missing_paths.push(path.clone());
+            continue;
+        }
+
+        if !path.is_dir() {
+            if debug {
+                eprintln!(
+                    "DEBUG: Skipping configured path (not a directory): {}",
+                    path.display()
+                );
+            }
+            continue;
+        }
+
+        if existing.contains(path) {
+            continue;
+        }
+
+        let len_before = existing.len();
+        match indexer.add_indexed_path(path) {
+            Ok(_) => {
+                // Refresh our view of tracked paths to honor internal dedup logic
+                existing = indexer.get_indexed_paths().iter().cloned().collect();
+                if existing.len() > len_before {
+                    report.newly_seeded.push(path.clone());
+                }
+                if debug {
+                    eprintln!(
+                        "DEBUG: Seeded configured directory into tracked paths: {}",
+                        path.display()
+                    );
+                }
+            }
+            Err(e) => {
+                eprintln!(
+                    "Warning: Failed to track configured directory '{}': {e}",
+                    path.display()
+                );
+            }
+        }
+    }
+
+    report
+}
+
 fn add_paths_to_settings(
     paths: &[PathBuf],
     config_path: &Path,
     strict: bool,
-) -> Result<(Settings, Vec<PathBuf>), String> {
+) -> Result<(Settings, Vec<PathBuf>, Vec<SkippedPath>), String> {
     // Load settings from file
     let mut settings = Settings::load_from(config_path)
         .map_err(|e| format!("Error loading configuration: {e}"))?;
 
     let mut added_paths = Vec::new();
+    let mut skipped_paths = Vec::new();
 
     // Add each path (Settings::add_indexed_path handles deduplication)
     for path in paths {
@@ -740,7 +815,19 @@ fn add_paths_to_settings(
                     // add-dir is strict - return error
                     return Err(e);
                 }
-                // index is idempotent - skip silently
+                // index is idempotent - report and skip
+                let covered_by = path.canonicalize().ok().and_then(|canonical| {
+                    settings
+                        .indexing
+                        .indexed_paths
+                        .iter()
+                        .find(|existing| canonical.starts_with(existing.as_path()))
+                        .cloned()
+                });
+                skipped_paths.push(SkippedPath {
+                    path: path.clone(),
+                    covered_by,
+                });
             }
             Err(e) => {
                 // Other errors (invalid path, etc.) always propagate
@@ -756,7 +843,7 @@ fn add_paths_to_settings(
             .map_err(|e| format!("Error saving configuration: {e}"))?;
     }
 
-    Ok((settings, added_paths))
+    Ok((settings, added_paths, skipped_paths))
 }
 
 /// Entry point with tokio async runtime.
@@ -985,6 +1072,16 @@ async fn main() {
     };
 
     // Enable semantic search if configured
+    let seed_report = if !skip_index_load {
+        Some(seed_indexer_with_config_paths(
+            &mut indexer,
+            &config.indexing.indexed_paths,
+            config.debug,
+        ))
+    } else {
+        None
+    };
+
     if config.semantic_search.enabled && !indexer.has_semantic_search() {
         if let Err(e) = indexer.enable_semantic_search() {
             eprintln!("Warning: Failed to enable semantic search: {e}");
@@ -1000,6 +1097,54 @@ async fn main() {
     // This handles changes made while the index was not in use (e.g., add-dir command)
     // Skip sync if force flag is present (force means fresh start, not incremental)
     let is_force_index = matches!(cli.command, Commands::Index { force: true, .. });
+    if let Some(report) = &seed_report {
+        if is_force_index {
+            if !report.newly_seeded.is_empty() {
+                let roots: Vec<String> = report
+                    .newly_seeded
+                    .iter()
+                    .map(|p| p.display().to_string())
+                    .collect();
+                println!(
+                    "Rebuilding index for configured roots: {}",
+                    roots.join(", ")
+                );
+            } else if !config.indexing.indexed_paths.is_empty() {
+                let roots: Vec<String> = config
+                    .indexing
+                    .indexed_paths
+                    .iter()
+                    .map(|p| p.display().to_string())
+                    .collect();
+                println!(
+                    "Rebuilding index for configured roots: {}",
+                    roots.join(", ")
+                );
+            } else {
+                println!("Rebuilding index with provided paths only (no configured roots).");
+            }
+        }
+
+        if !report.missing_paths.is_empty() {
+            if report.missing_paths.len() == 1 {
+                eprintln!(
+                    "Warning: Skipping configured path (not found): {}",
+                    report.missing_paths[0].display()
+                );
+            } else {
+                let listed: Vec<String> = report
+                    .missing_paths
+                    .iter()
+                    .map(|p| p.display().to_string())
+                    .collect();
+                eprintln!(
+                    "Warning: Skipping {} configured paths (not found): {}",
+                    report.missing_paths.len(),
+                    listed.join(", ")
+                );
+            }
+        }
+    }
     if !skip_index_load && persistence.exists() && !is_force_index {
         // Load stored indexed_paths from metadata
         if let Ok(metadata) = IndexMetadata::load(&config.index_path) {
@@ -1289,9 +1434,23 @@ async fn main() {
                 };
 
                 match add_paths_to_settings(&paths, &config_path, false) {
-                    Ok((updated_settings, added_paths)) => {
+                    Ok((updated_settings, added_paths, skipped_paths)) => {
                         if !added_paths.is_empty() {
                             eprintln!("Added {} path(s) to settings.toml", added_paths.len());
+                        }
+                        for skipped in &skipped_paths {
+                            if let Some(parent) = &skipped.covered_by {
+                                println!(
+                                    "Skipping {} (already covered by {})",
+                                    skipped.path.display(),
+                                    parent.display()
+                                );
+                            } else {
+                                println!(
+                                    "Skipping {} (already present in indexed paths)",
+                                    skipped.path.display()
+                                );
+                            }
                         }
                         // Reload config to get updated indexed_paths
                         config = updated_settings;
@@ -1318,6 +1477,7 @@ async fn main() {
                 if !force {
                     // No force, no explicit paths - sync already handled it
                     // Save and exit (avoid redundant work)
+                    println!("Index already up to date (no changes detected).");
                     if let Err(e) = persistence.save(&indexer) {
                         eprintln!("Error saving index: {e}");
                         std::process::exit(1);
@@ -1506,12 +1666,16 @@ async fn main() {
 
             // Use helper to add path and save (strict mode for add-dir)
             match add_paths_to_settings(std::slice::from_ref(&path), &config_path, true) {
-                Ok((settings, added_paths)) => {
+                Ok((settings, added_paths, skipped_paths)) => {
                     // In strict mode, we know exactly one path was added (or error)
                     assert_eq!(
                         added_paths.len(),
                         1,
                         "Expected exactly one path to be added"
+                    );
+                    debug_assert!(
+                        skipped_paths.is_empty(),
+                        "Strict mode should never produce skipped paths"
                     );
                     println!("Added directory to indexed paths: {}", path.display());
                     println!("Configuration saved to: {}", config_path.display());
@@ -3395,6 +3559,117 @@ fn run_parse_command(
     }
 }
 
+#[cfg(test)]
+mod add_paths_tests {
+    use super::*;
+    use std::fs;
+    use std::sync::Arc;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_add_paths_to_settings_records_skipped_paths() {
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("settings.toml");
+        let parent = temp_dir.path().join("parent");
+        let child = parent.join("child");
+        fs::create_dir_all(&child).unwrap();
+
+        let settings = Settings::default();
+        settings
+            .save(&config_path)
+            .expect("failed to write initial config");
+
+        // Add parent to config
+        let (settings, added, skipped) =
+            add_paths_to_settings(std::slice::from_ref(&parent), &config_path, false)
+                .expect("parent addition should succeed");
+        assert_eq!(added.len(), 1);
+        assert!(skipped.is_empty());
+        settings
+            .save(&config_path)
+            .expect("failed to persist updated config");
+
+        // Attempt to add child - should be skipped and report parent coverage
+        let (_, added_again, skipped_paths) =
+            add_paths_to_settings(std::slice::from_ref(&child), &config_path, false)
+                .expect("child addition should be skipped gracefully");
+        assert!(added_again.is_empty(), "child path should not be added");
+        assert_eq!(skipped_paths.len(), 1);
+        let skipped = &skipped_paths[0];
+        assert_eq!(skipped.path, child);
+        let parent_canonical = parent.canonicalize().unwrap();
+        assert_eq!(
+            skipped.covered_by.as_ref(),
+            Some(&parent_canonical),
+            "Expected skipped path to report coverage by parent"
+        );
+    }
+
+    #[test]
+    fn test_seed_indexer_with_config_paths_tracks_configured_roots() {
+        let temp_dir = TempDir::new().unwrap();
+        let parent = temp_dir.path().join("parent");
+        let child = parent.join("child");
+        fs::create_dir_all(&child).unwrap();
+
+        let settings = Settings {
+            index_path: temp_dir.path().join("index"),
+            ..Settings::default()
+        };
+        let mut indexer = SimpleIndexer::with_settings(Arc::new(settings));
+        assert!(indexer.get_indexed_paths().is_empty());
+
+        let canonical_parent = parent.canonicalize().unwrap();
+        let report = seed_indexer_with_config_paths(
+            &mut indexer,
+            std::slice::from_ref(&canonical_parent),
+            false,
+        );
+        assert_eq!(report.newly_seeded.len(), 1);
+        assert_eq!(report.newly_seeded[0], canonical_parent);
+        assert!(report.missing_paths.is_empty());
+
+        let tracked: Vec<_> = indexer.get_indexed_paths().iter().cloned().collect();
+        assert_eq!(tracked.len(), 1);
+        assert_eq!(tracked[0], canonical_parent);
+
+        // Adding a child after the parent should be a no-op
+        let canonical_child = child.canonicalize().unwrap();
+        let child_report = seed_indexer_with_config_paths(
+            &mut indexer,
+            std::slice::from_ref(&canonical_child),
+            false,
+        );
+        assert!(
+            child_report.newly_seeded.is_empty(),
+            "child seeding should not add new directories"
+        );
+        let tracked_after_child: Vec<_> = indexer.get_indexed_paths().iter().cloned().collect();
+        assert_eq!(tracked_after_child.len(), 1, "child should not be tracked");
+        assert_eq!(tracked_after_child[0], canonical_parent);
+    }
+
+    #[test]
+    fn test_seed_indexer_with_config_paths_reports_missing() {
+        let temp_dir = TempDir::new().unwrap();
+        let missing = temp_dir.path().join("missing_dir");
+
+        let settings = Arc::new(Settings {
+            index_path: temp_dir.path().join("index"),
+            ..Settings::default()
+        });
+        let mut indexer = SimpleIndexer::with_settings(settings);
+
+        let report =
+            seed_indexer_with_config_paths(&mut indexer, std::slice::from_ref(&missing), false);
+        assert!(
+            report.newly_seeded.is_empty(),
+            "missing directory should not be seeded"
+        );
+        assert_eq!(report.missing_paths.len(), 1);
+        assert_eq!(report.missing_paths[0], missing);
+    }
+}
 /// Run parser performance benchmarks
 fn run_benchmark_command(language: &str, custom_file: Option<PathBuf>) {
     use codanna::display::theme::Theme;

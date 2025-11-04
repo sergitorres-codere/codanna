@@ -16,6 +16,9 @@ mod test_typescript_nested_functions;
 #[path = "parsers/typescript/test_alias_resolution.rs"]
 mod test_typescript_alias_resolution;
 
+#[path = "parsers/typescript/test_jsx_uses.rs"]
+mod test_typescript_jsx_uses;
+
 #[path = "parsers/c/test_resolution.rs"]
 mod test_c_resolution;
 

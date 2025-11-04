@@ -66,7 +66,10 @@ codanna index --progress
 **Behavior:**
 - Accepts multiple paths for indexing in a single operation
 - When run without arguments, uses folders from `indexed_paths` configuration
+- Reuses cached results; prints `Index already up to date (no changes detected).` when nothing changed
 - Automatically cleans up symbols from removed folders when using configuration
+- CLI path additions are idempotent: prints `Skipping <path> (already covered by <parent>)` when a parent directory is already tracked
+- Forced runs (`--force`) rebuild all configured roots first, even if you target a nested subdirectory
 - Backward compatible with single-path usage
 
 `codanna add-dir <PATH>`

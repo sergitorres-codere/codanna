@@ -45,6 +45,10 @@ pub struct Settings {
     #[serde(default)]
     pub indexing: IndexingConfig,
 
+    /// Cached canonicalized paths for fast lookups (not serialized)
+    #[serde(skip)]
+    pub indexed_paths_cache: Vec<PathBuf>,
+
     /// Language-specific settings
     #[serde(default)]
     pub languages: HashMap<String, LanguageConfig>,
@@ -271,6 +275,7 @@ impl Default for Settings {
             workspace_root: None,
             debug: false,
             indexing: IndexingConfig::default(),
+            indexed_paths_cache: Vec::new(),
             languages: generate_language_defaults(), // Now uses registry
             mcp: McpConfig::default(),
             semantic_search: SemanticSearchConfig::default(),
@@ -497,6 +502,10 @@ fn fallback_minimal_languages() -> HashMap<String, LanguageConfig> {
 }
 
 impl Settings {
+    fn sync_indexed_path_cache(&mut self) {
+        self.indexed_paths_cache = self.indexing.indexed_paths.clone();
+    }
+
     /// Create settings specifically for init_config_file
     /// This populates all dynamic fields based on the current environment
     pub fn for_init() -> Result<Self, Box<dyn std::error::Error>> {
@@ -539,6 +548,7 @@ impl Settings {
                 if settings.workspace_root.is_none() {
                     settings.workspace_root = Self::workspace_root();
                 }
+                settings.sync_indexed_path_cache();
                 settings
             })
     }
@@ -613,6 +623,10 @@ impl Settings {
             .merge(Toml::file(path))
             .merge(Env::prefixed("CI_").split("_"))
             .extract()
+            .map(|mut settings: Settings| {
+                settings.sync_indexed_path_cache();
+                settings
+            })
             .map_err(Box::new)
     }
 
@@ -942,17 +956,42 @@ __pycache__/
             .canonicalize()
             .map_err(|e| format!("Invalid path: {e}"))?;
 
-        // Check if path already exists
-        for existing in &self.indexing.indexed_paths {
-            if let Ok(existing_canonical) = existing.canonicalize() {
-                if existing_canonical == canonical_path {
-                    return Err(format!("Path already indexed: {}", path.display()));
-                }
+        // Track whether we should remove child paths that are covered by the new entry
+        let mut has_descendants = false;
+
+        // Check if path already exists or is covered by an existing parent
+        for existing in &self.indexed_paths_cache {
+            if *existing == canonical_path {
+                return Err(format!("Path already indexed: {}", path.display()));
+            }
+
+            // If an existing entry is an ancestor of the new path, treat as already indexed
+            if canonical_path.starts_with(existing) {
+                return Err(format!(
+                    "Path already indexed: {} (covered by {})",
+                    path.display(),
+                    existing.display()
+                ));
+            }
+
+            // Record descendant paths so we can prune them before inserting the parent
+            if existing.starts_with(&canonical_path) {
+                has_descendants = true;
             }
         }
 
+        if has_descendants {
+            // Remove any paths that are descendants of the new canonical path
+            self.indexing
+                .indexed_paths
+                .retain(|existing| !existing.starts_with(&canonical_path));
+            self.indexed_paths_cache
+                .retain(|existing| !existing.starts_with(&canonical_path));
+        }
+
         // Add the path
-        self.indexing.indexed_paths.push(canonical_path);
+        self.indexing.indexed_paths.push(canonical_path.clone());
+        self.indexed_paths_cache.push(canonical_path);
         Ok(())
     }
 
@@ -963,13 +1002,8 @@ __pycache__/
             .map_err(|e| format!("Invalid path: {e}"))?;
 
         let original_len = self.indexing.indexed_paths.len();
-        self.indexing.indexed_paths.retain(|p| {
-            if let Ok(existing_canonical) = p.canonicalize() {
-                existing_canonical != canonical_path
-            } else {
-                true
-            }
-        });
+        self.indexing.indexed_paths.retain(|p| p != &canonical_path);
+        self.indexed_paths_cache.retain(|p| p != &canonical_path);
 
         if self.indexing.indexed_paths.len() == original_len {
             return Err(format!(
@@ -1291,6 +1325,52 @@ enabled = true
 
         assert!(remaining_paths.contains(&canonical_folder1));
         assert!(remaining_paths.contains(&canonical_folder3));
+    }
+
+    #[test]
+    fn test_add_indexed_path_skips_child_when_parent_exists() {
+        let temp_dir = TempDir::new().unwrap();
+        let parent = temp_dir.path().join("parent");
+        let child = parent.join("child");
+
+        fs::create_dir_all(&child).unwrap();
+
+        let mut settings = Settings::default();
+        settings.add_indexed_path(parent.clone()).unwrap();
+        assert_eq!(settings.indexing.indexed_paths.len(), 1);
+
+        let result = settings.add_indexed_path(child.clone());
+        assert!(result.is_err());
+        assert_eq!(settings.indexing.indexed_paths.len(), 1);
+
+        let error_message = result.unwrap_err();
+        assert!(
+            error_message.contains("already indexed"),
+            "expected duplicate error, got: {error_message}"
+        );
+    }
+
+    #[test]
+    fn test_add_indexed_path_replaces_children_when_adding_parent() {
+        let temp_dir = TempDir::new().unwrap();
+        let parent = temp_dir.path().join("parent");
+        let child = parent.join("child");
+
+        fs::create_dir_all(&child).unwrap();
+
+        let mut settings = Settings::default();
+        settings.add_indexed_path(child.clone()).unwrap();
+        assert_eq!(settings.indexing.indexed_paths.len(), 1);
+
+        settings.add_indexed_path(parent.clone()).unwrap();
+        assert_eq!(settings.indexing.indexed_paths.len(), 1);
+
+        let stored = settings
+            .indexing
+            .indexed_paths
+            .first()
+            .expect("expected parent path");
+        assert_eq!(stored, &parent.canonicalize().unwrap());
     }
 
     #[test]
