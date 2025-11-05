@@ -1925,13 +1925,31 @@ impl CSharpParser {
                     .unwrap_or("anonymous");
 
                 // Extract parameter types
-                if let Some(params) = node.child_by_field_name("parameters") {
+                let params_opt = node.child_by_field_name("parameters");
+                if let Some(params) = params_opt {
                     self.extract_parameter_types(&params, code, context_name, uses);
                 }
 
                 // Extract return type (methods only, not constructors)
                 if node.kind() == "method_declaration" {
-                    if let Some(return_type) = node.child_by_field_name("type") {
+                    // Try multiple field names that tree-sitter might use
+                    let return_type = node.child_by_field_name("type")
+                        .or_else(|| node.child_by_field_name("return_type"))
+                        .or_else(|| {
+                            // Fallback: find first type node before parameters
+                            let params_pos = params_opt.map(|p| p.start_position()).unwrap_or(node.end_position());
+                            let mut cursor = node.walk();
+                            for child in node.children(&mut cursor) {
+                                if child.start_position() < params_pos {
+                                    if matches!(child.kind(), "identifier" | "generic_name" | "qualified_name" | "predefined_type" | "array_type" | "nullable_type") {
+                                        return Some(child);
+                                    }
+                                }
+                            }
+                            None
+                        });
+
+                    if let Some(return_type) = return_type {
                         self.extract_type_from_node(&return_type, code, context_name, uses);
                     }
                 }
@@ -1981,22 +1999,9 @@ impl CSharpParser {
                 }
             }
 
-            // Field declarations - track field types
-            "field_declaration" => {
-                // Get the declaring class from context (would need to track scope)
-                // For now, we'll use the variable name as context
-                self.extract_field_types(node, code, uses);
-            }
-
-            // Property declarations - track property types
-            "property_declaration" => {
-                if let Some(name_node) = node.child_by_field_name("name") {
-                    let prop_name = &code[name_node.byte_range()];
-                    if let Some(type_node) = node.child_by_field_name("type") {
-                        self.extract_type_from_node(&type_node, code, prop_name, uses);
-                    }
-                }
-            }
+            // Note: field_declaration and property_declaration are handled via
+            // extract_member_types() when inside a class/struct, so we don't
+            // process them here to avoid duplicates
 
             // Delegate declarations - track parameter and return types
             "delegate_declaration" => {
@@ -2066,8 +2071,13 @@ impl CSharpParser {
 
         // Also extract generic type arguments if present
         if type_node.kind() == "generic_name" {
-            if let Some(type_args) = type_node.child_by_field_name("type_arguments") {
-                self.extract_generic_type_arguments(&type_args, code, context, uses);
+            // Try to find type_argument_list as a child (field name might vary)
+            let mut cursor = type_node.walk();
+            for child in type_node.children(&mut cursor) {
+                if child.kind() == "type_argument_list" {
+                    self.extract_generic_type_arguments(&child, code, context, uses);
+                    break;
+                }
             }
         }
     }
@@ -2078,10 +2088,20 @@ impl CSharpParser {
             "identifier" => &code[type_node.byte_range()],
             "generic_name" => {
                 // For generic types, extract just the base name (e.g., "List" from "List<T>")
-                if let Some(ident) = type_node.child_by_field_name("name") {
-                    &code[ident.byte_range()]
+                // Try to find the identifier child (first child is usually the base type name)
+                let mut cursor = type_node.walk();
+                for child in type_node.children(&mut cursor) {
+                    if child.kind() == "identifier" {
+                        return &code[child.byte_range()];
+                    }
+                }
+
+                // Fallback: parse string to extract part before '<'
+                let full_text = &code[type_node.byte_range()];
+                if let Some(bracket_pos) = full_text.find('<') {
+                    &full_text[..bracket_pos]
                 } else {
-                    &code[type_node.byte_range()]
+                    full_text
                 }
             }
             "qualified_name" => {
@@ -2281,13 +2301,15 @@ impl CSharpParser {
                                     defines.push((class_name, method_name, range));
 
                                     // Recurse into method body to find local definitions
-                                    self.extract_defines_recursive(
-                                        &child,
-                                        code,
-                                        Some(class_name),
-                                        Some(method_name),
-                                        defines,
-                                    );
+                                    if let Some(method_body) = child.child_by_field_name("body") {
+                                        self.extract_defines_recursive(
+                                            &method_body,
+                                            code,
+                                            Some(class_name),
+                                            Some(method_name),
+                                            defines,
+                                        );
+                                    }
                                 }
                             }
 
@@ -2312,6 +2334,7 @@ impl CSharpParser {
 
                             // Events defined by class
                             "event_declaration" | "event_field_declaration" => {
+                                // Try to get name directly first
                                 if let Some(name_node) = child.child_by_field_name("name") {
                                     let event_name = &code[name_node.byte_range()];
                                     let range = Range::new(
@@ -2321,6 +2344,39 @@ impl CSharpParser {
                                         child.end_position().column as u16,
                                     );
                                     defines.push((class_name, event_name, range));
+                                } else {
+                                    // Fallback: search for variable_declaration (similar to fields)
+                                    let mut ev_cursor = child.walk();
+                                    for ev_child in child.children(&mut ev_cursor) {
+                                        if ev_child.kind() == "variable_declaration" {
+                                            let mut var_cursor = ev_child.walk();
+                                            for var_child in ev_child.children(&mut var_cursor) {
+                                                if var_child.kind() == "variable_declarator" {
+                                                    if let Some(name_node) = var_child.child_by_field_name("name") {
+                                                        let event_name = &code[name_node.byte_range()];
+                                                        let range = Range::new(
+                                                            var_child.start_position().row as u32,
+                                                            var_child.start_position().column as u16,
+                                                            var_child.end_position().row as u32,
+                                                            var_child.end_position().column as u16,
+                                                        );
+                                                        defines.push((class_name, event_name, range));
+                                                    }
+                                                }
+                                            }
+                                        } else if ev_child.kind() == "identifier" {
+                                            // Sometimes the name is a direct identifier child
+                                            let event_name = &code[ev_child.byte_range()];
+                                            let range = Range::new(
+                                                child.start_position().row as u32,
+                                                child.start_position().column as u16,
+                                                child.end_position().row as u32,
+                                                child.end_position().column as u16,
+                                            );
+                                            defines.push((class_name, event_name, range));
+                                            break;
+                                        }
+                                    }
                                 }
                             }
 
