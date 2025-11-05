@@ -1436,7 +1436,15 @@ impl CSharpParser {
                         if let Some(symbol) =
                             self.process_method(child, code, file_id, counter, module_path)
                         {
+                            let method_name = symbol.name.to_string();
                             symbols.push(symbol);
+
+                            // Process method body for local variables and functions
+                            self.context
+                                .enter_scope(ScopeType::Function { hoisting: false });
+                            self.context.set_current_function(Some(method_name));
+                            self.extract_method_body(child, code, file_id, counter, symbols, module_path);
+                            self.context.exit_scope();
                         }
                     }
                     "property_declaration" => {
@@ -1608,37 +1616,58 @@ impl CSharpParser {
     ) {
         // Look for local functions and variable declarations within method body
         if let Some(body_node) = method_node.child_by_field_name("body") {
-            let mut cursor = body_node.walk();
-            for child in body_node.children(&mut cursor) {
-                match child.kind() {
-                    "local_function_statement" => {
-                        if let Some(symbol) =
-                            self.process_local_function(child, code, file_id, counter, module_path)
-                        {
-                            symbols.push(symbol);
-                        }
-                    }
-                    "local_declaration_statement" => {
-                        self.process_variable_declaration(
-                            child,
-                            code,
-                            file_id,
-                            counter,
-                            symbols,
-                            module_path,
-                        );
-                    }
-                    _ => {
-                        // Continue recursively for nested blocks
-                        self.extract_method_body(
-                            child,
-                            code,
-                            file_id,
-                            counter,
-                            symbols,
-                            module_path,
-                        );
-                    }
+            self.extract_method_body_recursive(
+                body_node,
+                code,
+                file_id,
+                counter,
+                symbols,
+                module_path,
+            );
+        }
+    }
+
+    /// Recursively extract local variables and functions from any node
+    fn extract_method_body_recursive(
+        &mut self,
+        node: Node,
+        code: &str,
+        file_id: FileId,
+        counter: &mut SymbolCounter,
+        symbols: &mut Vec<Symbol>,
+        module_path: &str,
+    ) {
+        // Process the current node
+        match node.kind() {
+            "local_function_statement" => {
+                if let Some(symbol) =
+                    self.process_local_function(node, code, file_id, counter, module_path)
+                {
+                    symbols.push(symbol);
+                }
+            }
+            "local_declaration_statement" => {
+                self.process_variable_declaration(
+                    node,
+                    code,
+                    file_id,
+                    counter,
+                    symbols,
+                    module_path,
+                );
+            }
+            _ => {
+                // Recursively process all children
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    self.extract_method_body_recursive(
+                        child,
+                        code,
+                        file_id,
+                        counter,
+                        symbols,
+                        module_path,
+                    );
                 }
             }
         }
@@ -1855,32 +1884,53 @@ impl CSharpParser {
         symbols: &mut Vec<Symbol>,
         module_path: &str,
     ) {
-        // Look for variable_declarator nodes within the declaration
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if child.kind() == "variable_declarator" {
-                if let Some(name_node) = child.child_by_field_name("name") {
-                    let name = code[name_node.byte_range()].to_string();
-                    let signature = self.extract_variable_signature(node, code);
-                    let doc_comment = self.extract_doc_comment(&node, code);
+        // Handle the nested structure of local_declaration_statement and variable_declaration
+        // Structure:
+        //   local_declaration_statement -> variable_declaration -> variable_declarator
+        //   OR
+        //   variable_declaration -> variable_declarator
 
-                    let symbol = self.create_symbol(
-                        counter.next_id(),
-                        name,
-                        SymbolKind::Variable,
-                        file_id,
-                        Range::new(
-                            child.start_position().row as u32,
-                            child.start_position().column as u16,
-                            child.end_position().row as u32,
-                            child.end_position().column as u16,
-                        ),
-                        Some(signature.clone()),
-                        doc_comment.clone(),
-                        module_path,
-                        Visibility::Private, // Local variables are private
-                    );
-                    symbols.push(symbol);
+        // First, find the variable_declaration node if we're starting from local_declaration_statement
+        let var_decl_node = if node.kind() == "local_declaration_statement" {
+            // Find the variable_declaration child
+            let mut cursor = node.walk();
+            node.children(&mut cursor)
+                .find(|child| child.kind() == "variable_declaration")
+        } else if node.kind() == "variable_declaration" {
+            // Already have the variable_declaration
+            Some(node)
+        } else {
+            None
+        };
+
+        // If we found a variable_declaration node, extract its declarators
+        if let Some(var_decl) = var_decl_node {
+            let mut cursor = var_decl.walk();
+            for child in var_decl.children(&mut cursor) {
+                if child.kind() == "variable_declarator" {
+                    if let Some(name_node) = child.child_by_field_name("name") {
+                        let name = code[name_node.byte_range()].to_string();
+                        let signature = self.extract_variable_signature(node, code);
+                        let doc_comment = self.extract_doc_comment(&node, code);
+
+                        let symbol = self.create_symbol(
+                            counter.next_id(),
+                            name,
+                            SymbolKind::Variable,
+                            file_id,
+                            Range::new(
+                                child.start_position().row as u32,
+                                child.start_position().column as u16,
+                                child.end_position().row as u32,
+                                child.end_position().column as u16,
+                            ),
+                            Some(signature.clone()),
+                            doc_comment.clone(),
+                            module_path,
+                            Visibility::Private, // Local variables are private
+                        );
+                        symbols.push(symbol);
+                    }
                 }
             }
         }
@@ -2258,5 +2308,40 @@ mod tests {
                 .any(|i| i.path == "System.Collections.Generic")
         );
         assert!(imports.iter().any(|i| i.path == "MyApp.Services"));
+    }
+
+    #[test]
+    fn test_csharp_local_variable_extraction() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class TestClass {
+                public void TestMethod() {
+                    var localVar = new Helper();
+                    int count = 5;
+                }
+            }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        // Should extract the class, method, and local variables
+        assert!(
+            symbols.iter().any(|s| s.name.as_ref() == "TestClass" && s.kind == SymbolKind::Class),
+            "Should find TestClass"
+        );
+        assert!(
+            symbols.iter().any(|s| s.name.as_ref() == "TestMethod" && s.kind == SymbolKind::Method),
+            "Should find TestMethod"
+        );
+        assert!(
+            symbols.iter().any(|s| s.name.as_ref() == "localVar" && s.kind == SymbolKind::Variable),
+            "Should find localVar"
+        );
+        assert!(
+            symbols.iter().any(|s| s.name.as_ref() == "count" && s.kind == SymbolKind::Variable),
+            "Should find count"
+        );
     }
 }

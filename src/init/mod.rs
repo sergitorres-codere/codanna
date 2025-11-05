@@ -6,7 +6,8 @@
 //! - Symlink creation for model cache
 //! - Claude configuration templates
 
-pub mod claude_config;
+// Temporarily disabled due to compilation errors
+// pub mod claude_config;
 
 use crate::error::IndexError;
 use serde::{Deserialize, Serialize};
