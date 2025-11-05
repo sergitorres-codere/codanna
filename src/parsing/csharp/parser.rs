@@ -2120,9 +2120,24 @@ impl CSharpParser {
     fn is_primitive_type(type_name: &str) -> bool {
         matches!(
             type_name,
-            "void" | "int" | "string" | "bool" | "float" | "double" | "decimal"
-            | "byte" | "sbyte" | "short" | "ushort" | "uint" | "long" | "ulong"
-            | "char" | "object" | "dynamic" | "var"
+            "void"
+                | "int"
+                | "string"
+                | "bool"
+                | "float"
+                | "double"
+                | "decimal"
+                | "byte"
+                | "sbyte"
+                | "short"
+                | "ushort"
+                | "uint"
+                | "long"
+                | "ulong"
+                | "char"
+                | "object"
+                | "dynamic"
+                | "var"
         )
     }
 
