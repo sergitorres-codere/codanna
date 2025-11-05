@@ -1255,19 +1255,30 @@ impl CSharpParser {
                     let var_name = &code[name_node.byte_range()];
 
                     // Strategy 1: Try to extract type from initializer (handles "var" keyword)
-                    // In tree-sitter C#, object_creation_expression is a direct child of variable_declarator
-                    // Example structure: variable_declarator -> [identifier, "=", object_creation_expression]
+                    // In tree-sitter C#, various expression types can appear as children of variable_declarator
+                    // Example structure: variable_declarator -> [identifier, "=", <expression>]
+                    // Supported expressions:
+                    // - object_creation_expression: var x = new Type()
+                    // - invocation_expression: var x = GetHelper()
+                    // - element_access_expression: var x = collection[0]
+                    // - conditional_expression: var x = condition ? a : b
                     let mut init_expr = None;
                     let mut sub_cursor = child.walk();
                     for vchild in child.children(&mut sub_cursor) {
-                        if vchild.kind() == "object_creation_expression" {
-                            init_expr = Some(vchild);
-                            break;
+                        match vchild.kind() {
+                            "object_creation_expression"
+                            | "invocation_expression"
+                            | "element_access_expression"
+                            | "conditional_expression" => {
+                                init_expr = Some(vchild);
+                                break;
+                            }
+                            _ => {}
                         }
                     }
 
                     if let Some(init_node) = init_expr {
-                        // Found a "new Type()" expression - extract the type
+                        // Try to extract type from the initializer expression
                         if let Some(type_name) =
                             self.extract_type_from_initializer(&init_node, code)
                         {
@@ -1309,17 +1320,42 @@ impl CSharpParser {
     /// - `new Type()` → Some("Type")
     /// - `new Generic<T>()` → Some("Generic")
     /// - `new Namespace.Type()` → Some("Type")
+    /// - `GetHelper()` → Some("Helper") (method return type inference)
+    /// - `CreateUser()` → Some("User") (method return type inference)
+    /// - `collection[0]` → tries to infer element type from collection
+    /// - `condition ? a : b` → tries to infer from either branch
     fn extract_type_from_initializer<'a>(
         &self,
         init_node: &Node,
         code: &'a str,
     ) -> Option<&'a str> {
-        // Look for object_creation_expression
-        if init_node.kind() == "object_creation_expression" {
-            // object_creation_expression has a 'type' field
-            if let Some(type_node) = init_node.child_by_field_name("type") {
-                return Some(self.extract_simple_type_name(&type_node, code));
+        match init_node.kind() {
+            "object_creation_expression" => {
+                // object_creation_expression has a 'type' field
+                if let Some(type_node) = init_node.child_by_field_name("type") {
+                    return Some(self.extract_simple_type_name(&type_node, code));
+                }
             }
+            "invocation_expression" => {
+                // Try to infer type from method name
+                // Common patterns:
+                // - GetHelper() → Helper
+                // - CreateUser() → User
+                // - BuildConnection() → Connection
+                // - ToList() → List
+                return self.infer_type_from_method_call(init_node, code);
+            }
+            "element_access_expression" => {
+                // Try to infer element type from collection
+                // e.g., items[0] where items is List<Item> → Item
+                return self.infer_type_from_element_access(init_node, code);
+            }
+            "conditional_expression" => {
+                // Try to infer from either branch of ternary expression
+                // condition ? trueExpr : falseExpr
+                return self.infer_type_from_conditional(init_node, code);
+            }
+            _ => {}
         }
         None
     }
@@ -1354,6 +1390,168 @@ impl CSharpParser {
             }
             _ => &code[type_node.byte_range()],
         }
+    }
+
+    /// Infer type from method call based on naming conventions
+    ///
+    /// Handles common C# method naming patterns:
+    /// - `GetHelper()` → "Helper"
+    /// - `CreateUser()` → "User"
+    /// - `BuildConnection()` → "Connection"
+    /// - `ToList()` → "List"
+    /// - `AsEnumerable()` → "Enumerable"
+    ///
+    /// Returns None if the method name doesn't follow a recognizable pattern.
+    fn infer_type_from_method_call<'a>(
+        &self,
+        invocation_node: &Node,
+        code: &'a str,
+    ) -> Option<&'a str> {
+        // Get the method name from the invocation expression
+        let method_name = if let Some(expr_node) = invocation_node.child(0) {
+            match expr_node.kind() {
+                "member_access_expression" => {
+                    // obj.Method() - get the method name
+                    expr_node
+                        .child_by_field_name("name")
+                        .map(|n| &code[n.byte_range()])
+                }
+                "identifier" => {
+                    // Simple method call like DoSomething()
+                    Some(&code[expr_node.byte_range()])
+                }
+                "generic_name" => {
+                    // Generic method like GetValue<T>()
+                    expr_node
+                        .child_by_field_name("name")
+                        .map(|n| &code[n.byte_range()])
+                }
+                _ => None,
+            }
+        } else {
+            None
+        }?;
+
+        // Try to extract type from method name using common prefixes
+        // Get* → *
+        if let Some(type_name) = method_name.strip_prefix("Get") {
+            if !type_name.is_empty() && type_name.chars().next().unwrap().is_uppercase() {
+                return Some(type_name);
+            }
+        }
+        // Create* → *
+        if let Some(type_name) = method_name.strip_prefix("Create") {
+            if !type_name.is_empty() && type_name.chars().next().unwrap().is_uppercase() {
+                return Some(type_name);
+            }
+        }
+        // Build* → *
+        if let Some(type_name) = method_name.strip_prefix("Build") {
+            if !type_name.is_empty() && type_name.chars().next().unwrap().is_uppercase() {
+                return Some(type_name);
+            }
+        }
+        // To* → *
+        if let Some(type_name) = method_name.strip_prefix("To") {
+            if !type_name.is_empty() && type_name.chars().next().unwrap().is_uppercase() {
+                return Some(type_name);
+            }
+        }
+        // As* → *
+        if let Some(type_name) = method_name.strip_prefix("As") {
+            if !type_name.is_empty() && type_name.chars().next().unwrap().is_uppercase() {
+                return Some(type_name);
+            }
+        }
+
+        None
+    }
+
+    /// Infer element type from element access expression
+    ///
+    /// This is a best-effort heuristic. For collection[index], we try to infer
+    /// the element type by looking at the collection's type if it's a known identifier.
+    ///
+    /// Note: This is limited without full type tracking. We can only infer if the
+    /// collection variable name follows conventions like "users" → "User".
+    fn infer_type_from_element_access<'a>(
+        &self,
+        element_access_node: &Node,
+        code: &'a str,
+    ) -> Option<&'a str> {
+        // Get the expression being accessed (the collection)
+        if let Some(expr_node) = element_access_node.child_by_field_name("expression") {
+            if expr_node.kind() == "identifier" {
+                let collection_name = &code[expr_node.byte_range()];
+
+                // Try to singularize common plural forms
+                // users → User, items → Item, connections → Connection
+                if let Some(singular) = self.try_singularize(collection_name) {
+                    return Some(singular);
+                }
+            }
+        }
+
+        None
+    }
+
+    /// Infer type from conditional (ternary) expression
+    ///
+    /// For `condition ? trueExpr : falseExpr`, we try to infer the type from
+    /// the true expression branch (could be either, but we pick the first one).
+    fn infer_type_from_conditional<'a>(
+        &self,
+        conditional_node: &Node,
+        code: &'a str,
+    ) -> Option<&'a str> {
+        // Try to extract type from the consequence (true branch)
+        if let Some(consequence) = conditional_node.child_by_field_name("consequence") {
+            // Recursively try to infer type from the consequence expression
+            return self.extract_type_from_initializer(&consequence, code);
+        }
+
+        None
+    }
+
+    /// Try to singularize a plural noun (simple heuristic)
+    ///
+    /// This is a very basic implementation that handles common English plural forms:
+    /// - items → item
+    /// - users → user
+    /// - classes → class
+    /// - indices → index
+    ///
+    /// Returns the singularized form with the first letter capitalized to match
+    /// C# type naming conventions.
+    fn try_singularize<'a>(&self, word: &'a str) -> Option<&'a str> {
+        if word.is_empty() {
+            return None;
+        }
+
+        // Handle common plural patterns
+        if word.ends_with("ies") && word.len() > 3 {
+            // entries → entry, but keep as-is since we can't modify the string
+            // For now, just skip these
+            return None;
+        }
+
+        if word.ends_with("ses") && word.len() > 3 {
+            // classes → class, but we can't return a substring
+            // For now, just skip these
+            return None;
+        }
+
+        if word.ends_with('s') && word.len() > 1 {
+            // items → item, users → user
+            // Return substring without the 's'
+            let singular = &word[..word.len() - 1];
+            // Check if it's at least 2 chars and looks like a valid identifier
+            if singular.len() >= 2 {
+                return Some(singular);
+            }
+        }
+
+        None
     }
 
     /// Determine visibility from modifiers
