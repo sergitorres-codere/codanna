@@ -1652,7 +1652,7 @@ impl CodeIntelligenceServer {
             module.as_deref(),
             lang.as_deref(),
         ) {
-            Ok(results) => {
+            Ok(mut results) => {
                 if results.is_empty() {
                     let mut output = format!("No results found for query: {query}");
                     // Add guidance for no results
@@ -1665,6 +1665,9 @@ impl CodeIntelligenceServer {
                     }
                     return Ok(CallToolResult::success(vec![Content::text(output)]));
                 }
+
+                // Capture total count before pagination
+                let total_count = results.len();
 
                 // Apply pagination offset
                 if offset as usize >= total_count {
