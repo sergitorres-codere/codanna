@@ -259,6 +259,8 @@ pub fn execute_parse(
         Language::C => tree_sitter_c::LANGUAGE.into(),
         Language::Cpp => tree_sitter_cpp::LANGUAGE.into(),
         Language::CSharp => tree_sitter_c_sharp::LANGUAGE.into(),
+        Language::Gdscript => tree_sitter_gdscript::LANGUAGE.into(),
+        Language::Kotlin => tree_sitter_kotlin::language(),
     };
 
     parser

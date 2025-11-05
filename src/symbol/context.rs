@@ -1,6 +1,7 @@
 //! Symbol context aggregation for comprehensive metadata display
 
-use crate::{Symbol, SymbolKind, Visibility};
+use crate::relationship::RelationshipMetadata;
+use crate::{Symbol, Visibility};
 use bitflags::bitflags;
 use serde::Serialize;
 use std::fmt;
@@ -25,10 +26,10 @@ pub struct SymbolRelationships {
     pub implemented_by: Option<Vec<Symbol>>,
     /// What methods/fields this symbol defines
     pub defines: Option<Vec<Symbol>>,
-    /// What this symbol calls (with metadata)
-    pub calls: Option<Vec<(Symbol, Option<String>)>>,
-    /// What calls this symbol (with metadata)
-    pub called_by: Option<Vec<(Symbol, Option<String>)>>,
+    /// What this symbol calls (with relationship metadata including call site location)
+    pub calls: Option<Vec<(Symbol, Option<RelationshipMetadata>)>>,
+    /// What calls this symbol (with relationship metadata including call site location)
+    pub called_by: Option<Vec<(Symbol, Option<RelationshipMetadata>)>>,
 }
 
 bitflags! {
@@ -44,25 +45,34 @@ bitflags! {
 
 impl fmt::Display for SymbolContext {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Use format_location_with_type for concise symbol identification
-        // Format: "{Kind} {name} at {file_path}"
-        write!(f, "{}", self.format_location_with_type())
+        let formatted = self.format_full("");
+
+        if formatted.ends_with('\n') {
+            write!(f, "{}", &formatted[..formatted.len() - 1])
+        } else {
+            write!(f, "{formatted}")
+        }
     }
 }
 
 impl SymbolContext {
     /// Format just the location line
     pub fn format_location(&self) -> String {
-        // Note: file_path already includes line number (e.g., "src/file.rs:123")
-        format!("{} at {}", self.symbol.name, self.file_path)
+        format!(
+            "{} at {}",
+            self.symbol.name,
+            Self::symbol_location(&self.symbol)
+        )
     }
 
     /// Format location with type info
     pub fn format_location_with_type(&self) -> String {
-        // Note: file_path already includes line number (e.g., "src/file.rs:123")
         format!(
-            "{:?} {} at {}",
-            self.symbol.kind, self.symbol.name, self.file_path
+            "{:?} {} at {} [symbol_id:{}]",
+            self.symbol.kind,
+            self.symbol.name,
+            Self::symbol_location(&self.symbol),
+            self.symbol.id.value()
         )
     }
 
@@ -76,10 +86,13 @@ impl SymbolContext {
     }
 
     fn append_header(&self, output: &mut String, indent: &str) {
-        // Note: file_path already includes line number (e.g., "src/file.rs:123")
         output.push_str(&format!(
-            "{}{} ({:?}) at {}\n",
-            indent, self.symbol.name, self.symbol.kind, self.file_path
+            "{}{} ({:?}) at {} [symbol_id:{}]\n",
+            indent,
+            self.symbol.name,
+            self.symbol.kind,
+            Self::symbol_location(&self.symbol),
+            self.symbol.id.value()
         ));
     }
 
@@ -89,11 +102,9 @@ impl SymbolContext {
             output.push_str(&format!("{indent}Module: {module}\n"));
         }
 
-        // Signature for methods/functions
-        if matches!(self.symbol.kind, SymbolKind::Function | SymbolKind::Method) {
-            if let Some(sig) = self.symbol.as_signature() {
-                output.push_str(&format!("{indent}Signature: {sig}\n"));
-            }
+        if let Some(sig) = self.symbol.as_signature() {
+            output.push_str(&format!("{indent}Signature:\n"));
+            Self::write_multiline(output, sig, indent, 2);
         }
 
         // Visibility for appropriate symbols
@@ -121,15 +132,16 @@ impl SymbolContext {
         // Implementations
         if let Some(impls) = &self.relationships.implements {
             if !impls.is_empty() {
-                output.push_str(&format!(
-                    "{}Implements: {}\n",
-                    indent,
-                    impls
-                        .iter()
-                        .map(|s| s.as_name())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ));
+                output.push_str(&format!("{indent}Implements:\n"));
+                for symbol in impls {
+                    output.push_str(&format!(
+                        "{}  - {} ({:?}) at {}\n",
+                        indent,
+                        symbol.name,
+                        symbol.kind,
+                        SymbolContext::symbol_location(symbol)
+                    ));
+                }
             }
         }
 
@@ -137,17 +149,17 @@ impl SymbolContext {
         if let Some(impl_by) = &self.relationships.implemented_by {
             if !impl_by.is_empty() {
                 output.push_str(&format!(
-                    "{}Implemented by {} type(s):\n",
+                    "{}Implemented by {} symbol(s):\n",
                     indent,
                     impl_by.len()
                 ));
                 for impl_type in impl_by {
-                    // Note: In real implementation, would need to resolve each impl's file path
                     output.push_str(&format!(
-                        "{}  - {} at <file>:{}\n",
+                        "{}  - {} ({:?}) at {}\n",
                         indent,
                         impl_type.name,
-                        impl_type.range.start_line + 1
+                        impl_type.kind,
+                        SymbolContext::symbol_location(impl_type)
                     ));
                 }
             }
@@ -155,33 +167,60 @@ impl SymbolContext {
 
         // Methods defined
         if let Some(defines) = &self.relationships.defines {
-            let methods: Vec<_> = defines
-                .iter()
-                .filter(|s| s.kind == SymbolKind::Method)
-                .collect();
-            if !methods.is_empty() {
-                output.push_str(&format!("{indent}Methods: "));
-                output.push_str(
-                    &methods
-                        .iter()
-                        .map(|m| {
-                            if let Some(sig) = m.as_signature() {
-                                sig.to_string()
-                            } else {
-                                m.name.to_string()
-                            }
-                        })
-                        .collect::<Vec<_>>()
-                        .join(", "),
-                );
-                output.push('\n');
+            if !defines.is_empty() {
+                output.push_str(&format!("{}Defines {} symbol(s):\n", indent, defines.len()));
+                for defined in defines {
+                    output.push_str(&format!(
+                        "{}  - {} ({:?}) at {}",
+                        indent,
+                        defined.name,
+                        defined.kind,
+                        SymbolContext::symbol_location(defined)
+                    ));
+                    if let Some(sig) = defined.as_signature() {
+                        output.push('\n');
+                        Self::write_multiline(output, sig, indent, 4);
+                    }
+                    output.push('\n');
+                }
             }
         }
 
         // Calls
         if let Some(calls) = &self.relationships.calls {
             if !calls.is_empty() {
-                output.push_str(&format!("{}Calls {} function(s)\n", indent, calls.len()));
+                output.push_str(&format!("{}Calls {} function(s):\n", indent, calls.len()));
+                for (called, metadata) in calls {
+                    // Use call site location from metadata if available, otherwise definition location
+                    let location = if let Some(meta) = metadata {
+                        if let Some(line) = meta.line {
+                            format!("{}:{}", called.file_path, line.saturating_add(1))
+                        } else {
+                            Self::symbol_location(called)
+                        }
+                    } else {
+                        Self::symbol_location(called)
+                    };
+
+                    output.push_str(&format!(
+                        "{}  - {} ({:?}) at {} [symbol_id:{}]",
+                        indent,
+                        called.name,
+                        called.kind,
+                        location,
+                        called.id.value()
+                    ));
+
+                    // Show receiver info if available
+                    if let Some(meta) = metadata {
+                        if let Some(context) = &meta.context {
+                            if !context.is_empty() {
+                                output.push_str(&format!(" [{context}]"));
+                            }
+                        }
+                    }
+                    output.push('\n');
+                }
             }
         }
 
@@ -189,11 +228,63 @@ impl SymbolContext {
         if let Some(callers) = &self.relationships.called_by {
             if !callers.is_empty() {
                 output.push_str(&format!(
-                    "{}Called by {} function(s)\n",
+                    "{}Called by {} function(s):\n",
                     indent,
                     callers.len()
                 ));
+                for (caller, metadata) in callers {
+                    // Use call site location from metadata if available, otherwise definition location
+                    let location = if let Some(meta) = metadata {
+                        if let Some(line) = meta.line {
+                            format!("{}:{}", caller.file_path, line.saturating_add(1))
+                        } else {
+                            Self::symbol_location(caller)
+                        }
+                    } else {
+                        Self::symbol_location(caller)
+                    };
+
+                    output.push_str(&format!(
+                        "{}  - {} ({:?}) at {} [symbol_id:{}]",
+                        indent,
+                        caller.name,
+                        caller.kind,
+                        location,
+                        caller.id.value()
+                    ));
+
+                    // Show receiver info if available
+                    if let Some(meta) = metadata {
+                        if let Some(context) = &meta.context {
+                            if !context.is_empty() {
+                                output.push_str(&format!(" [{context}]"));
+                            }
+                        }
+                    }
+                    output.push('\n');
+                }
             }
+        }
+    }
+
+    pub(crate) fn symbol_location(symbol: &Symbol) -> String {
+        let start = symbol.range.start_line.saturating_add(1);
+        let end = symbol.range.end_line.saturating_add(1);
+        if start == end {
+            format!("{}:{start}", symbol.file_path)
+        } else {
+            format!("{}:{start}-{end}", symbol.file_path)
+        }
+    }
+}
+
+impl SymbolContext {
+    fn write_multiline(output: &mut String, text: &str, indent: &str, extra_spaces: usize) {
+        let padding = format!("{indent}{:width$}", "", width = extra_spaces);
+        for line in text.lines() {
+            output.push_str(&padding);
+            output.push_str(line);
+            output.push('\n');
         }
     }
 }

@@ -16,6 +16,9 @@ mod test_typescript_nested_functions;
 #[path = "parsers/typescript/test_alias_resolution.rs"]
 mod test_typescript_alias_resolution;
 
+#[path = "parsers/typescript/test_jsx_uses.rs"]
+mod test_typescript_jsx_uses;
+
 #[path = "parsers/c/test_resolution.rs"]
 mod test_c_resolution;
 
@@ -28,5 +31,32 @@ mod test_python_module_level_calls;
 #[path = "parsers/csharp/test_parser.rs"]
 mod test_csharp_parser;
 
-#[path = "parsers/csharp/test_call_tracking_enhancements.rs"]
-mod test_csharp_call_tracking_enhancements;
+#[path = "parsers/gdscript/test_parser.rs"]
+mod test_gdscript_parser;
+
+#[path = "parsers/gdscript/test_resolution.rs"]
+mod test_gdscript_resolution;
+
+#[path = "parsers/gdscript/test_behavior_api.rs"]
+mod test_gdscript_behavior_api;
+
+#[path = "parsers/gdscript/test_import_extraction.rs"]
+mod test_gdscript_import_extraction;
+
+#[path = "parsers/gdscript/test_relationships.rs"]
+mod test_gdscript_relationships;
+
+#[path = "parsers/kotlin/test_type_usage.rs"]
+mod test_kotlin_type_usage;
+
+#[path = "parsers/kotlin/test_method_definitions.rs"]
+mod test_kotlin_method_definitions;
+
+#[path = "parsers/kotlin/test_integration.rs"]
+mod test_kotlin_integration;
+
+#[path = "parsers/kotlin/test_interfaces_and_enums.rs"]
+mod test_kotlin_interfaces_and_enums;
+
+#[path = "parsers/kotlin/test_nested_scopes.rs"]
+mod test_kotlin_nested_scopes;

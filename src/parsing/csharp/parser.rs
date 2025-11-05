@@ -1098,8 +1098,9 @@ impl CSharpParser {
                         is_type_only: false,
                     });
                 } else {
-                    // Fallback: tree-sitter-c-sharp doesn't use "name" field for using_directive
-                    // Instead, look for qualified_name or identifier child directly
+                    // Fallback: tree-sitter-c-sharp doesn't consistently expose "name" field
+                    // for using_directive nodes. Iterate child nodes to find qualified_name
+                    // or identifier nodes directly.
                     let mut cursor = node.walk();
                     for child in node.children(&mut cursor) {
                         if child.kind() == "qualified_name" || child.kind() == "identifier" {

@@ -7,6 +7,7 @@
 //! - Imported package symbols
 //! - Interface implementation tracking (implicit in Go)
 
+use crate::parsing::resolution::ImportBinding;
 use crate::parsing::{InheritanceResolver, ResolutionScope, ScopeLevel, ScopeType};
 use crate::storage::DocumentIndex;
 use crate::{FileId, SymbolId};
@@ -346,6 +347,9 @@ pub struct GoResolutionContext {
 
     /// Type registry for type resolution
     type_registry: TypeRegistry,
+
+    /// Binding info for imports keyed by visible name
+    import_bindings: HashMap<String, ImportBinding>,
 }
 
 impl GoResolutionContext {
@@ -361,6 +365,7 @@ impl GoResolutionContext {
             scope_stack: Vec::new(),
             imports: Vec::new(),
             type_registry: TypeRegistry::new(),
+            import_bindings: HashMap::new(),
         }
     }
 
@@ -1043,6 +1048,22 @@ impl ResolutionScope for GoResolutionContext {
         }
 
         symbols
+    }
+
+    fn populate_imports(&mut self, imports: &[crate::parsing::Import]) {
+        // Convert Import records into our internal (path, alias) tuple format
+        for import in imports {
+            self.add_import(import.path.clone(), import.alias.clone());
+        }
+    }
+
+    fn register_import_binding(&mut self, binding: ImportBinding) {
+        self.import_bindings
+            .insert(binding.exposed_name.clone(), binding);
+    }
+
+    fn import_binding(&self, name: &str) -> Option<ImportBinding> {
+        self.import_bindings.get(name).cloned()
     }
 }
 

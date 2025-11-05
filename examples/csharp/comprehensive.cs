@@ -10,6 +10,9 @@
 /// - Interface implementation detection
 /// </summary>
 
+// External alias directive (rarely used, for resolving conflicts between assemblies)
+extern alias CoreLib;
+
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
@@ -410,6 +413,12 @@ namespace Codanna.Examples.CSharp
     // === TEST SCENARIO 10: Delegates and Events ===
 
     /// <summary>
+    /// Delegate declaration for data transformation.
+    /// Tests: Standalone delegate declaration
+    /// </summary>
+    public delegate string DataTransformer(string input);
+
+    /// <summary>
     /// Data processing event arguments.
     /// </summary>
     public class DataProcessedEventArgs : EventArgs
@@ -426,8 +435,27 @@ namespace Codanna.Examples.CSharp
     {
         /// <summary>
         /// Event raised when data is processed.
+        /// Tests: event_field_declaration (simple event field)
         /// </summary>
         public event EventHandler<DataProcessedEventArgs> DataProcessed;
+
+        private EventHandler<DataProcessedEventArgs> _customEvent;
+
+        /// <summary>
+        /// Custom event with explicit add/remove accessors.
+        /// Tests: event_declaration (explicit event with accessors)
+        /// </summary>
+        public event EventHandler<DataProcessedEventArgs> CustomEvent
+        {
+            add
+            {
+                _customEvent += value;
+            }
+            remove
+            {
+                _customEvent -= value;
+            }
+        }
 
         /// <summary>
         /// Trigger the data processed event.
@@ -439,6 +467,170 @@ namespace Codanna.Examples.CSharp
                 Data = data,
                 ProcessedAt = DateTime.UtcNow
             });
+            _customEvent?.Invoke(this, new DataProcessedEventArgs
+            {
+                Data = data,
+                ProcessedAt = DateTime.UtcNow
+            });
+        }
+    }
+
+    // === TEST SCENARIO 11: Structs ===
+
+    /// <summary>
+    /// Point struct for coordinate representation.
+    /// Tests: Struct declaration, value type semantics
+    /// </summary>
+    public struct Point
+    {
+        public int X { get; set; }
+        public int Y { get; set; }
+
+        public Point(int x, int y)
+        {
+            X = x;
+            Y = y;
+        }
+
+        /// <summary>
+        /// Calculate distance to another point.
+        /// </summary>
+        public double DistanceTo(Point other)
+        {
+            int dx = X - other.X;
+            int dy = Y - other.Y;
+            return Math.Sqrt(dx * dx + dy * dy);
+        }
+    }
+
+    // === TEST SCENARIO 12: Records ===
+
+    /// <summary>
+    /// Record for immutable person data.
+    /// Tests: Record declaration (C# 9.0+)
+    /// </summary>
+    public record Person(string FirstName, string LastName, int Age)
+    {
+        /// <summary>
+        /// Get the full name.
+        /// </summary>
+        public string FullName => $"{FirstName} {LastName}";
+    }
+
+    /// <summary>
+    /// Record class with additional members.
+    /// </summary>
+    public record Employee(string FirstName, string LastName, int Age, string Department)
+        : Person(FirstName, LastName, Age);
+
+    // === TEST SCENARIO 13: Indexers ===
+
+    /// <summary>
+    /// Collection class with indexer.
+    /// Tests: Indexer declaration
+    /// </summary>
+    public class StringCollection
+    {
+        private string[] _items = new string[100];
+
+        /// <summary>
+        /// Indexer to access items by index.
+        /// Tests: Indexer with get/set
+        /// </summary>
+        public string this[int index]
+        {
+            get { return _items[index]; }
+            set { _items[index] = value; }
+        }
+
+        /// <summary>
+        /// Named indexer for key-based access.
+        /// </summary>
+        public string this[string key]
+        {
+            get { return _items[key.GetHashCode() % 100]; }
+            set { _items[key.GetHashCode() % 100] = value; }
+        }
+    }
+
+    // === TEST SCENARIO 14: Operator Overloading ===
+
+    /// <summary>
+    /// Complex number with operator overloading.
+    /// Tests: Operator declarations
+    /// </summary>
+    public struct Complex
+    {
+        public double Real { get; set; }
+        public double Imaginary { get; set; }
+
+        public Complex(double real, double imaginary)
+        {
+            Real = real;
+            Imaginary = imaginary;
+        }
+
+        /// <summary>
+        /// Addition operator.
+        /// Tests: Binary operator overload
+        /// </summary>
+        public static Complex operator +(Complex a, Complex b)
+        {
+            return new Complex(a.Real + b.Real, a.Imaginary + b.Imaginary);
+        }
+
+        /// <summary>
+        /// Subtraction operator.
+        /// </summary>
+        public static Complex operator -(Complex a, Complex b)
+        {
+            return new Complex(a.Real - b.Real, a.Imaginary - b.Imaginary);
+        }
+
+        /// <summary>
+        /// Implicit conversion from double to Complex.
+        /// Tests: Conversion operator declaration
+        /// </summary>
+        public static implicit operator Complex(double real)
+        {
+            return new Complex(real, 0);
+        }
+
+        /// <summary>
+        /// Explicit conversion from Complex to double.
+        /// </summary>
+        public static explicit operator double(Complex c)
+        {
+            return c.Real;
+        }
+    }
+
+    // === TEST SCENARIO 15: Destructors ===
+
+    /// <summary>
+    /// Resource manager with destructor.
+    /// Tests: Destructor/finalizer declaration
+    /// </summary>
+    public class ResourceManager
+    {
+        private IntPtr _handle;
+
+        public ResourceManager(IntPtr handle)
+        {
+            _handle = handle;
+        }
+
+        /// <summary>
+        /// Destructor/Finalizer.
+        /// Tests: Destructor declaration
+        /// </summary>
+        ~ResourceManager()
+        {
+            // Cleanup resources
+            if (_handle != IntPtr.Zero)
+            {
+                _handle = IntPtr.Zero;
+            }
         }
     }
 }

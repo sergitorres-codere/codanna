@@ -22,6 +22,8 @@ pub struct TypeScriptParser {
     node_tracker: NodeTrackingState,
     /// Track symbols that are default exported (e.g., export default Container)
     default_exported_symbols: std::collections::HashSet<String>,
+    /// Track symbols that are named exported (e.g., export { Card, CardHeader })
+    named_exported_symbols: std::collections::HashSet<String>,
     /// Track JSX component usages (caller -> component name)
     component_usages: Vec<(String, String)>,
 }
@@ -66,9 +68,10 @@ impl TypeScriptParser {
         file_id: FileId,
         symbol_counter: &mut SymbolCounter,
     ) -> Vec<Symbol> {
-        // Reset context and default exports for each file
+        // Reset context and exports for each file
         self.context = ParserContext::new();
         self.default_exported_symbols.clear();
+        self.named_exported_symbols.clear();
         self.component_usages.clear();
         let mut symbols = Vec::new();
 
@@ -103,6 +106,13 @@ impl TypeScriptParser {
             }
         }
 
+        // Update visibility for named exported symbols
+        for symbol in &mut symbols {
+            if self.named_exported_symbols.contains(symbol.name.as_ref()) {
+                symbol.visibility = Visibility::Public;
+            }
+        }
+
         symbols
     }
 
@@ -121,6 +131,7 @@ impl TypeScriptParser {
             context: ParserContext::new(),
             node_tracker: NodeTrackingState::new(),
             default_exported_symbols: std::collections::HashSet::new(),
+            named_exported_symbols: std::collections::HashSet::new(),
             component_usages: Vec::new(),
         })
     }
@@ -370,6 +381,23 @@ impl TypeScriptParser {
                                     .insert(symbol_name.to_string());
                                 if crate::config::is_global_debug_enabled() {
                                     eprintln!("DEBUG: Found default export of '{symbol_name}'");
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Check for named export lists (export { Card, CardHeader })
+                for child in &children {
+                    if child.kind() == "export_clause" {
+                        // Process export specifiers within the export clause
+                        let mut export_cursor = child.walk();
+                        for export_child in child.children(&mut export_cursor) {
+                            if export_child.kind() == "export_specifier" {
+                                // Get the name being exported
+                                if let Some(name_node) = export_child.child_by_field_name("name") {
+                                    let symbol_name = &code[name_node.byte_range()];
+                                    self.named_exported_symbols.insert(symbol_name.to_string());
                                 }
                             }
                         }
@@ -1618,6 +1646,33 @@ impl TypeScriptParser {
                                         if p.kind() == "variable_declarator" {
                                             if let Some(name_node) = p.child_by_field_name("name") {
                                                 ctx = Some(&code[name_node.byte_range()]);
+                                                break;
+                                            }
+                                        } else if p.kind() == "pair" {
+                                            // Handle object property: { propertyName: () => { ... } }
+                                            // Look for the parent object's variable name
+                                            let mut obj_anc = p.parent();
+                                            while let Some(oa) = obj_anc {
+                                                if oa.kind() == "object" {
+                                                    // Found the object, now find its variable declarator
+                                                    if let Some(obj_parent) = oa.parent() {
+                                                        if obj_parent.kind()
+                                                            == "variable_declarator"
+                                                        {
+                                                            if let Some(name_node) = obj_parent
+                                                                .child_by_field_name("name")
+                                                            {
+                                                                ctx = Some(
+                                                                    &code[name_node.byte_range()],
+                                                                );
+                                                                break;
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                obj_anc = oa.parent();
+                                            }
+                                            if ctx.is_some() {
                                                 break;
                                             }
                                         }

@@ -34,6 +34,19 @@ impl IndexPersistence {
 
         metadata.update_counts(indexer.symbol_count() as u32, indexer.file_count());
 
+        // Update indexed paths for sync detection on next load
+        let indexed_paths: Vec<PathBuf> = indexer.get_indexed_paths().iter().cloned().collect();
+        if indexer.settings().debug {
+            eprintln!(
+                "DEBUG: Saving {} indexed paths to metadata",
+                indexed_paths.len()
+            );
+            for path in &indexed_paths {
+                eprintln!("  - {}", path.display());
+            }
+        }
+        metadata.update_indexed_paths(indexed_paths);
+
         // Update metadata to reflect Tantivy
         metadata.data_source = DataSource::Tantivy {
             path: self.base_path.join("tantivy"),
@@ -44,7 +57,11 @@ impl IndexPersistence {
         metadata.save(&self.base_path)?;
 
         // Update project registry with latest metadata
-        self.update_project_registry(&metadata)?;
+        if let Err(err) = self.update_project_registry(&metadata) {
+            eprintln!(
+                "Note: Skipped project registry update ({err}). The index itself was saved successfully; registry metadata will refresh once permissions allow writing to ~/.codanna."
+            );
+        }
 
         // Save semantic search if enabled
         if indexer.has_semantic_search() {
@@ -103,7 +120,7 @@ impl IndexPersistence {
             };
 
             // Display source info with fresh counts
-            if let Some(meta) = metadata {
+            if let Some(ref meta) = metadata {
                 // Get fresh counts from the actual index
                 let fresh_symbol_count = indexer.symbol_count();
                 let fresh_file_count = indexer.file_count();
@@ -153,6 +170,29 @@ impl IndexPersistence {
                 Err(e) => {
                     // Log error but continue - semantic search is optional
                     eprintln!("Warning: Failed to load semantic search: {e}");
+                }
+            }
+
+            // Restore indexed_paths from metadata to the indexer
+            if let Some(ref meta) = metadata {
+                if let Some(ref stored_paths) = meta.indexed_paths {
+                    for path in stored_paths {
+                        if let Err(e) = indexer.add_indexed_path(path) {
+                            if debug {
+                                eprintln!(
+                                    "DEBUG: Failed to restore indexed path {}: {}",
+                                    path.display(),
+                                    e
+                                );
+                            }
+                        }
+                    }
+                    if info || debug {
+                        eprintln!(
+                            "DEBUG: Restored {} indexed paths from metadata",
+                            stored_paths.len()
+                        );
+                    }
                 }
             }
 
