@@ -11,7 +11,6 @@ use std::path::{Path, PathBuf};
 #[derive(RustEmbed)]
 #[folder = ".claude/"]
 #[exclude = "settings.local.json"]
-#[exclude = "README.md"]
 #[exclude = ".gitignore"]
 #[exclude = "*.swp"]
 #[exclude = "*~"]

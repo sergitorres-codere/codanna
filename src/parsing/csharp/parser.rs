@@ -696,6 +696,50 @@ impl CSharpParser {
     /// Extract variable signature
     fn extract_variable_signature(&self, node: Node, code: &str) -> String {
         // Variables are declared like "int x = 5;" or "var name = value;"
+        // Try to infer the type from the declaration
+
+        // Check if this is a variable_declarator (the actual variable, not the declaration)
+        let var_node = if node.kind() == "variable_declarator" {
+            node
+        } else {
+            // If it's a variable_declaration, find the first variable_declarator
+            let mut cursor = node.walk();
+            if let Some(declarator) = node.children(&mut cursor).find(|n| n.kind() == "variable_declarator") {
+                declarator
+            } else {
+                return code[node.byte_range()].trim().to_string();
+            }
+        };
+
+        // Try to extract type from initializer expression
+        let mut sub_cursor = var_node.walk();
+        for vchild in var_node.children(&mut sub_cursor) {
+            match vchild.kind() {
+                "object_creation_expression"
+                | "invocation_expression"
+                | "element_access_expression"
+                | "conditional_expression" => {
+                    if let Some(type_name) = self.extract_type_from_initializer(&vchild, code) {
+                        return type_name.to_string();
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // Fallback: try to get explicit type from parent variable_declaration
+        if let Some(parent) = var_node.parent() {
+            if parent.kind() == "variable_declaration" {
+                if let Some(type_node) = parent.child_by_field_name("type") {
+                    let type_str = &code[type_node.byte_range()];
+                    if type_str != "var" {
+                        return type_str.to_string();
+                    }
+                }
+            }
+        }
+
+        // Final fallback: return the whole declaration
         code[node.byte_range()].trim().to_string()
     }
 
@@ -2059,7 +2103,7 @@ impl CSharpParser {
             if child.kind() == "variable_declarator" {
                 if let Some(name_node) = child.child_by_field_name("name") {
                     let name = code[name_node.byte_range()].to_string();
-                    let signature = self.extract_variable_signature(node, code);
+                    let signature = self.extract_variable_signature(child, code);
                     let doc_comment = self.extract_doc_comment(&node, code);
 
                     let symbol = self.create_symbol(
@@ -2456,5 +2500,231 @@ mod tests {
                 .any(|i| i.path == "System.Collections.Generic")
         );
         assert!(imports.iter().any(|i| i.path == "MyApp.Services"));
+    }
+
+    #[test]
+    fn test_csharp_var_type_inference_from_method_call() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class Service {
+                private Helper GetHelper() {
+                    return new Helper();
+                }
+
+                public void Process() {
+                    var helper = GetHelper();
+                    helper.DoSomething();
+                }
+            }
+
+            public class Helper {
+                public void DoSomething() { }
+            }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        // Debug: print all symbols
+        println!("Total symbols: {}", symbols.len());
+        for s in &symbols {
+            println!("  {:?} '{}' sig={:?}", s.kind, s.name, s.signature);
+        }
+
+        // Should infer that 'helper' variable has type 'Helper' from GetHelper() method name
+        let bindings: Vec<_> = symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Variable)
+            .map(|s| (s.name.as_ref(), s.signature.as_deref()))
+            .collect();
+
+        assert!(
+            bindings
+                .iter()
+                .any(|(name, typ)| *name == "helper" && *typ == Some("Helper")),
+            "Should infer helper variable as type Helper from GetHelper() method. Found bindings: {:?}",
+            bindings
+        );
+    }
+
+    #[test]
+    fn test_csharp_var_type_inference_from_create_method() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class Factory {
+                public User CreateUser() {
+                    return new User();
+                }
+
+                public void Initialize() {
+                    var user = CreateUser();
+                    user.Save();
+                }
+            }
+
+            public class User {
+                public void Save() { }
+            }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        // Should infer that 'user' variable has type 'User' from CreateUser() method name
+        let bindings: Vec<_> = symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Variable)
+            .map(|s| (s.name.as_ref(), s.signature.as_deref()))
+            .collect();
+
+        assert!(
+            bindings
+                .iter()
+                .any(|(name, typ)| *name == "user" && *typ == Some("User")),
+            "Should infer user variable as type User from CreateUser() method. Found bindings: {:?}",
+            bindings
+        );
+    }
+
+    #[test]
+    fn test_csharp_var_type_inference_from_indexer() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class Repository {
+                public void Process() {
+                    var users = new List<User>();
+                    var firstUser = users[0];
+                    firstUser.Save();
+                }
+            }
+
+            public class User {
+                public void Save() { }
+            }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        // Should infer that 'firstUser' has type 'user' (singularized from 'users')
+        let bindings: Vec<_> = symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Variable)
+            .map(|s| (s.name.as_ref(), s.signature.as_deref()))
+            .collect();
+
+        assert!(
+            bindings
+                .iter()
+                .any(|(name, typ)| *name == "firstUser" && *typ == Some("user")),
+            "Should infer firstUser variable from collection indexer. Found bindings: {:?}",
+            bindings
+        );
+    }
+
+    #[test]
+    fn test_csharp_var_type_inference_from_ternary() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class Manager {
+                public void Handle(bool condition) {
+                    var handler = condition ? new Helper() : new Helper();
+                    handler.Process();
+                }
+            }
+
+            public class Helper {
+                public void Process() { }
+            }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        // Should infer that 'handler' has type 'Helper' from ternary expression
+        let bindings: Vec<_> = symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Variable)
+            .map(|s| (s.name.as_ref(), s.signature.as_deref()))
+            .collect();
+
+        assert!(
+            bindings
+                .iter()
+                .any(|(name, typ)| *name == "handler" && *typ == Some("Helper")),
+            "Should infer handler variable from ternary expression. Found bindings: {:?}",
+            bindings
+        );
+    }
+
+    #[test]
+    fn test_csharp_var_type_inference_multiple_patterns() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class MultiTest {
+                private Service GetService() { return new Service(); }
+                private Connection BuildConnection() { return new Connection(); }
+
+                public void Execute() {
+                    var obj1 = new Helper();
+                    var obj2 = GetService();
+                    var obj3 = BuildConnection();
+                    var items = new List<Item>();
+                    var firstItem = items[0];
+                    var selected = true ? new Helper() : new Helper();
+                }
+            }
+
+            public class Helper { }
+            public class Service { }
+            public class Connection { }
+            public class Item { }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        let bindings: Vec<_> = symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Variable)
+            .map(|s| (s.name.as_ref(), s.signature.as_deref()))
+            .collect();
+
+        // Test all inference patterns
+        assert!(
+            bindings
+                .iter()
+                .any(|(name, typ)| *name == "obj1" && *typ == Some("Helper")),
+            "Should infer obj1 from object creation"
+        );
+        assert!(
+            bindings
+                .iter()
+                .any(|(name, typ)| *name == "obj2" && *typ == Some("Service")),
+            "Should infer obj2 from GetService() method"
+        );
+        assert!(
+            bindings
+                .iter()
+                .any(|(name, typ)| *name == "obj3" && *typ == Some("Connection")),
+            "Should infer obj3 from BuildConnection() method"
+        );
+        assert!(
+            bindings
+                .iter()
+                .any(|(name, typ)| *name == "firstItem" && *typ == Some("item")),
+            "Should infer firstItem from indexer"
+        );
+        assert!(
+            bindings
+                .iter()
+                .any(|(name, typ)| *name == "selected" && *typ == Some("Helper")),
+            "Should infer selected from ternary expression"
+        );
     }
 }
