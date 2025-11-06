@@ -5,7 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.6.9] - 2025-11-03
+## [0.6.9] - 2025-11-05
+
+### Added
+
+- TypeScript JSX component usage tracking with find_uses extraction
+- Symbol name to ID mapping during extraction phase for TypeScript
+- Test suite for JSX component relationship tracking (test_jsx_uses.rs)
+- Indexed paths cache in Settings for O(1) ancestor checks
+- Path deduplication in Settings to skip children when parent exists and replace children when adding parent
+- Path deduplication in SimpleIndexer to remove descendant paths when adding ancestor
 
 ### Fixed
 
@@ -20,6 +29,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sync state tracking changed from boolean to `Option<bool>` to distinguish metadata unavailable (None), no changes (Some(false)), and changes applied (Some(true))
 - Single-file paths in `codanna index` are now skipped with clear message instead of attempting to add to settings
 - File removal during sync now shows progress bar for multiple files
+- Settings::add_indexed_path now deduplicates paths and manages parent-child relationships
+- add_relationships_by_name now accepts optional from_id parameter to skip lookups when symbol ID is known
+- resolve_relationships skips lookups when from_id exists in TypeScript parser
+- Index command now reuses cached results and prints skip messages for already-indexed paths
+
+### Documentation
+
+- Added profiles feature documentation with examples
+- Updated README with profiles configuration details
+- Updated cli-reference.md with idempotent indexing behavior and skip messages
 
 ## [0.6.8] - 2025-11-03
 
