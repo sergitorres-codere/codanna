@@ -2222,22 +2222,20 @@ impl LanguageParser for CSharpParser {
         uses
     }
 
-    fn find_defines<'a>(&mut self, _code: &'a str) -> Vec<(&'a str, &'a str, Range)> {
-        // TODO: Implement proper defines tracking for C#
-        //
-        // This should track definition relationships, for example:
-        // - Variable definitions: `var x = 5;` → (containing_method, "x", range)
-        // - Field definitions: `private int _count;` → (containing_class, "_count", range)
-        // - Property definitions: `public string Name { get; set; }` → (containing_class, "Name", range)
-        //
-        // Previously disabled because it was using node.kind() instead of actual definer names,
-        // creating relationships like "variable_declaration defines x" instead of "Method defines x".
-        //
-        // Implementation approach:
-        // 1. Track current scope context (class, method, etc.)
-        // 2. For each definition, extract (definer_name, defined_symbol, range)
-        // 3. Ensure definer_name is the actual symbol name, not AST node type
-        Vec::new()
+    fn find_defines<'a>(&mut self, code: &'a str) -> Vec<(&'a str, &'a str, Range)> {
+        let mut defines = Vec::new();
+
+        match self.parser.parse(code, None) {
+            Some(tree) => {
+                let root_node = tree.root_node();
+                Self::extract_defines_from_node(root_node, code, &mut defines, None, None);
+            }
+            None => {
+                eprintln!("Failed to parse C# file for defines");
+            }
+        }
+
+        defines
     }
 
     /// Extract variable type bindings from C# code
@@ -2621,6 +2619,299 @@ impl CSharpParser {
                 | "dynamic"
                 | "var"
         )
+    }
+
+    /// Recursively extract definition relationships from AST
+    ///
+    /// Tracks containment relationships:
+    /// - Class defines method: `("UserService", "GetUser", range)`
+    /// - Class defines field: `("UserService", "_repository", range)`
+    /// - Class defines property: `("UserService", "CurrentUser", range)`
+    /// - Method defines variable: `("GetUser", "result", range)`
+    ///
+    /// # Parameters
+    /// - `node`: Current AST node being processed
+    /// - `code`: Source code string
+    /// - `defines`: Output vector for (definer, defined, range) tuples
+    /// - `current_class`: Name of the class we're currently inside (if any)
+    /// - `current_method`: Name of the method we're currently inside (if any)
+    fn extract_defines_from_node<'a>(
+        node: Node,
+        code: &'a str,
+        defines: &mut Vec<(&'a str, &'a str, Range)>,
+        current_class: Option<&'a str>,
+        current_method: Option<&'a str>,
+    ) {
+        match node.kind() {
+            // Track class/struct/record declarations as definers
+            "class_declaration" | "struct_declaration" | "record_declaration" => {
+                let class_name = Self::find_identifier_child(node, code);
+
+                if let Some(class_name) = class_name {
+                    // Find all members defined by this class
+                    // Members are inside the declaration_list child
+                    let mut cursor = node.walk();
+                    for child in node.children(&mut cursor) {
+                        if child.kind() == "declaration_list" {
+                            // Now iterate the members inside declaration_list
+                            let mut decl_cursor = child.walk();
+                            for member in child.children(&mut decl_cursor) {
+                                match member.kind() {
+                                    "method_declaration" | "constructor_declaration" => {
+                                        if let Some(method_name) = member
+                                            .child_by_field_name("name")
+                                            .map(|n| &code[n.byte_range()])
+                                        {
+                                            let range = Range::new(
+                                                member.start_position().row as u32,
+                                                member.start_position().column as u16,
+                                                member.end_position().row as u32,
+                                                member.end_position().column as u16,
+                                            );
+                                            defines.push((class_name, method_name, range));
+                                        }
+                                    }
+                                    "field_declaration" => {
+                                        // field_declaration contains variable_declaration with variable_declarator children
+                                        Self::extract_field_names(
+                                            &member, code, class_name, defines,
+                                        );
+                                    }
+                                    "property_declaration" => {
+                                        if let Some(prop_name) = member
+                                            .child_by_field_name("name")
+                                            .map(|n| &code[n.byte_range()])
+                                        {
+                                            let range = Range::new(
+                                                member.start_position().row as u32,
+                                                member.start_position().column as u16,
+                                                member.end_position().row as u32,
+                                                member.end_position().column as u16,
+                                            );
+                                            defines.push((class_name, prop_name, range));
+                                        }
+                                    }
+                                    "event_declaration" => {
+                                        if let Some(event_name) = member
+                                            .child_by_field_name("name")
+                                            .map(|n| &code[n.byte_range()])
+                                        {
+                                            let range = Range::new(
+                                                member.start_position().row as u32,
+                                                member.start_position().column as u16,
+                                                member.end_position().row as u32,
+                                                member.end_position().column as u16,
+                                            );
+                                            defines.push((class_name, event_name, range));
+                                        }
+                                    }
+                                    "event_field_declaration" => {
+                                        // Similar to field_declaration, contains variable_declaration
+                                        Self::extract_field_names(
+                                            &member, code, class_name, defines,
+                                        );
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+
+                    // Recursively process children with updated class context
+                    let mut cursor = node.walk();
+                    for child in node.children(&mut cursor) {
+                        Self::extract_defines_from_node(
+                            child,
+                            code,
+                            defines,
+                            Some(class_name),
+                            None,
+                        );
+                    }
+                } else {
+                    // No class name found, continue recursively
+                    let mut cursor = node.walk();
+                    for child in node.children(&mut cursor) {
+                        Self::extract_defines_from_node(
+                            child,
+                            code,
+                            defines,
+                            current_class,
+                            current_method,
+                        );
+                    }
+                }
+            }
+
+            // Track interface declarations
+            "interface_declaration" => {
+                let interface_name = Self::find_identifier_child(node, code);
+
+                if let Some(interface_name) = interface_name {
+                    // Find all methods defined by this interface
+                    // Methods are inside the declaration_list child
+                    let mut cursor = node.walk();
+                    for child in node.children(&mut cursor) {
+                        if child.kind() == "declaration_list" {
+                            let mut decl_cursor = child.walk();
+                            for member in child.children(&mut decl_cursor) {
+                                if member.kind() == "method_declaration" {
+                                    if let Some(method_name) = member
+                                        .child_by_field_name("name")
+                                        .map(|n| &code[n.byte_range()])
+                                    {
+                                        let range = Range::new(
+                                            member.start_position().row as u32,
+                                            member.start_position().column as u16,
+                                            member.end_position().row as u32,
+                                            member.end_position().column as u16,
+                                        );
+                                        defines.push((interface_name, method_name, range));
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Recursively process children
+                    let mut cursor = node.walk();
+                    for child in node.children(&mut cursor) {
+                        Self::extract_defines_from_node(
+                            child,
+                            code,
+                            defines,
+                            Some(interface_name),
+                            None,
+                        );
+                    }
+                } else {
+                    // No interface name found, continue recursively
+                    let mut cursor = node.walk();
+                    for child in node.children(&mut cursor) {
+                        Self::extract_defines_from_node(
+                            child,
+                            code,
+                            defines,
+                            current_class,
+                            current_method,
+                        );
+                    }
+                }
+            }
+
+            // Track method declarations as definers of local variables
+            "method_declaration" | "constructor_declaration" | "local_function_statement" => {
+                let method_name = node
+                    .child_by_field_name("name")
+                    .map(|n| &code[n.byte_range()]);
+
+                // Process method body to find local variable definitions
+                if let Some(method_name) = method_name {
+                    let mut cursor = node.walk();
+                    for child in node.children(&mut cursor) {
+                        Self::extract_defines_from_node(
+                            child,
+                            code,
+                            defines,
+                            current_class,
+                            Some(method_name),
+                        );
+                    }
+                } else {
+                    // No method name, continue recursively
+                    let mut cursor = node.walk();
+                    for child in node.children(&mut cursor) {
+                        Self::extract_defines_from_node(
+                            child,
+                            code,
+                            defines,
+                            current_class,
+                            current_method,
+                        );
+                    }
+                }
+            }
+
+            // Track local variable declarations
+            "local_declaration_statement" => {
+                if let Some(definer) = current_method.or(current_class) {
+                    // Look for variable_declaration child
+                    let mut cursor = node.walk();
+                    for child in node.children(&mut cursor) {
+                        if child.kind() == "variable_declaration" {
+                            Self::extract_variable_names(&child, code, definer, defines);
+                        }
+                    }
+                }
+
+                // Continue processing children
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    Self::extract_defines_from_node(
+                        child,
+                        code,
+                        defines,
+                        current_class,
+                        current_method,
+                    );
+                }
+            }
+
+            // Recursively process all other nodes
+            _ => {
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    Self::extract_defines_from_node(
+                        child,
+                        code,
+                        defines,
+                        current_class,
+                        current_method,
+                    );
+                }
+            }
+        }
+    }
+
+    /// Extract field names from field_declaration or event_field_declaration
+    fn extract_field_names<'a>(
+        field_decl: &Node,
+        code: &'a str,
+        class_name: &'a str,
+        defines: &mut Vec<(&'a str, &'a str, Range)>,
+    ) {
+        let mut cursor = field_decl.walk();
+        for child in field_decl.children(&mut cursor) {
+            if child.kind() == "variable_declaration" {
+                Self::extract_variable_names(&child, code, class_name, defines);
+            }
+        }
+    }
+
+    /// Extract variable names from variable_declaration
+    fn extract_variable_names<'a>(
+        var_decl: &Node,
+        code: &'a str,
+        definer: &'a str,
+        defines: &mut Vec<(&'a str, &'a str, Range)>,
+    ) {
+        let mut cursor = var_decl.walk();
+        for child in var_decl.children(&mut cursor) {
+            if child.kind() == "variable_declarator" {
+                if let Some(name_node) = child.child_by_field_name("name") {
+                    if name_node.kind() == "identifier" {
+                        let var_name = &code[name_node.byte_range()];
+                        let range = Range::new(
+                            child.start_position().row as u32,
+                            child.start_position().column as u16,
+                            child.end_position().row as u32,
+                            child.end_position().column as u16,
+                        );
+                        defines.push((definer, var_name, range));
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -3855,6 +4146,482 @@ class UserRepository : BaseRepository, IRepository {
                 .any(|(user, used, _)| *user == "GetUser" && *used == "UserId"),
             "Should find UserId parameter. Found: {:?}",
             uses
+        );
+    }
+
+    #[test]
+    fn test_csharp_find_defines_class_methods() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+class UserService {
+    public void GetUser() {
+        // method body
+    }
+
+    private bool ValidateUser() {
+        return true;
+    }
+}
+"#;
+
+        let defines = parser.find_defines(code);
+
+        // Should find class defines methods
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "UserService" && *defined == "GetUser"),
+            "Should find UserService defines GetUser. Found: {:?}",
+            defines
+        );
+        assert!(
+            defines.iter().any(
+                |(definer, defined, _)| *definer == "UserService" && *defined == "ValidateUser"
+            ),
+            "Should find UserService defines ValidateUser. Found: {:?}",
+            defines
+        );
+    }
+
+    #[test]
+    fn test_csharp_find_defines_class_fields() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+class UserService {
+    private IRepository _repository;
+    private Logger _logger;
+    public int count;
+}
+"#;
+
+        let defines = parser.find_defines(code);
+
+        // Should find class defines fields
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "UserService"
+                    && *defined == "_repository"),
+            "Should find UserService defines _repository. Found: {:?}",
+            defines
+        );
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "UserService" && *defined == "_logger"),
+            "Should find UserService defines _logger. Found: {:?}",
+            defines
+        );
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "UserService" && *defined == "count"),
+            "Should find UserService defines count. Found: {:?}",
+            defines
+        );
+    }
+
+    #[test]
+    fn test_csharp_find_defines_class_properties() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+class UserService {
+    public User CurrentUser { get; set; }
+    private string Name { get; }
+    public int Count { get; set; }
+}
+"#;
+
+        let defines = parser.find_defines(code);
+
+        // Should find class defines properties
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "UserService"
+                    && *defined == "CurrentUser"),
+            "Should find UserService defines CurrentUser. Found: {:?}",
+            defines
+        );
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "UserService" && *defined == "Name"),
+            "Should find UserService defines Name. Found: {:?}",
+            defines
+        );
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "UserService" && *defined == "Count"),
+            "Should find UserService defines Count. Found: {:?}",
+            defines
+        );
+    }
+
+    #[test]
+    fn test_csharp_find_defines_class_events() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+class UserService {
+    public event EventHandler UserAdded;
+    public event Action<User> UserUpdated;
+    private event DataChangedHandler _dataChanged;
+}
+"#;
+
+        let defines = parser.find_defines(code);
+
+        // Should find class defines events
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "UserService" && *defined == "UserAdded"),
+            "Should find UserService defines UserAdded. Found: {:?}",
+            defines
+        );
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "UserService"
+                    && *defined == "UserUpdated"),
+            "Should find UserService defines UserUpdated. Found: {:?}",
+            defines
+        );
+        assert!(
+            defines.iter().any(
+                |(definer, defined, _)| *definer == "UserService" && *defined == "_dataChanged"
+            ),
+            "Should find UserService defines _dataChanged. Found: {:?}",
+            defines
+        );
+    }
+
+    #[test]
+    fn test_csharp_find_defines_interface_methods() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+interface IRepository {
+    User Get(int id);
+    void Save(User user);
+    void Delete(int id);
+}
+"#;
+
+        let defines = parser.find_defines(code);
+
+        // Should find interface defines methods
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "IRepository" && *defined == "Get"),
+            "Should find IRepository defines Get. Found: {:?}",
+            defines
+        );
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "IRepository" && *defined == "Save"),
+            "Should find IRepository defines Save. Found: {:?}",
+            defines
+        );
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "IRepository" && *defined == "Delete"),
+            "Should find IRepository defines Delete. Found: {:?}",
+            defines
+        );
+    }
+
+    #[test]
+    fn test_csharp_find_defines_method_variables() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+class UserService {
+    public void ProcessUser() {
+        var user = GetUser();
+        string name = "test";
+        int count = 0;
+    }
+}
+"#;
+
+        let defines = parser.find_defines(code);
+
+        // Should find method defines local variables
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "ProcessUser" && *defined == "user"),
+            "Should find ProcessUser defines user. Found: {:?}",
+            defines
+        );
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "ProcessUser" && *defined == "name"),
+            "Should find ProcessUser defines name. Found: {:?}",
+            defines
+        );
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "ProcessUser" && *defined == "count"),
+            "Should find ProcessUser defines count. Found: {:?}",
+            defines
+        );
+    }
+
+    #[test]
+    fn test_csharp_find_defines_struct_members() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+struct Point {
+    public double X;
+    public double Y;
+
+    public double Distance() {
+        return 0.0;
+    }
+}
+"#;
+
+        let defines = parser.find_defines(code);
+
+        // Should find struct defines fields and methods
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "Point" && *defined == "X"),
+            "Should find Point defines X. Found: {:?}",
+            defines
+        );
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "Point" && *defined == "Y"),
+            "Should find Point defines Y. Found: {:?}",
+            defines
+        );
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "Point" && *defined == "Distance"),
+            "Should find Point defines Distance. Found: {:?}",
+            defines
+        );
+    }
+
+    #[test]
+    fn test_csharp_find_defines_record_members() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+record Person(string Name, int Age) {
+    public string GetGreeting() {
+        return "Hello";
+    }
+}
+"#;
+
+        let defines = parser.find_defines(code);
+
+        // Should find record defines method (parameters are not tracked as fields in this context)
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "Person" && *defined == "GetGreeting"),
+            "Should find Person defines GetGreeting. Found: {:?}",
+            defines
+        );
+    }
+
+    #[test]
+    fn test_csharp_find_defines_constructor() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+class UserService {
+    public UserService(IRepository repo) {
+        var initialized = true;
+    }
+}
+"#;
+
+        let defines = parser.find_defines(code);
+
+        // Should find class defines constructor
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "UserService"
+                    && *defined == "UserService"),
+            "Should find UserService defines UserService constructor. Found: {:?}",
+            defines
+        );
+
+        // Constructor should also define local variables
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "UserService"
+                    && *defined == "initialized"),
+            "Should find UserService constructor defines initialized. Found: {:?}",
+            defines
+        );
+    }
+
+    #[test]
+    fn test_csharp_find_defines_multiple_variables() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+class DataService {
+    private int _count, _total, _average;
+
+    public void Calculate() {
+        var x = 1, y = 2, z = 3;
+    }
+}
+"#;
+
+        let defines = parser.find_defines(code);
+
+        // Should find all field declarations
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "DataService" && *defined == "_count"),
+            "Should find DataService defines _count. Found: {:?}",
+            defines
+        );
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "DataService" && *defined == "_total"),
+            "Should find DataService defines _total. Found: {:?}",
+            defines
+        );
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "DataService" && *defined == "_average"),
+            "Should find DataService defines _average. Found: {:?}",
+            defines
+        );
+
+        // Should find all local variable declarations
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "Calculate" && *defined == "x"),
+            "Should find Calculate defines x. Found: {:?}",
+            defines
+        );
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "Calculate" && *defined == "y"),
+            "Should find Calculate defines y. Found: {:?}",
+            defines
+        );
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "Calculate" && *defined == "z"),
+            "Should find Calculate defines z. Found: {:?}",
+            defines
+        );
+    }
+
+    #[test]
+    fn test_csharp_find_defines_complex_scenario() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+interface IRepository {
+    User Get(int id);
+}
+
+class UserRepository : IRepository {
+    private DbContext _context;
+    public Logger Logger { get; set; }
+    public event EventHandler DataChanged;
+
+    public UserRepository(DbContext context) {
+        _context = context;
+    }
+
+    public User Get(int id) {
+        var result = _context.Users.Find(id);
+        return result;
+    }
+}
+"#;
+
+        let defines = parser.find_defines(code);
+
+        // Interface defines method
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "IRepository" && *defined == "Get"),
+            "Should find IRepository defines Get. Found: {:?}",
+            defines
+        );
+
+        // Class defines field
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "UserRepository"
+                    && *defined == "_context"),
+            "Should find UserRepository defines _context. Found: {:?}",
+            defines
+        );
+
+        // Class defines property
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "UserRepository" && *defined == "Logger"),
+            "Should find UserRepository defines Logger. Found: {:?}",
+            defines
+        );
+
+        // Class defines event
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "UserRepository"
+                    && *defined == "DataChanged"),
+            "Should find UserRepository defines DataChanged. Found: {:?}",
+            defines
+        );
+
+        // Class defines constructor
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "UserRepository"
+                    && *defined == "UserRepository"),
+            "Should find UserRepository defines constructor. Found: {:?}",
+            defines
+        );
+
+        // Class defines method
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "UserRepository" && *defined == "Get"),
+            "Should find UserRepository defines Get. Found: {:?}",
+            defines
+        );
+
+        // Method defines local variable
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "Get" && *defined == "result"),
+            "Should find Get defines result. Found: {:?}",
+            defines
         );
     }
 }
