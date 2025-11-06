@@ -2362,17 +2362,56 @@ impl CSharpParser {
     ) {
         if let Some(type_name) = self.extract_simple_type_name_for_uses(type_node, code) {
             // Filter out C# primitive types
-            if self.is_primitive_type(type_name) {
-                return;
+            if !self.is_primitive_type(type_name) {
+                let range = Range::new(
+                    type_node.start_position().row as u32,
+                    type_node.start_position().column as u16,
+                    type_node.end_position().row as u32,
+                    type_node.end_position().column as u16,
+                );
+                uses.push((context_name, type_name, range));
             }
+        }
 
-            let range = Range::new(
-                type_node.start_position().row as u32,
-                type_node.start_position().column as u16,
-                type_node.end_position().row as u32,
-                type_node.end_position().column as u16,
-            );
-            uses.push((context_name, type_name, range));
+        // For generic types, also extract type arguments
+        // This handles cases like Dictionary<string, List<int>> where we want to track:
+        // - Dictionary (base type - already tracked above)
+        // - List (nested generic type argument)
+        // Note: We skip primitive type arguments like string, int, etc.
+        if type_node.kind() == "generic_name" {
+            self.extract_generic_type_arguments(type_node, code, context_name, uses);
+        }
+    }
+
+    /// Recursively extract type arguments from generic types
+    /// For Dictionary<string, List<int>>, this extracts List (and recursively any nested generics)
+    fn extract_generic_type_arguments<'a>(
+        &self,
+        generic_node: &Node,
+        code: &'a str,
+        context_name: &'a str,
+        uses: &mut Vec<(&'a str, &'a str, Range)>,
+    ) {
+        // Search for type_argument_list among children
+        let mut cursor = generic_node.walk();
+        for child in generic_node.children(&mut cursor) {
+            if child.kind() == "type_argument_list" {
+                // Process each type argument in the list
+                let mut arg_cursor = child.walk();
+                for arg in child.children(&mut arg_cursor) {
+                    // Process each type argument recursively
+                    // This handles nested generics like List<int> inside Dictionary<string, List<int>>
+                    match arg.kind() {
+                        "identifier" | "generic_name" | "qualified_name" | "array_type"
+                        | "nullable_type" | "predefined_type" => {
+                            // Recursively extract this type and any nested generics
+                            self.extract_type_from_node(&arg, code, context_name, uses);
+                        }
+                        _ => {}
+                    }
+                }
+                break; // Found the type_argument_list, no need to continue
+            }
         }
     }
 
@@ -3200,6 +3239,146 @@ mod tests {
             "Should detect Container uses List (base type of generic). Found: {:?}",
             uses
         );
+    }
+
+    #[test]
+    fn test_csharp_find_uses_generic_type_arguments() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class Item { }
+
+            public class Container {
+                private List<Item> _items;
+            }
+        "#;
+
+        let uses = parser.find_uses(code);
+
+        // Should extract both List (base type) and Item (type argument)
+        assert!(
+            uses.iter()
+                .any(|(context, typ, _)| *context == "Container" && *typ == "List"),
+            "Should detect Container uses List (base generic type). Found: {:?}",
+            uses
+        );
+        assert!(
+            uses.iter()
+                .any(|(context, typ, _)| *context == "Container" && *typ == "Item"),
+            "Should detect Container uses Item (generic type argument). Found: {:?}",
+            uses
+        );
+    }
+
+    #[test]
+    fn test_csharp_find_uses_nested_generic_types() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class Key { }
+            public class Value { }
+
+            public class Cache {
+                private Dictionary<Key, List<Value>> _cache;
+            }
+        "#;
+
+        let uses = parser.find_uses(code);
+
+        // Should extract Dictionary, List, Key, and Value
+        assert!(
+            uses.iter()
+                .any(|(context, typ, _)| *context == "Cache" && *typ == "Dictionary"),
+            "Should detect Cache uses Dictionary. Found: {:?}",
+            uses
+        );
+        assert!(
+            uses.iter()
+                .any(|(context, typ, _)| *context == "Cache" && *typ == "List"),
+            "Should detect Cache uses List (nested generic). Found: {:?}",
+            uses
+        );
+        assert!(
+            uses.iter()
+                .any(|(context, typ, _)| *context == "Cache" && *typ == "Key"),
+            "Should detect Cache uses Key (type argument). Found: {:?}",
+            uses
+        );
+        assert!(
+            uses.iter()
+                .any(|(context, typ, _)| *context == "Cache" && *typ == "Value"),
+            "Should detect Cache uses Value (nested type argument). Found: {:?}",
+            uses
+        );
+    }
+
+    #[test]
+    fn test_csharp_find_uses_generic_types_filter_primitives() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class DataStore {
+                private Dictionary<string, int> _data;
+                private List<bool> _flags;
+            }
+        "#;
+
+        let uses = parser.find_uses(code);
+
+        // Should extract Dictionary and List but NOT string, int, or bool (primitives)
+        assert!(
+            uses.iter()
+                .any(|(context, typ, _)| *context == "DataStore" && *typ == "Dictionary"),
+            "Should detect DataStore uses Dictionary. Found: {:?}",
+            uses
+        );
+        assert!(
+            uses.iter()
+                .any(|(context, typ, _)| *context == "DataStore" && *typ == "List"),
+            "Should detect DataStore uses List. Found: {:?}",
+            uses
+        );
+        assert!(
+            !uses.iter().any(|(_, typ, _)| *typ == "string"),
+            "Should NOT track primitive type 'string'. Found: {:?}",
+            uses
+        );
+        assert!(
+            !uses.iter().any(|(_, typ, _)| *typ == "int"),
+            "Should NOT track primitive type 'int'. Found: {:?}",
+            uses
+        );
+        assert!(
+            !uses.iter().any(|(_, typ, _)| *typ == "bool"),
+            "Should NOT track primitive type 'bool'. Found: {:?}",
+            uses
+        );
+    }
+
+    #[test]
+    fn test_csharp_find_uses_complex_nested_generics() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class User { }
+            public class Permission { }
+            public class Role { }
+
+            public class SecurityManager {
+                // Deeply nested generic: Dictionary<User, Dictionary<Role, List<Permission>>>
+                private Dictionary<User, Dictionary<Role, List<Permission>>> _permissions;
+            }
+        "#;
+
+        let uses = parser.find_uses(code);
+
+        // Should extract all custom types from the deeply nested generic
+        let expected_types = vec!["Dictionary", "List", "User", "Role", "Permission"];
+        for expected_type in expected_types {
+            assert!(
+                uses.iter()
+                    .any(|(context, typ, _)| *context == "SecurityManager" && *typ == expected_type),
+                "Should detect SecurityManager uses {} in nested generic. Found: {:?}",
+                expected_type,
+                uses
+            );
+        }
     }
 
     #[test]
