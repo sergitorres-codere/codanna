@@ -2226,6 +2226,95 @@ impl CSharpParser {
                 | "nuint"
         )
     }
+
+    /// Extract method definitions from types (classes, interfaces, structs, records)
+    ///
+    /// Tracks which types define which methods, for example:
+    /// - UserService defines ProcessUser
+    /// - IRepository defines Save
+    fn extract_method_defines_recursive<'a>(
+        &self,
+        node: &Node,
+        code: &'a str,
+        defines: &mut Vec<(&'a str, &'a str, Range)>,
+    ) {
+        match node.kind() {
+            // Classes, structs, and records define methods
+            "class_declaration" | "struct_declaration" | "record_declaration" => {
+                let type_name = node
+                    .child_by_field_name("name")
+                    .map(|n| &code[n.byte_range()])
+                    .unwrap_or("anonymous");
+
+                // Extract methods from type body
+                if let Some(body) = node.child_by_field_name("body") {
+                    self.extract_methods_from_body(&body, code, type_name, defines);
+                }
+            }
+
+            // Interfaces define method signatures
+            "interface_declaration" => {
+                let interface_name = node
+                    .child_by_field_name("name")
+                    .map(|n| &code[n.byte_range()])
+                    .unwrap_or("anonymous");
+
+                // Extract method signatures from interface body
+                if let Some(body) = node.child_by_field_name("body") {
+                    self.extract_methods_from_body(&body, code, interface_name, defines);
+                }
+            }
+
+            _ => {}
+        }
+
+        // Recurse to children to handle nested types
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            self.extract_method_defines_recursive(&child, code, defines);
+        }
+    }
+
+    /// Extract methods from a type body (class_declaration body, interface_declaration body, etc.)
+    fn extract_methods_from_body<'a>(
+        &self,
+        body_node: &Node,
+        code: &'a str,
+        type_name: &'a str,
+        defines: &mut Vec<(&'a str, &'a str, Range)>,
+    ) {
+        let mut cursor = body_node.walk();
+        for child in body_node.children(&mut cursor) {
+            match child.kind() {
+                "method_declaration" | "constructor_declaration" | "destructor_declaration" => {
+                    if let Some(name_node) = child.child_by_field_name("name") {
+                        let method_name = &code[name_node.byte_range()];
+                        let range = Range::new(
+                            child.start_position().row as u32,
+                            child.start_position().column as u16,
+                            child.end_position().row as u32,
+                            child.end_position().column as u16,
+                        );
+                        defines.push((type_name, method_name, range));
+                    }
+                }
+                "property_declaration" => {
+                    // Properties can also be considered as method-like members
+                    if let Some(name_node) = child.child_by_field_name("name") {
+                        let property_name = &code[name_node.byte_range()];
+                        let range = Range::new(
+                            child.start_position().row as u32,
+                            child.start_position().column as u16,
+                            child.end_position().row as u32,
+                            child.end_position().column as u16,
+                        );
+                        defines.push((type_name, property_name, range));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
 }
 
 impl NodeTracker for CSharpParser {
@@ -2310,22 +2399,18 @@ impl LanguageParser for CSharpParser {
         uses
     }
 
-    fn find_defines<'a>(&mut self, _code: &'a str) -> Vec<(&'a str, &'a str, Range)> {
-        // TODO: Implement proper defines tracking for C#
-        //
-        // This should track definition relationships, for example:
-        // - Variable definitions: `var x = 5;` → (containing_method, "x", range)
-        // - Field definitions: `private int _count;` → (containing_class, "_count", range)
-        // - Property definitions: `public string Name { get; set; }` → (containing_class, "Name", range)
-        //
-        // Previously disabled because it was using node.kind() instead of actual definer names,
-        // creating relationships like "variable_declaration defines x" instead of "Method defines x".
-        //
-        // Implementation approach:
-        // 1. Track current scope context (class, method, etc.)
-        // 2. For each definition, extract (definer_name, defined_symbol, range)
-        // 3. Ensure definer_name is the actual symbol name, not AST node type
-        Vec::new()
+    fn find_defines<'a>(&mut self, code: &'a str) -> Vec<(&'a str, &'a str, Range)> {
+        let tree = match self.parser.parse(code, None) {
+            Some(tree) => tree,
+            None => return Vec::new(),
+        };
+
+        let root = tree.root_node();
+        let mut defines = Vec::new();
+
+        self.extract_method_defines_recursive(&root, code, &mut defines);
+
+        defines
     }
 
     /// Extract variable type bindings from C# code
@@ -2789,5 +2874,245 @@ mod tests {
                 prim
             );
         }
+    }
+
+    #[test]
+    fn test_csharp_find_defines_class_methods() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class UserService {
+                public void ProcessUser() { }
+                public void SaveUser() { }
+                private void ValidateUser() { }
+            }
+        "#;
+
+        let defines = parser.find_defines(code);
+
+        // Should find UserService defines ProcessUser, SaveUser, and ValidateUser
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, method, _)| *definer == "UserService" && *method == "ProcessUser"),
+            "Should detect UserService defines ProcessUser. Found: {:?}",
+            defines
+        );
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, method, _)| *definer == "UserService" && *method == "SaveUser"),
+            "Should detect UserService defines SaveUser"
+        );
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, method, _)| *definer == "UserService" && *method == "ValidateUser"),
+            "Should detect UserService defines ValidateUser"
+        );
+    }
+
+    #[test]
+    fn test_csharp_find_defines_interface_methods() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public interface IRepository {
+                void Save();
+                void Delete();
+                Item GetById(int id);
+            }
+        "#;
+
+        let defines = parser.find_defines(code);
+
+        // Should find IRepository defines Save, Delete, and GetById
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, method, _)| *definer == "IRepository" && *method == "Save"),
+            "Should detect IRepository defines Save. Found: {:?}",
+            defines
+        );
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, method, _)| *definer == "IRepository" && *method == "Delete"),
+            "Should detect IRepository defines Delete"
+        );
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, method, _)| *definer == "IRepository" && *method == "GetById"),
+            "Should detect IRepository defines GetById"
+        );
+    }
+
+    #[test]
+    fn test_csharp_find_defines_struct_methods() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public struct Point {
+                public double X { get; set; }
+                public double Y { get; set; }
+
+                public double Distance() {
+                    return Math.Sqrt(X * X + Y * Y);
+                }
+            }
+        "#;
+
+        let defines = parser.find_defines(code);
+
+        // Should find Point defines Distance and properties
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, method, _)| *definer == "Point" && *method == "Distance"),
+            "Should detect Point defines Distance. Found: {:?}",
+            defines
+        );
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, prop, _)| *definer == "Point" && *prop == "X"),
+            "Should detect Point defines X property"
+        );
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, prop, _)| *definer == "Point" && *prop == "Y"),
+            "Should detect Point defines Y property"
+        );
+    }
+
+    #[test]
+    fn test_csharp_find_defines_record() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public record Person {
+                public string Name { get; init; }
+                public int Age { get; init; }
+
+                public string GetInfo() {
+                    return $"{Name} ({Age})";
+                }
+            }
+        "#;
+
+        let defines = parser.find_defines(code);
+
+        // Should find Person defines GetInfo and properties
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, method, _)| *definer == "Person" && *method == "GetInfo"),
+            "Should detect Person defines GetInfo. Found: {:?}",
+            defines
+        );
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, prop, _)| *definer == "Person" && *prop == "Name"),
+            "Should detect Person defines Name property"
+        );
+    }
+
+    #[test]
+    fn test_csharp_find_defines_constructors() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class Service {
+                public Service() { }
+                public Service(int param) { }
+            }
+        "#;
+
+        let defines = parser.find_defines(code);
+
+        // Should find Service defines constructors
+        // Note: Both constructors have the same name "Service"
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, method, _)| *definer == "Service" && *method == "Service"),
+            "Should detect Service defines constructor. Found: {:?}",
+            defines
+        );
+
+        // Should have at least 2 define relationships (the two constructors)
+        let constructor_count = defines
+            .iter()
+            .filter(|(definer, method, _)| *definer == "Service" && *method == "Service")
+            .count();
+        assert!(
+            constructor_count >= 2,
+            "Should find at least 2 constructor definitions, found: {}",
+            constructor_count
+        );
+    }
+
+    #[test]
+    fn test_csharp_find_defines_nested_classes() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class Outer {
+                public void OuterMethod() { }
+
+                public class Inner {
+                    public void InnerMethod() { }
+                }
+            }
+        "#;
+
+        let defines = parser.find_defines(code);
+
+        // Should find both outer and inner class methods
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, method, _)| *definer == "Outer" && *method == "OuterMethod"),
+            "Should detect Outer defines OuterMethod. Found: {:?}",
+            defines
+        );
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, method, _)| *definer == "Inner" && *method == "InnerMethod"),
+            "Should detect Inner defines InnerMethod"
+        );
+    }
+
+    #[test]
+    fn test_csharp_find_defines_properties_only() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class Model {
+                public string Name { get; set; }
+                public int Age { get; set; }
+                public bool IsActive { get; set; }
+            }
+        "#;
+
+        let defines = parser.find_defines(code);
+
+        // Should find all properties
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, prop, _)| *definer == "Model" && *prop == "Name"),
+            "Should detect Model defines Name. Found: {:?}",
+            defines
+        );
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, prop, _)| *definer == "Model" && *prop == "Age"),
+            "Should detect Model defines Age"
+        );
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, prop, _)| *definer == "Model" && *prop == "IsActive"),
+            "Should detect Model defines IsActive"
+        );
     }
 }
