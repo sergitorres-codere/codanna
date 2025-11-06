@@ -704,7 +704,10 @@ impl CSharpParser {
         } else {
             // If it's a variable_declaration, find the first variable_declarator
             let mut cursor = node.walk();
-            if let Some(declarator) = node.children(&mut cursor).find(|n| n.kind() == "variable_declarator") {
+            if let Some(declarator) = node
+                .children(&mut cursor)
+                .find(|n| n.kind() == "variable_declarator")
+            {
                 declarator
             } else {
                 return code[node.byte_range()].trim().to_string();
