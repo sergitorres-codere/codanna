@@ -1431,18 +1431,19 @@ impl CSharpParser {
                     // Look for "into" keyword followed by identifier
                     // Pattern: group_clause ... "into" identifier
                     for j in (i + 1)..children.len() {
-                        if &code[children[j].byte_range()] == "into" && j + 1 < children.len() {
-                            if children[j + 1].kind() == "identifier" {
-                                let into_var = &code[children[j + 1].byte_range()];
-                                let range = Range::new(
-                                    children[j + 1].start_position().row as u32,
-                                    children[j + 1].start_position().column as u16,
-                                    children[j + 1].end_position().row as u32,
-                                    children[j + 1].end_position().column as u16,
-                                );
-                                bindings.push((into_var, "IGrouping", range));
-                                break;
-                            }
+                        if &code[children[j].byte_range()] == "into"
+                            && j + 1 < children.len()
+                            && children[j + 1].kind() == "identifier"
+                        {
+                            let into_var = &code[children[j + 1].byte_range()];
+                            let range = Range::new(
+                                children[j + 1].start_position().row as u32,
+                                children[j + 1].start_position().column as u16,
+                                children[j + 1].end_position().row as u32,
+                                children[j + 1].end_position().column as u16,
+                            );
+                            bindings.push((into_var, "IGrouping", range));
+                            break;
                         }
                     }
                 }
@@ -2205,24 +2206,20 @@ impl LanguageParser for CSharpParser {
         implementations
     }
 
-    fn find_uses<'a>(&mut self, _code: &'a str) -> Vec<(&'a str, &'a str, Range)> {
-        // TODO: Implement proper type usage tracking for C#
-        //
-        // This should track where types are referenced/used, for example:
-        // - Method parameter types: `void DoWork(Helper helper)`
-        // - Return types: `Helper GetHelper()`
-        // - Field/property types: `private Helper _helper;`
-        // - Base classes/interfaces: `class Foo : IBar`
-        //
-        // Previously disabled because it was creating invalid relationships with "use" as context
-        // instead of proper semantic relationships.
-        //
-        // Implementation approach:
-        // 1. Traverse AST looking for type references
-        // 2. Extract (user_symbol, used_type, range) tuples
-        // 3. Filter out primitive types (int, string, etc.)
-        // 4. Ensure proper context (method names, not node kinds)
-        Vec::new()
+    fn find_uses<'a>(&mut self, code: &'a str) -> Vec<(&'a str, &'a str, Range)> {
+        let mut uses = Vec::new();
+
+        match self.parser.parse(code, None) {
+            Some(tree) => {
+                let root_node = tree.root_node();
+                Self::extract_uses_from_node(root_node, code, &mut uses, None, None);
+            }
+            None => {
+                eprintln!("Failed to parse C# file for type uses");
+            }
+        }
+
+        uses
     }
 
     fn find_defines<'a>(&mut self, _code: &'a str) -> Vec<(&'a str, &'a str, Range)> {
@@ -2315,6 +2312,315 @@ impl LanguageParser for CSharpParser {
 
     fn as_any(&self) -> &dyn Any {
         self
+    }
+}
+
+// Helper methods for find_uses() implementation
+impl CSharpParser {
+    /// Recursively extract type usage relationships from AST
+    ///
+    /// Tracks where types are used:
+    /// - Method parameter types: `void DoWork(Helper helper)` → ("DoWork", "Helper", range)
+    /// - Return types: `Helper GetHelper()` → ("GetHelper", "Helper", range)
+    /// - Field/property types: `private Helper _helper;` → ("MyClass", "Helper", range)
+    /// - Base classes/interfaces: `class Foo : IBar` → ("Foo", "IBar", range)
+    ///
+    /// # Parameters
+    /// - `node`: Current AST node being processed
+    /// - `code`: Source code string
+    /// - `uses`: Output vector for (user_symbol, used_type, range) tuples
+    /// - `current_class`: Name of the class we're currently inside (if any)
+    /// - `current_method`: Name of the method we're currently inside (if any)
+    fn extract_uses_from_node<'a>(
+        node: Node,
+        code: &'a str,
+        uses: &mut Vec<(&'a str, &'a str, Range)>,
+        current_class: Option<&'a str>,
+        current_method: Option<&'a str>,
+    ) {
+        match node.kind() {
+            // Track class/struct/record declarations for context
+            "class_declaration" | "struct_declaration" | "record_declaration" => {
+                // Extract class name
+                let class_name = Self::find_identifier_child(node, code);
+
+                // Extract base classes and interfaces from base_list
+                if let Some(class_name) = class_name {
+                    let mut cursor = node.walk();
+                    for child in node.children(&mut cursor) {
+                        if child.kind() == "base_list" {
+                            Self::extract_base_types(child, code, class_name, uses);
+                        }
+                    }
+                }
+
+                // Recursively process children with updated class context
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    Self::extract_uses_from_node(child, code, uses, class_name, None);
+                }
+            }
+
+            // Track method declarations
+            "method_declaration" | "constructor_declaration" | "local_function_statement" => {
+                // Use "name" field for method name, not first identifier (which might be return type)
+                let method_name = node
+                    .child_by_field_name("name")
+                    .map(|n| &code[n.byte_range()]);
+                let user_context = method_name.or(current_method).or(current_class);
+
+                // Extract return type (for methods, not constructors)
+                if node.kind() == "method_declaration" {
+                    // Field is called "returns", not "type"
+                    if let Some(return_type) = node.child_by_field_name("returns") {
+                        if let Some(user) = user_context {
+                            Self::extract_type_usage(&return_type, code, user, uses);
+                        }
+                    }
+                }
+
+                // Extract parameter types
+                if let Some(params) = node.child_by_field_name("parameters") {
+                    if let Some(user) = user_context {
+                        Self::extract_parameter_types(params, code, user, uses);
+                    }
+                }
+
+                // Recursively process method body with updated method context
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    Self::extract_uses_from_node(child, code, uses, current_class, method_name);
+                }
+            }
+
+            // Track field declarations
+            "field_declaration" => {
+                if let Some(class_name) = current_class {
+                    // field_declaration contains variable_declaration child which has "type" field
+                    let mut cursor = node.walk();
+                    for child in node.children(&mut cursor) {
+                        if child.kind() == "variable_declaration" {
+                            if let Some(type_node) = child.child_by_field_name("type") {
+                                Self::extract_type_usage(&type_node, code, class_name, uses);
+                            }
+                            break; // Only process first variable_declaration
+                        }
+                    }
+                }
+
+                // Continue processing children
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    Self::extract_uses_from_node(child, code, uses, current_class, current_method);
+                }
+            }
+
+            // Track property declarations
+            "property_declaration" => {
+                if let Some(class_name) = current_class {
+                    if let Some(type_node) = node.child_by_field_name("type") {
+                        Self::extract_type_usage(&type_node, code, class_name, uses);
+                    }
+                }
+
+                // Continue processing children
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    Self::extract_uses_from_node(child, code, uses, current_class, current_method);
+                }
+            }
+
+            // Track event declarations
+            "event_declaration" => {
+                // event_declaration has a "type" field
+                if let Some(class_name) = current_class {
+                    if let Some(type_node) = node.child_by_field_name("type") {
+                        Self::extract_type_usage(&type_node, code, class_name, uses);
+                    }
+                }
+
+                // Continue processing children
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    Self::extract_uses_from_node(child, code, uses, current_class, current_method);
+                }
+            }
+
+            "event_field_declaration" => {
+                // event_field_declaration contains variable_declaration child with "type" field
+                if let Some(class_name) = current_class {
+                    let mut cursor = node.walk();
+                    for child in node.children(&mut cursor) {
+                        if child.kind() == "variable_declaration" {
+                            if let Some(type_node) = child.child_by_field_name("type") {
+                                Self::extract_type_usage(&type_node, code, class_name, uses);
+                            }
+                            break;
+                        }
+                    }
+                }
+
+                // Continue processing children
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    Self::extract_uses_from_node(child, code, uses, current_class, current_method);
+                }
+            }
+
+            // Recursively process all other nodes
+            _ => {
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    Self::extract_uses_from_node(child, code, uses, current_class, current_method);
+                }
+            }
+        }
+    }
+
+    /// Helper to find the identifier child of a node (typically the name)
+    fn find_identifier_child<'a>(node: Node, code: &'a str) -> Option<&'a str> {
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if child.kind() == "identifier" {
+                return Some(&code[child.byte_range()]);
+            }
+        }
+        None
+    }
+
+    /// Extract base classes and interfaces from base_list
+    fn extract_base_types<'a>(
+        base_list: Node,
+        code: &'a str,
+        class_name: &'a str,
+        uses: &mut Vec<(&'a str, &'a str, Range)>,
+    ) {
+        let mut cursor = base_list.walk();
+        for child in base_list.children(&mut cursor) {
+            match child.kind() {
+                "identifier" | "generic_name" | "qualified_name" => {
+                    let type_name = &code[child.byte_range()];
+                    if !Self::is_primitive_type(type_name) {
+                        let range = Range::new(
+                            child.start_position().row as u32,
+                            child.start_position().column as u16,
+                            child.end_position().row as u32,
+                            child.end_position().column as u16,
+                        );
+                        uses.push((class_name, type_name, range));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Extract parameter types from parameter_list
+    fn extract_parameter_types<'a>(
+        params: Node,
+        code: &'a str,
+        user_name: &'a str,
+        uses: &mut Vec<(&'a str, &'a str, Range)>,
+    ) {
+        let mut cursor = params.walk();
+        for child in params.children(&mut cursor) {
+            if child.kind() == "parameter" {
+                if let Some(type_node) = child.child_by_field_name("type") {
+                    Self::extract_type_usage(&type_node, code, user_name, uses);
+                }
+            }
+        }
+    }
+
+    /// Extract a single type usage from a type node
+    fn extract_type_usage<'a>(
+        type_node: &Node,
+        code: &'a str,
+        user_name: &'a str,
+        uses: &mut Vec<(&'a str, &'a str, Range)>,
+    ) {
+        let type_name = match type_node.kind() {
+            "identifier" => &code[type_node.byte_range()],
+            "generic_name" => {
+                // Extract base type name from generic (e.g., "List" from "List<T>")
+                // generic_name has identifier child (not a field)
+                let mut cursor = type_node.walk();
+                let mut found = None;
+                for child in type_node.children(&mut cursor) {
+                    if child.kind() == "identifier" {
+                        found = Some(&code[child.byte_range()]);
+                        break;
+                    }
+                }
+                found.unwrap_or(&code[type_node.byte_range()])
+            }
+            "qualified_name" => {
+                // Extract rightmost identifier (e.g., "Helper" from "MyApp.Helper")
+                let mut cursor = type_node.walk();
+                let mut last_ident = None;
+                for child in type_node.children(&mut cursor) {
+                    if child.kind() == "identifier" {
+                        last_ident = Some(&code[child.byte_range()]);
+                    }
+                }
+                last_ident.unwrap_or(&code[type_node.byte_range()])
+            }
+            "array_type" => {
+                // Extract element type from array
+                if let Some(element_type) = type_node.child_by_field_name("type") {
+                    Self::extract_type_usage(&element_type, code, user_name, uses);
+                }
+                return; // Early return to avoid adding the array_type itself
+            }
+            "nullable_type" => {
+                // Extract underlying type from nullable
+                if let Some(underlying_type) = type_node.child_by_field_name("type") {
+                    Self::extract_type_usage(&underlying_type, code, user_name, uses);
+                }
+                return; // Early return
+            }
+            "predefined_type" => {
+                // This is a primitive type like int, string, etc.
+                return; // Skip primitives
+            }
+            _ => return, // Skip unknown types
+        };
+
+        // Filter out primitive types
+        if !Self::is_primitive_type(type_name) {
+            let range = Range::new(
+                type_node.start_position().row as u32,
+                type_node.start_position().column as u16,
+                type_node.end_position().row as u32,
+                type_node.end_position().column as u16,
+            );
+            uses.push((user_name, type_name, range));
+        }
+    }
+
+    /// Check if a type name is a C# primitive type
+    fn is_primitive_type(type_name: &str) -> bool {
+        matches!(
+            type_name,
+            "void"
+                | "bool"
+                | "byte"
+                | "sbyte"
+                | "char"
+                | "decimal"
+                | "double"
+                | "float"
+                | "int"
+                | "uint"
+                | "long"
+                | "ulong"
+                | "short"
+                | "ushort"
+                | "object"
+                | "string"
+                | "dynamic"
+                | "var"
+        )
     }
 }
 
@@ -2982,6 +3288,573 @@ mod tests {
                 .any(|(var, typ, _)| *var == "p" && *typ == "Person"),
             "Should find 'p' from nested LINQ. Found: {:?}",
             bindings
+        );
+    }
+
+    #[test]
+    fn test_csharp_find_uses_method_parameters() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+class UserService {
+    public void Process(User user, IRepository repo) {
+        // method body
+    }
+}
+"#;
+
+        let uses = parser.find_uses(code);
+
+        // Should find User and IRepository as used types
+        assert!(
+            uses.iter()
+                .any(|(user, used, _)| *user == "Process" && *used == "User"),
+            "Should find User parameter. Found: {:?}",
+            uses
+        );
+        assert!(
+            uses.iter()
+                .any(|(user, used, _)| *user == "Process" && *used == "IRepository"),
+            "Should find IRepository parameter. Found: {:?}",
+            uses
+        );
+    }
+
+    #[test]
+    fn test_csharp_find_uses_return_types() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+class UserService {
+    public User GetUser() {
+        return null;
+    }
+
+    public IRepository GetRepository() {
+        return null;
+    }
+}
+"#;
+
+        let uses = parser.find_uses(code);
+
+        assert!(
+            uses.iter()
+                .any(|(user, used, _)| *user == "GetUser" && *used == "User"),
+            "Should find User return type. Found: {:?}",
+            uses
+        );
+        assert!(
+            uses.iter()
+                .any(|(user, used, _)| *user == "GetRepository" && *used == "IRepository"),
+            "Should find IRepository return type. Found: {:?}",
+            uses
+        );
+    }
+
+    #[test]
+    fn test_csharp_find_uses_field_types() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+class UserService {
+    private IRepository _repository;
+    private User _currentUser;
+    public Helper helper;
+}
+"#;
+
+        let uses = parser.find_uses(code);
+
+        assert!(
+            uses.iter()
+                .any(|(user, used, _)| *user == "UserService" && *used == "IRepository"),
+            "Should find IRepository field. Found: {:?}",
+            uses
+        );
+        assert!(
+            uses.iter()
+                .any(|(user, used, _)| *user == "UserService" && *used == "User"),
+            "Should find User field. Found: {:?}",
+            uses
+        );
+        assert!(
+            uses.iter()
+                .any(|(user, used, _)| *user == "UserService" && *used == "Helper"),
+            "Should find Helper field. Found: {:?}",
+            uses
+        );
+    }
+
+    #[test]
+    fn test_csharp_find_uses_property_types() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+class UserService {
+    public User CurrentUser { get; set; }
+    public IRepository Repository { get; private set; }
+    private Helper InternalHelper { get; }
+}
+"#;
+
+        let uses = parser.find_uses(code);
+
+        assert!(
+            uses.iter()
+                .any(|(user, used, _)| *user == "UserService" && *used == "User"),
+            "Should find User property. Found: {:?}",
+            uses
+        );
+        assert!(
+            uses.iter()
+                .any(|(user, used, _)| *user == "UserService" && *used == "IRepository"),
+            "Should find IRepository property. Found: {:?}",
+            uses
+        );
+        assert!(
+            uses.iter()
+                .any(|(user, used, _)| *user == "UserService" && *used == "Helper"),
+            "Should find Helper property. Found: {:?}",
+            uses
+        );
+    }
+
+    #[test]
+    fn test_csharp_find_uses_base_classes() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+class UserService : BaseService {
+    // class body
+}
+
+class ProductService : BaseService, IDisposable {
+    // class body
+}
+"#;
+
+        let uses = parser.find_uses(code);
+
+        assert!(
+            uses.iter()
+                .any(|(user, used, _)| *user == "UserService" && *used == "BaseService"),
+            "Should find BaseService base class. Found: {:?}",
+            uses
+        );
+        assert!(
+            uses.iter()
+                .any(|(user, used, _)| *user == "ProductService" && *used == "BaseService"),
+            "Should find BaseService for ProductService. Found: {:?}",
+            uses
+        );
+        assert!(
+            uses.iter()
+                .any(|(user, used, _)| *user == "ProductService" && *used == "IDisposable"),
+            "Should find IDisposable interface. Found: {:?}",
+            uses
+        );
+    }
+
+    #[test]
+    fn test_csharp_find_uses_interface_implementations() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+class UserRepository : IRepository, IDisposable {
+    // class body
+}
+"#;
+
+        let uses = parser.find_uses(code);
+
+        assert!(
+            uses.iter()
+                .any(|(user, used, _)| *user == "UserRepository" && *used == "IRepository"),
+            "Should find IRepository interface. Found: {:?}",
+            uses
+        );
+        assert!(
+            uses.iter()
+                .any(|(user, used, _)| *user == "UserRepository" && *used == "IDisposable"),
+            "Should find IDisposable interface. Found: {:?}",
+            uses
+        );
+    }
+
+    #[test]
+    fn test_csharp_find_uses_generic_types() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+class DataService {
+    public List<User> GetUsers() {
+        return null;
+    }
+
+    public Dictionary<string, Product> products;
+}
+"#;
+
+        let uses = parser.find_uses(code);
+
+        // Should find List (base generic type) used by GetUsers
+        assert!(
+            uses.iter()
+                .any(|(user, used, _)| *user == "GetUsers" && *used == "List"),
+            "Should find List generic type. Found: {:?}",
+            uses
+        );
+
+        // Should find Dictionary (base generic type) used by DataService
+        assert!(
+            uses.iter()
+                .any(|(user, used, _)| *user == "DataService" && *used == "Dictionary"),
+            "Should find Dictionary generic type. Found: {:?}",
+            uses
+        );
+    }
+
+    #[test]
+    fn test_csharp_find_uses_array_types() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+class ArrayService {
+    public User[] GetUsers() {
+        return null;
+    }
+
+    private Product[] _products;
+}
+"#;
+
+        let uses = parser.find_uses(code);
+
+        // Should find User (element type, not array itself)
+        assert!(
+            uses.iter()
+                .any(|(user, used, _)| *user == "GetUsers" && *used == "User"),
+            "Should find User array element type. Found: {:?}",
+            uses
+        );
+
+        // Should find Product (element type)
+        assert!(
+            uses.iter()
+                .any(|(user, used, _)| *user == "ArrayService" && *used == "Product"),
+            "Should find Product array element type. Found: {:?}",
+            uses
+        );
+    }
+
+    #[test]
+    fn test_csharp_find_uses_nullable_types() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+class NullableService {
+    public User? GetUser() {
+        return null;
+    }
+
+    private Product? _product;
+}
+"#;
+
+        let uses = parser.find_uses(code);
+
+        // Should find User (underlying type, not nullable wrapper)
+        assert!(
+            uses.iter()
+                .any(|(user, used, _)| *user == "GetUser" && *used == "User"),
+            "Should find User nullable type. Found: {:?}",
+            uses
+        );
+
+        // Should find Product (underlying type)
+        assert!(
+            uses.iter()
+                .any(|(user, used, _)| *user == "NullableService" && *used == "Product"),
+            "Should find Product nullable type. Found: {:?}",
+            uses
+        );
+    }
+
+    #[test]
+    fn test_csharp_find_uses_qualified_names() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+class QualifiedService {
+    public MyApp.Models.User GetUser() {
+        return null;
+    }
+
+    private System.Data.SqlClient.SqlConnection _connection;
+}
+"#;
+
+        let uses = parser.find_uses(code);
+
+        // Should extract rightmost identifier (User)
+        assert!(
+            uses.iter()
+                .any(|(user, used, _)| *user == "GetUser" && *used == "User"),
+            "Should find User from qualified name. Found: {:?}",
+            uses
+        );
+
+        // Should extract rightmost identifier (SqlConnection)
+        assert!(
+            uses.iter()
+                .any(|(user, used, _)| *user == "QualifiedService" && *used == "SqlConnection"),
+            "Should find SqlConnection from qualified name. Found: {:?}",
+            uses
+        );
+    }
+
+    #[test]
+    fn test_csharp_find_uses_no_primitives() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+class PrimitiveService {
+    public int GetCount() {
+        return 0;
+    }
+
+    public void Process(string text, bool flag) {
+        // method body
+    }
+
+    private int _count;
+    public string Name { get; set; }
+}
+"#;
+
+        let uses = parser.find_uses(code);
+
+        // Should NOT find any primitive types
+        assert!(
+            !uses
+                .iter()
+                .any(|(_, used, _)| matches!(*used, "int" | "string" | "bool")),
+            "Should not find primitive types. Found: {:?}",
+            uses
+        );
+
+        // The uses vector should be empty (no non-primitive types)
+        assert!(
+            uses.is_empty(),
+            "Should find no type uses (all primitives). Found: {:?}",
+            uses
+        );
+    }
+
+    #[test]
+    fn test_csharp_find_uses_struct_types() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+struct Point {
+    public double X;
+    public double Y;
+}
+
+struct Vector : IEquatable {
+    private Point _start;
+    private Point _end;
+}
+"#;
+
+        let uses = parser.find_uses(code);
+
+        // Should find Point used by Vector (fields)
+        assert_eq!(
+            uses.iter()
+                .filter(|(user, used, _)| *user == "Vector" && *used == "Point")
+                .count(),
+            2,
+            "Should find Point used twice (two fields). Found: {:?}",
+            uses
+        );
+
+        // Should find IEquatable implemented by Vector
+        assert!(
+            uses.iter()
+                .any(|(user, used, _)| *user == "Vector" && *used == "IEquatable"),
+            "Should find IEquatable interface. Found: {:?}",
+            uses
+        );
+    }
+
+    #[test]
+    fn test_csharp_find_uses_record_types() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+record Person(string Name, int Age);
+
+record Employee : Person {
+    public Company Company { get; init; }
+}
+"#;
+
+        let uses = parser.find_uses(code);
+
+        // Should find Person as base record for Employee
+        assert!(
+            uses.iter()
+                .any(|(user, used, _)| *user == "Employee" && *used == "Person"),
+            "Should find Person base record. Found: {:?}",
+            uses
+        );
+
+        // Should find Company property type
+        assert!(
+            uses.iter()
+                .any(|(user, used, _)| *user == "Employee" && *used == "Company"),
+            "Should find Company property. Found: {:?}",
+            uses
+        );
+    }
+
+    #[test]
+    fn test_csharp_find_uses_event_types() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+class EventService {
+    public event EventHandler UserAdded;
+    public event Action<User> UserUpdated;
+    private event DataChangedHandler _dataChanged;
+}
+"#;
+
+        let uses = parser.find_uses(code);
+
+        // Should find EventHandler
+        assert!(
+            uses.iter()
+                .any(|(user, used, _)| *user == "EventService" && *used == "EventHandler"),
+            "Should find EventHandler event type. Found: {:?}",
+            uses
+        );
+
+        // Should find Action (generic base)
+        assert!(
+            uses.iter()
+                .any(|(user, used, _)| *user == "EventService" && *used == "Action"),
+            "Should find Action event type. Found: {:?}",
+            uses
+        );
+
+        // Should find DataChangedHandler
+        assert!(
+            uses.iter()
+                .any(|(user, used, _)| *user == "EventService" && *used == "DataChangedHandler"),
+            "Should find DataChangedHandler event type. Found: {:?}",
+            uses
+        );
+    }
+
+    #[test]
+    fn test_csharp_find_uses_constructor_parameters() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+class UserService {
+    public UserService(IRepository repo, Logger logger) {
+        // constructor body
+    }
+}
+"#;
+
+        let uses = parser.find_uses(code);
+
+        // Constructors should track parameter types
+        assert!(
+            uses.iter()
+                .any(|(user, used, _)| *user == "UserService" && *used == "IRepository"),
+            "Should find IRepository constructor parameter. Found: {:?}",
+            uses
+        );
+        assert!(
+            uses.iter()
+                .any(|(user, used, _)| *user == "UserService" && *used == "Logger"),
+            "Should find Logger constructor parameter. Found: {:?}",
+            uses
+        );
+    }
+
+    #[test]
+    fn test_csharp_find_uses_complex_scenario() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+class UserRepository : BaseRepository, IRepository {
+    private DbContext _context;
+    public Logger Logger { get; set; }
+
+    public UserRepository(DbContext context) {
+        _context = context;
+    }
+
+    public User GetUser(UserId id) {
+        return null;
+    }
+
+    public List<User> GetAll() {
+        return null;
+    }
+}
+"#;
+
+        let uses = parser.find_uses(code);
+
+        // Base class
+        assert!(
+            uses.iter()
+                .any(|(user, used, _)| *user == "UserRepository" && *used == "BaseRepository"),
+            "Should find BaseRepository. Found: {:?}",
+            uses
+        );
+
+        // Interface
+        assert!(
+            uses.iter()
+                .any(|(user, used, _)| *user == "UserRepository" && *used == "IRepository"),
+            "Should find IRepository. Found: {:?}",
+            uses
+        );
+
+        // Field types
+        assert!(
+            uses.iter()
+                .any(|(user, used, _)| *user == "UserRepository" && *used == "DbContext"),
+            "Should find DbContext field. Found: {:?}",
+            uses
+        );
+        assert!(
+            uses.iter()
+                .any(|(user, used, _)| *user == "UserRepository" && *used == "Logger"),
+            "Should find Logger property. Found: {:?}",
+            uses
+        );
+
+        // Constructor parameter
+        assert!(
+            uses.iter()
+                .any(|(user, used, _)| *user == "UserRepository" && *used == "DbContext"),
+            "Should find DbContext constructor param. Found: {:?}",
+            uses
+        );
+
+        // Method return types
+        assert!(
+            uses.iter()
+                .any(|(user, used, _)| *user == "GetUser" && *used == "User"),
+            "Should find User return type. Found: {:?}",
+            uses
+        );
+        assert!(
+            uses.iter()
+                .any(|(user, used, _)| *user == "GetAll" && *used == "List"),
+            "Should find List return type. Found: {:?}",
+            uses
+        );
+
+        // Method parameter types
+        assert!(
+            uses.iter()
+                .any(|(user, used, _)| *user == "GetUser" && *used == "UserId"),
+            "Should find UserId parameter. Found: {:?}",
+            uses
         );
     }
 }
