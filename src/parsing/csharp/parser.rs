@@ -1140,31 +1140,21 @@ impl CSharpParser {
                     let var_name = &code[name_node.byte_range()];
 
                     // Strategy 1: Try to extract type from initializer (handles "var" keyword)
-                    // In tree-sitter C#, object_creation_expression is a direct child of variable_declarator
-                    // Example structure: variable_declarator -> [identifier, "=", object_creation_expression]
-                    let mut init_expr = None;
-                    let mut sub_cursor = child.walk();
-                    for vchild in child.children(&mut sub_cursor) {
-                        if vchild.kind() == "object_creation_expression" {
-                            init_expr = Some(vchild);
-                            break;
-                        }
-                    }
-
-                    if let Some(init_node) = init_expr {
-                        // Found a "new Type()" expression - extract the type
-                        if let Some(type_name) =
-                            self.extract_type_from_initializer(&init_node, code)
-                        {
-                            let range = Range::new(
-                                child.start_position().row as u32,
-                                child.start_position().column as u16,
-                                child.end_position().row as u32,
-                                child.end_position().column as u16,
-                            );
-                            bindings.push((var_name, type_name, range));
-                            continue; // Successfully extracted, move to next variable
-                        }
+                    // Uses multiple inference strategies:
+                    // - object creation: new Type()
+                    // - method invocation: GetUser() → User
+                    // - element access: Users[0] → User
+                    // - conditional: flag ? new User() : GetUser() → User
+                    // - cast: (User)obj → User
+                    if let Some(type_name) = self.try_infer_type_from_initializer(&child, code) {
+                        let range = Range::new(
+                            child.start_position().row as u32,
+                            child.start_position().column as u16,
+                            child.end_position().row as u32,
+                            child.end_position().column as u16,
+                        );
+                        bindings.push((var_name, type_name, range));
+                        continue; // Successfully extracted, move to next variable
                     }
 
                     // Strategy 2: Fall back to explicit type annotation
@@ -1188,23 +1178,207 @@ impl CSharpParser {
         }
     }
 
-    /// Extract type name from an initializer expression
+    /// Try to infer type from an initializer expression using multiple strategies
     ///
     /// Handles:
-    /// - `new Type()` → Some("Type")
-    /// - `new Generic<T>()` → Some("Generic")
-    /// - `new Namespace.Type()` → Some("Type")
-    fn extract_type_from_initializer<'a>(
+    /// - `new Type()` → Some("Type") - object creation
+    /// - `GetUser()` → Some("User") - method invocation heuristic
+    /// - `Users[0]` → Some("User") - element access heuristic
+    /// - `flag ? new User() : GetUser()` → Some("User") - conditional expression
+    /// - `(User)obj` → Some("User") - cast expression
+    fn try_infer_type_from_initializer<'a>(
+        &self,
+        variable_declarator: &Node,
+        code: &'a str,
+    ) -> Option<&'a str> {
+        let mut cursor = variable_declarator.walk();
+        for child in variable_declarator.children(&mut cursor) {
+            match child.kind() {
+                "object_creation_expression" => {
+                    return self.extract_type_from_object_creation(&child, code);
+                }
+                "invocation_expression" => {
+                    return self.extract_type_from_invocation(&child, code);
+                }
+                "element_access_expression" => {
+                    return self.extract_type_from_element_access(&child, code);
+                }
+                "conditional_expression" => {
+                    return self.extract_type_from_conditional(&child, code);
+                }
+                "cast_expression" => {
+                    return self.extract_type_from_cast(&child, code);
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    /// Extract type from object creation expression
+    /// Example: `new User()` → Some("User")
+    fn extract_type_from_object_creation<'a>(
         &self,
         init_node: &Node,
         code: &'a str,
     ) -> Option<&'a str> {
-        // Look for object_creation_expression
-        if init_node.kind() == "object_creation_expression" {
-            // object_creation_expression has a 'type' field
-            if let Some(type_node) = init_node.child_by_field_name("type") {
-                return Some(self.extract_simple_type_name(&type_node, code));
+        if let Some(type_node) = init_node.child_by_field_name("type") {
+            return Some(self.extract_simple_type_name(&type_node, code));
+        }
+        None
+    }
+
+    /// Extract type from method invocation using heuristic patterns
+    ///
+    /// Patterns:
+    /// - `GetUser()` → `User`
+    /// - `CreateProduct()` → `Product`
+    /// - `factory.BuildService()` → `Service`
+    fn extract_type_from_invocation<'a>(
+        &self,
+        invocation: &Node,
+        code: &'a str,
+    ) -> Option<&'a str> {
+        // Get the function being called
+        if let Some(function_node) = invocation.child_by_field_name("function") {
+            // Try to extract method name from various patterns:
+            // - simple: `Create()`
+            // - member access: `factory.Create()`
+            // - chain: `factory.Build().Create()`
+
+            let method_name = Self::extract_method_name_from_expression(&function_node, code)?;
+
+            // Heuristic: Common factory/builder patterns
+            // GetUser() → User, CreateProduct() → Product, BuildService() → Service
+            if let Some(type_name) = self.infer_type_from_method_name(method_name) {
+                return Some(type_name);
             }
+        }
+        None
+    }
+
+    /// Extract method name from function expression
+    fn extract_method_name_from_expression<'a>(expr: &Node, code: &'a str) -> Option<&'a str> {
+        match expr.kind() {
+            "identifier" => Some(&code[expr.byte_range()]),
+            "member_access_expression" => {
+                // Get the rightmost identifier (the method name)
+                if let Some(name_node) = expr.child_by_field_name("name") {
+                    Some(&code[name_node.byte_range()])
+                } else {
+                    None
+                }
+            }
+            "invocation_expression" => {
+                // Chained calls - get the method from the chain
+                if let Some(function_node) = expr.child_by_field_name("function") {
+                    Self::extract_method_name_from_expression(&function_node, code)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// Infer type from common method naming patterns
+    ///
+    /// Patterns:
+    /// - `GetUser()` → `User`
+    /// - `CreateProduct()` → `Product`
+    /// - `BuildService()` → `Service`
+    /// - `ToList()` → `List`
+    /// - `AsEnumerable()` → `Enumerable`
+    fn infer_type_from_method_name<'a>(&self, method_name: &'a str) -> Option<&'a str> {
+        // Common prefixes that indicate return type
+        for prefix in &["Get", "Create", "Build", "Make", "New", "To", "As", "Parse"] {
+            if let Some(stripped) = method_name.strip_prefix(prefix) {
+                if !stripped.is_empty() && stripped.chars().next()?.is_uppercase() {
+                    return Some(stripped);
+                }
+            }
+        }
+
+        // If method name itself is PascalCase, treat as factory method
+        // Example: factory.User() → User
+        if method_name.chars().next()?.is_uppercase() && method_name.len() > 1 {
+            return Some(method_name);
+        }
+
+        None
+    }
+
+    /// Extract type from element access expression
+    ///
+    /// Heuristic: Assume collection names are plural, element type is singular
+    /// Example: `Users[0]` → `User`
+    fn extract_type_from_element_access<'a>(
+        &self,
+        element_access: &Node,
+        code: &'a str,
+    ) -> Option<&'a str> {
+        // Get the expression being indexed (e.g., "Users" in "Users[0]")
+        if let Some(expression) = element_access.child_by_field_name("expression") {
+            if expression.kind() == "identifier" {
+                let collection_name = &code[expression.byte_range()];
+                // Try to convert plural to singular
+                return self.pluralize_to_singular(collection_name);
+            }
+        }
+        None
+    }
+
+    /// Convert plural collection name to singular type name
+    /// Simple heuristic: remove trailing 's'
+    fn pluralize_to_singular<'a>(&self, plural: &'a str) -> Option<&'a str> {
+        if let Some(stripped) = plural.strip_suffix('s') {
+            if stripped.len() > 1 && stripped.chars().next()?.is_uppercase() {
+                return Some(stripped);
+            }
+        }
+        None
+    }
+
+    /// Extract type from conditional (ternary) expression
+    ///
+    /// If both branches have the same inferred type, use that type
+    /// Example: `flag ? new User() : GetUser()` → `User`
+    fn extract_type_from_conditional<'a>(
+        &self,
+        conditional: &Node,
+        code: &'a str,
+    ) -> Option<&'a str> {
+        let consequence = conditional.child_by_field_name("consequence")?;
+        let alternative = conditional.child_by_field_name("alternative")?;
+
+        let consequence_type = self.try_infer_type_from_expression(&consequence, code)?;
+        let alternative_type = self.try_infer_type_from_expression(&alternative, code)?;
+
+        // If both branches infer the same type, we can be confident
+        if consequence_type == alternative_type {
+            return Some(consequence_type);
+        }
+
+        None
+    }
+
+    /// Try to infer type from any expression node
+    fn try_infer_type_from_expression<'a>(&self, expr: &Node, code: &'a str) -> Option<&'a str> {
+        match expr.kind() {
+            "object_creation_expression" => self.extract_type_from_object_creation(expr, code),
+            "invocation_expression" => self.extract_type_from_invocation(expr, code),
+            "element_access_expression" => self.extract_type_from_element_access(expr, code),
+            "conditional_expression" => self.extract_type_from_conditional(expr, code),
+            "cast_expression" => self.extract_type_from_cast(expr, code),
+            _ => None,
+        }
+    }
+
+    /// Extract type from cast expression
+    /// Example: `(User)obj` → `User`
+    fn extract_type_from_cast<'a>(&self, cast: &Node, code: &'a str) -> Option<&'a str> {
+        if let Some(type_node) = cast.child_by_field_name("type") {
+            return Some(self.extract_simple_type_name(&type_node, code));
         }
         None
     }
@@ -3122,22 +3296,19 @@ mod tests {
             bindings
                 .iter()
                 .any(|(var, typ, _)| *var == "s" && *typ == "string"),
-            "Should find 's' of type 'string'. Found: {:?}",
-            bindings
+            "Should find 's' of type 'string'. Found: {bindings:?}"
         );
         assert!(
             bindings
                 .iter()
                 .any(|(var, typ, _)| *var == "i" && *typ == "int"),
-            "Should find 'i' of type 'int'. Found: {:?}",
-            bindings
+            "Should find 'i' of type 'int'. Found: {bindings:?}"
         );
         assert!(
             bindings
                 .iter()
                 .any(|(var, typ, _)| *var == "p" && *typ == "Person"),
-            "Should find 'p' of type 'Person'. Found: {:?}",
-            bindings
+            "Should find 'p' of type 'Person'. Found: {bindings:?}"
         );
     }
 
@@ -3163,22 +3334,19 @@ mod tests {
             bindings
                 .iter()
                 .any(|(var, typ, _)| *var == "i" && *typ == "int"),
-            "Should find 'i' of type 'int' in switch expression. Found: {:?}",
-            bindings
+            "Should find 'i' of type 'int' in switch expression. Found: {bindings:?}"
         );
         assert!(
             bindings
                 .iter()
                 .any(|(var, typ, _)| *var == "s" && *typ == "string"),
-            "Should find 's' of type 'string' in switch expression. Found: {:?}",
-            bindings
+            "Should find 's' of type 'string' in switch expression. Found: {bindings:?}"
         );
         assert!(
             bindings
                 .iter()
                 .any(|(var, typ, _)| *var == "d" && *typ == "double"),
-            "Should find 'd' of type 'double' in switch expression. Found: {:?}",
-            bindings
+            "Should find 'd' of type 'double' in switch expression. Found: {bindings:?}"
         );
     }
 
@@ -3204,15 +3372,13 @@ mod tests {
             bindings
                 .iter()
                 .any(|(var, typ, _)| *var == "list" && typ.contains("List")),
-            "Should find 'list' with List type. Found: {:?}",
-            bindings
+            "Should find 'list' with List type. Found: {bindings:?}"
         );
         assert!(
             bindings
                 .iter()
                 .any(|(var, typ, _)| *var == "dict" && typ.contains("Dictionary")),
-            "Should find 'dict' with Dictionary type. Found: {:?}",
-            bindings
+            "Should find 'dict' with Dictionary type. Found: {bindings:?}"
         );
     }
 
@@ -3237,8 +3403,7 @@ mod tests {
             bindings
                 .iter()
                 .any(|(var, typ, _)| *var == "s" && *typ == "string"),
-            "Should find outer pattern variable 's'. Found: {:?}",
-            bindings
+            "Should find outer pattern variable 's'. Found: {bindings:?}"
         );
         // Note: 't' may or may not be extracted depending on when clause handling
     }
@@ -3270,29 +3435,25 @@ mod tests {
             bindings
                 .iter()
                 .any(|(var, typ, _)| *var == "s1" && *typ == "string"),
-            "Should find 's1' of type 'string'. Found: {:?}",
-            bindings
+            "Should find 's1' of type 'string'. Found: {bindings:?}"
         );
         assert!(
             bindings
                 .iter()
                 .any(|(var, typ, _)| *var == "i1" && *typ == "int"),
-            "Should find 'i1' of type 'int'. Found: {:?}",
-            bindings
+            "Should find 'i1' of type 'int'. Found: {bindings:?}"
         );
         assert!(
             bindings
                 .iter()
                 .any(|(var, typ, _)| *var == "s2" && *typ == "string"),
-            "Should find 's2' of type 'string'. Found: {:?}",
-            bindings
+            "Should find 's2' of type 'string'. Found: {bindings:?}"
         );
         assert!(
             bindings
                 .iter()
                 .any(|(var, typ, _)| *var == "d1" && *typ == "double"),
-            "Should find 'd1' of type 'double'. Found: {:?}",
-            bindings
+            "Should find 'd1' of type 'double'. Found: {bindings:?}"
         );
     }
 
@@ -3318,15 +3479,13 @@ mod tests {
             bindings
                 .iter()
                 .any(|(var, typ, _)| *var == "s" && *typ == "String"),
-            "Should find 's' with simple type name 'String'. Found: {:?}",
-            bindings
+            "Should find 's' with simple type name 'String'. Found: {bindings:?}"
         );
         assert!(
             bindings
                 .iter()
                 .any(|(var, typ, _)| *var == "m" && *typ == "MyClass"),
-            "Should find 'm' with simple type name 'MyClass'. Found: {:?}",
-            bindings
+            "Should find 'm' with simple type name 'MyClass'. Found: {bindings:?}"
         );
     }
 
@@ -3351,15 +3510,13 @@ mod tests {
             bindings
                 .iter()
                 .any(|(var, typ, _)| *var == "user" && *typ == "User"),
-            "Should find 'user' of type 'User' in from clause. Found: {:?}",
-            bindings
+            "Should find 'user' of type 'User' in from clause. Found: {bindings:?}"
         );
         assert!(
             bindings
                 .iter()
                 .any(|(var, typ, _)| *var == "num" && *typ == "int"),
-            "Should find 'num' of type 'int' in from clause. Found: {:?}",
-            bindings
+            "Should find 'num' of type 'int' in from clause. Found: {bindings:?}"
         );
     }
 
@@ -3385,29 +3542,25 @@ mod tests {
             bindings
                 .iter()
                 .any(|(var, typ, _)| *var == "user" && *typ == "User"),
-            "Should find 'user' from from clause. Found: {:?}",
-            bindings
+            "Should find 'user' from from clause. Found: {bindings:?}"
         );
         assert!(
             bindings
                 .iter()
                 .any(|(var, typ, _)| *var == "order" && *typ == "Order"),
-            "Should find 'order' from join clause. Found: {:?}",
-            bindings
+            "Should find 'order' from join clause. Found: {bindings:?}"
         );
         assert!(
             bindings
                 .iter()
                 .any(|(var, typ, _)| *var == "p" && *typ == "Person"),
-            "Should find 'p' from from clause. Found: {:?}",
-            bindings
+            "Should find 'p' from from clause. Found: {bindings:?}"
         );
         assert!(
             bindings
                 .iter()
                 .any(|(var, typ, _)| *var == "addr" && *typ == "Address"),
-            "Should find 'addr' from join clause. Found: {:?}",
-            bindings
+            "Should find 'addr' from join clause. Found: {bindings:?}"
         );
     }
 
@@ -3429,16 +3582,14 @@ mod tests {
             bindings
                 .iter()
                 .any(|(var, typ, _)| *var == "item" && *typ == "Product"),
-            "Should find 'item' of type 'Product'. Found: {:?}",
-            bindings
+            "Should find 'item' of type 'Product'. Found: {bindings:?}"
         );
         // Should extract grouping variable
         assert!(
             bindings
                 .iter()
                 .any(|(var, typ, _)| *var == "g" && *typ == "IGrouping"),
-            "Should find 'g' as IGrouping from group...into. Found: {:?}",
-            bindings
+            "Should find 'g' as IGrouping from group...into. Found: {bindings:?}"
         );
     }
 
@@ -3461,15 +3612,13 @@ mod tests {
             bindings
                 .iter()
                 .any(|(var, typ, _)| *var == "c" && *typ == "Customer"),
-            "Should find 'c' of type 'Customer'. Found: {:?}",
-            bindings
+            "Should find 'c' of type 'Customer'. Found: {bindings:?}"
         );
         assert!(
             bindings
                 .iter()
                 .any(|(var, typ, _)| *var == "o" && *typ == "Order"),
-            "Should find 'o' of type 'Order'. Found: {:?}",
-            bindings
+            "Should find 'o' of type 'Order'. Found: {bindings:?}"
         );
     }
 
@@ -3491,8 +3640,7 @@ mod tests {
             bindings
                 .iter()
                 .any(|(var, typ, _)| *var == "list" && typ.contains("List")),
-            "Should find 'list' with List type. Found: {:?}",
-            bindings
+            "Should find 'list' with List type. Found: {bindings:?}"
         );
     }
 
@@ -3515,15 +3663,13 @@ mod tests {
             bindings
                 .iter()
                 .any(|(var, typ, _)| *var == "c" && *typ == "Customer"),
-            "Should find outer range variable 'c'. Found: {:?}",
-            bindings
+            "Should find outer range variable 'c'. Found: {bindings:?}"
         );
         assert!(
             bindings
                 .iter()
                 .any(|(var, typ, _)| *var == "o" && *typ == "Order"),
-            "Should find inner range variable 'o'. Found: {:?}",
-            bindings
+            "Should find inner range variable 'o'. Found: {bindings:?}"
         );
     }
 
@@ -3556,29 +3702,273 @@ mod tests {
             bindings
                 .iter()
                 .any(|(var, typ, _)| *var == "users" && typ.contains("List")),
-            "Should find 'users' from pattern. Found: {:?}",
-            bindings
+            "Should find 'users' from pattern. Found: {bindings:?}"
         );
         // Should find LINQ range variables
         assert!(
             bindings
                 .iter()
                 .any(|(var, typ, _)| *var == "u" && *typ == "User"),
-            "Should find 'u' from LINQ query. Found: {:?}",
-            bindings
+            "Should find 'u' from LINQ query. Found: {bindings:?}"
         );
         // Should find both pattern and LINQ variables in switch expression
         assert!(
             bindings.iter().any(|(var, _, _)| *var == "people"),
-            "Should find 'people' from switch pattern. Found: {:?}",
-            bindings
+            "Should find 'people' from switch pattern. Found: {bindings:?}"
         );
         assert!(
             bindings
                 .iter()
                 .any(|(var, typ, _)| *var == "p" && *typ == "Person"),
-            "Should find 'p' from nested LINQ. Found: {:?}",
+            "Should find 'p' from nested LINQ. Found: {bindings:?}"
+        );
+    }
+
+    // Extended Type Inference Tests
+
+    #[test]
+    fn test_csharp_type_inference_method_invocation() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            class UserService {
+                void ProcessData() {
+                    var user1 = GetUser();
+                    var product = CreateProduct();
+                    var service = BuildService();
+                    var list = ToList();
+                }
+            }
+        "#;
+
+        let bindings = parser.find_variable_types(code);
+
+        assert!(
             bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "user1" && *typ == "User"),
+            "Should infer User from GetUser(). Found: {bindings:?}"
+        );
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "product" && *typ == "Product"),
+            "Should infer Product from CreateProduct(). Found: {bindings:?}"
+        );
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "service" && *typ == "Service"),
+            "Should infer Service from BuildService(). Found: {bindings:?}"
+        );
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "list" && *typ == "List"),
+            "Should infer List from ToList(). Found: {bindings:?}"
+        );
+    }
+
+    #[test]
+    fn test_csharp_type_inference_member_access() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            class FactoryTest {
+                void Test() {
+                    var user = factory.GetUser();
+                    var item = repository.CreateItem();
+                    var data = builder.BuildData();
+                }
+            }
+        "#;
+
+        let bindings = parser.find_variable_types(code);
+
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "user" && *typ == "User"),
+            "Should infer User from factory.GetUser(). Found: {bindings:?}"
+        );
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "item" && *typ == "Item"),
+            "Should infer Item from repository.CreateItem(). Found: {bindings:?}"
+        );
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "data" && *typ == "Data"),
+            "Should infer Data from builder.BuildData(). Found: {bindings:?}"
+        );
+    }
+
+    #[test]
+    fn test_csharp_type_inference_element_access() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            class CollectionTest {
+                void Test() {
+                    var user = Users[0];
+                    var item = Items[index];
+                    var product = Products[i];
+                }
+            }
+        "#;
+
+        let bindings = parser.find_variable_types(code);
+
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "user" && *typ == "User"),
+            "Should infer User from Users[0]. Found: {bindings:?}"
+        );
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "item" && *typ == "Item"),
+            "Should infer Item from Items[index]. Found: {bindings:?}"
+        );
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "product" && *typ == "Product"),
+            "Should infer Product from Products[i]. Found: {bindings:?}"
+        );
+    }
+
+    #[test]
+    fn test_csharp_type_inference_conditional() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            class ConditionalTest {
+                void Test() {
+                    var user1 = flag ? new User() : new User();
+                    var item = condition ? GetItem() : CreateItem();
+                }
+            }
+        "#;
+
+        let bindings = parser.find_variable_types(code);
+
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "user1" && *typ == "User"),
+            "Should infer User from ternary with new User() in both branches. Found: {bindings:?}"
+        );
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "item" && *typ == "Item"),
+            "Should infer Item from ternary with GetItem() and CreateItem(). Found: {bindings:?}"
+        );
+    }
+
+    #[test]
+    fn test_csharp_type_inference_cast() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            class CastTest {
+                void Test() {
+                    var user = (User)obj;
+                    var item = (IItem)data;
+                    var service = (Services.UserService)provider;
+                }
+            }
+        "#;
+
+        let bindings = parser.find_variable_types(code);
+
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "user" && *typ == "User"),
+            "Should infer User from (User)obj. Found: {bindings:?}"
+        );
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "item" && *typ == "IItem"),
+            "Should infer IItem from (IItem)data. Found: {bindings:?}"
+        );
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "service" && *typ == "UserService"),
+            "Should infer UserService from qualified cast. Found: {bindings:?}"
+        );
+    }
+
+    #[test]
+    fn test_csharp_type_inference_factory_patterns() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            class FactoryPatternTest {
+                void Test() {
+                    var user1 = factory.User();
+                    var product = builder.Product();
+                    var user2 = ParseUser();
+                    var data = AsEnumerable();
+                }
+            }
+        "#;
+
+        let bindings = parser.find_variable_types(code);
+
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "user1" && *typ == "User"),
+            "Should infer User from factory.User(). Found: {bindings:?}"
+        );
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "product" && *typ == "Product"),
+            "Should infer Product from builder.Product(). Found: {bindings:?}"
+        );
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "user2" && *typ == "User"),
+            "Should infer User from ParseUser(). Found: {bindings:?}"
+        );
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "data" && *typ == "Enumerable"),
+            "Should infer Enumerable from AsEnumerable(). Found: {bindings:?}"
+        );
+    }
+
+    #[test]
+    fn test_csharp_type_inference_complex_scenarios() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            class ComplexTest {
+                void Test() {
+                    var user1 = GetUser();
+                    var user2 = factory.CreateUser();
+                    var user3 = Users[0];
+                    var user4 = flag ? new User() : GetUser();
+                    var user5 = (User)obj;
+                }
+            }
+        "#;
+
+        let bindings = parser.find_variable_types(code);
+
+        // Count how many User variables we found via extended inference
+        let user_count = bindings
+            .iter()
+            .filter(|(var, typ, _)| var.starts_with("user") && *typ == "User")
+            .count();
+
+        assert!(
+            user_count >= 5,
+            "Should find at least 5 User variables from inference. Found: {bindings:?}"
         );
     }
 
@@ -3599,14 +3989,12 @@ class UserService {
         assert!(
             uses.iter()
                 .any(|(user, used, _)| *user == "Process" && *used == "User"),
-            "Should find User parameter. Found: {:?}",
-            uses
+            "Should find User parameter. Found: {uses:?}"
         );
         assert!(
             uses.iter()
                 .any(|(user, used, _)| *user == "Process" && *used == "IRepository"),
-            "Should find IRepository parameter. Found: {:?}",
-            uses
+            "Should find IRepository parameter. Found: {uses:?}"
         );
     }
 
@@ -3630,14 +4018,12 @@ class UserService {
         assert!(
             uses.iter()
                 .any(|(user, used, _)| *user == "GetUser" && *used == "User"),
-            "Should find User return type. Found: {:?}",
-            uses
+            "Should find User return type. Found: {uses:?}"
         );
         assert!(
             uses.iter()
                 .any(|(user, used, _)| *user == "GetRepository" && *used == "IRepository"),
-            "Should find IRepository return type. Found: {:?}",
-            uses
+            "Should find IRepository return type. Found: {uses:?}"
         );
     }
 
@@ -3657,20 +4043,17 @@ class UserService {
         assert!(
             uses.iter()
                 .any(|(user, used, _)| *user == "UserService" && *used == "IRepository"),
-            "Should find IRepository field. Found: {:?}",
-            uses
+            "Should find IRepository field. Found: {uses:?}"
         );
         assert!(
             uses.iter()
                 .any(|(user, used, _)| *user == "UserService" && *used == "User"),
-            "Should find User field. Found: {:?}",
-            uses
+            "Should find User field. Found: {uses:?}"
         );
         assert!(
             uses.iter()
                 .any(|(user, used, _)| *user == "UserService" && *used == "Helper"),
-            "Should find Helper field. Found: {:?}",
-            uses
+            "Should find Helper field. Found: {uses:?}"
         );
     }
 
@@ -3690,20 +4073,17 @@ class UserService {
         assert!(
             uses.iter()
                 .any(|(user, used, _)| *user == "UserService" && *used == "User"),
-            "Should find User property. Found: {:?}",
-            uses
+            "Should find User property. Found: {uses:?}"
         );
         assert!(
             uses.iter()
                 .any(|(user, used, _)| *user == "UserService" && *used == "IRepository"),
-            "Should find IRepository property. Found: {:?}",
-            uses
+            "Should find IRepository property. Found: {uses:?}"
         );
         assert!(
             uses.iter()
                 .any(|(user, used, _)| *user == "UserService" && *used == "Helper"),
-            "Should find Helper property. Found: {:?}",
-            uses
+            "Should find Helper property. Found: {uses:?}"
         );
     }
 
@@ -3725,20 +4105,17 @@ class ProductService : BaseService, IDisposable {
         assert!(
             uses.iter()
                 .any(|(user, used, _)| *user == "UserService" && *used == "BaseService"),
-            "Should find BaseService base class. Found: {:?}",
-            uses
+            "Should find BaseService base class. Found: {uses:?}"
         );
         assert!(
             uses.iter()
                 .any(|(user, used, _)| *user == "ProductService" && *used == "BaseService"),
-            "Should find BaseService for ProductService. Found: {:?}",
-            uses
+            "Should find BaseService for ProductService. Found: {uses:?}"
         );
         assert!(
             uses.iter()
                 .any(|(user, used, _)| *user == "ProductService" && *used == "IDisposable"),
-            "Should find IDisposable interface. Found: {:?}",
-            uses
+            "Should find IDisposable interface. Found: {uses:?}"
         );
     }
 
@@ -3756,14 +4133,12 @@ class UserRepository : IRepository, IDisposable {
         assert!(
             uses.iter()
                 .any(|(user, used, _)| *user == "UserRepository" && *used == "IRepository"),
-            "Should find IRepository interface. Found: {:?}",
-            uses
+            "Should find IRepository interface. Found: {uses:?}"
         );
         assert!(
             uses.iter()
                 .any(|(user, used, _)| *user == "UserRepository" && *used == "IDisposable"),
-            "Should find IDisposable interface. Found: {:?}",
-            uses
+            "Should find IDisposable interface. Found: {uses:?}"
         );
     }
 
@@ -3786,16 +4161,14 @@ class DataService {
         assert!(
             uses.iter()
                 .any(|(user, used, _)| *user == "GetUsers" && *used == "List"),
-            "Should find List generic type. Found: {:?}",
-            uses
+            "Should find List generic type. Found: {uses:?}"
         );
 
         // Should find Dictionary (base generic type) used by DataService
         assert!(
             uses.iter()
                 .any(|(user, used, _)| *user == "DataService" && *used == "Dictionary"),
-            "Should find Dictionary generic type. Found: {:?}",
-            uses
+            "Should find Dictionary generic type. Found: {uses:?}"
         );
     }
 
@@ -3818,16 +4191,14 @@ class ArrayService {
         assert!(
             uses.iter()
                 .any(|(user, used, _)| *user == "GetUsers" && *used == "User"),
-            "Should find User array element type. Found: {:?}",
-            uses
+            "Should find User array element type. Found: {uses:?}"
         );
 
         // Should find Product (element type)
         assert!(
             uses.iter()
                 .any(|(user, used, _)| *user == "ArrayService" && *used == "Product"),
-            "Should find Product array element type. Found: {:?}",
-            uses
+            "Should find Product array element type. Found: {uses:?}"
         );
     }
 
@@ -3850,16 +4221,14 @@ class NullableService {
         assert!(
             uses.iter()
                 .any(|(user, used, _)| *user == "GetUser" && *used == "User"),
-            "Should find User nullable type. Found: {:?}",
-            uses
+            "Should find User nullable type. Found: {uses:?}"
         );
 
         // Should find Product (underlying type)
         assert!(
             uses.iter()
                 .any(|(user, used, _)| *user == "NullableService" && *used == "Product"),
-            "Should find Product nullable type. Found: {:?}",
-            uses
+            "Should find Product nullable type. Found: {uses:?}"
         );
     }
 
@@ -3882,16 +4251,14 @@ class QualifiedService {
         assert!(
             uses.iter()
                 .any(|(user, used, _)| *user == "GetUser" && *used == "User"),
-            "Should find User from qualified name. Found: {:?}",
-            uses
+            "Should find User from qualified name. Found: {uses:?}"
         );
 
         // Should extract rightmost identifier (SqlConnection)
         assert!(
             uses.iter()
                 .any(|(user, used, _)| *user == "QualifiedService" && *used == "SqlConnection"),
-            "Should find SqlConnection from qualified name. Found: {:?}",
-            uses
+            "Should find SqlConnection from qualified name. Found: {uses:?}"
         );
     }
 
@@ -3920,15 +4287,13 @@ class PrimitiveService {
             !uses
                 .iter()
                 .any(|(_, used, _)| matches!(*used, "int" | "string" | "bool")),
-            "Should not find primitive types. Found: {:?}",
-            uses
+            "Should not find primitive types. Found: {uses:?}"
         );
 
         // The uses vector should be empty (no non-primitive types)
         assert!(
             uses.is_empty(),
-            "Should find no type uses (all primitives). Found: {:?}",
-            uses
+            "Should find no type uses (all primitives). Found: {uses:?}"
         );
     }
 
@@ -3955,16 +4320,14 @@ struct Vector : IEquatable {
                 .filter(|(user, used, _)| *user == "Vector" && *used == "Point")
                 .count(),
             2,
-            "Should find Point used twice (two fields). Found: {:?}",
-            uses
+            "Should find Point used twice (two fields). Found: {uses:?}"
         );
 
         // Should find IEquatable implemented by Vector
         assert!(
             uses.iter()
                 .any(|(user, used, _)| *user == "Vector" && *used == "IEquatable"),
-            "Should find IEquatable interface. Found: {:?}",
-            uses
+            "Should find IEquatable interface. Found: {uses:?}"
         );
     }
 
@@ -3985,16 +4348,14 @@ record Employee : Person {
         assert!(
             uses.iter()
                 .any(|(user, used, _)| *user == "Employee" && *used == "Person"),
-            "Should find Person base record. Found: {:?}",
-            uses
+            "Should find Person base record. Found: {uses:?}"
         );
 
         // Should find Company property type
         assert!(
             uses.iter()
                 .any(|(user, used, _)| *user == "Employee" && *used == "Company"),
-            "Should find Company property. Found: {:?}",
-            uses
+            "Should find Company property. Found: {uses:?}"
         );
     }
 
@@ -4015,24 +4376,21 @@ class EventService {
         assert!(
             uses.iter()
                 .any(|(user, used, _)| *user == "EventService" && *used == "EventHandler"),
-            "Should find EventHandler event type. Found: {:?}",
-            uses
+            "Should find EventHandler event type. Found: {uses:?}"
         );
 
         // Should find Action (generic base)
         assert!(
             uses.iter()
                 .any(|(user, used, _)| *user == "EventService" && *used == "Action"),
-            "Should find Action event type. Found: {:?}",
-            uses
+            "Should find Action event type. Found: {uses:?}"
         );
 
         // Should find DataChangedHandler
         assert!(
             uses.iter()
                 .any(|(user, used, _)| *user == "EventService" && *used == "DataChangedHandler"),
-            "Should find DataChangedHandler event type. Found: {:?}",
-            uses
+            "Should find DataChangedHandler event type. Found: {uses:?}"
         );
     }
 
@@ -4053,14 +4411,12 @@ class UserService {
         assert!(
             uses.iter()
                 .any(|(user, used, _)| *user == "UserService" && *used == "IRepository"),
-            "Should find IRepository constructor parameter. Found: {:?}",
-            uses
+            "Should find IRepository constructor parameter. Found: {uses:?}"
         );
         assert!(
             uses.iter()
                 .any(|(user, used, _)| *user == "UserService" && *used == "Logger"),
-            "Should find Logger constructor parameter. Found: {:?}",
-            uses
+            "Should find Logger constructor parameter. Found: {uses:?}"
         );
     }
 
@@ -4092,60 +4448,52 @@ class UserRepository : BaseRepository, IRepository {
         assert!(
             uses.iter()
                 .any(|(user, used, _)| *user == "UserRepository" && *used == "BaseRepository"),
-            "Should find BaseRepository. Found: {:?}",
-            uses
+            "Should find BaseRepository. Found: {uses:?}"
         );
 
         // Interface
         assert!(
             uses.iter()
                 .any(|(user, used, _)| *user == "UserRepository" && *used == "IRepository"),
-            "Should find IRepository. Found: {:?}",
-            uses
+            "Should find IRepository. Found: {uses:?}"
         );
 
         // Field types
         assert!(
             uses.iter()
                 .any(|(user, used, _)| *user == "UserRepository" && *used == "DbContext"),
-            "Should find DbContext field. Found: {:?}",
-            uses
+            "Should find DbContext field. Found: {uses:?}"
         );
         assert!(
             uses.iter()
                 .any(|(user, used, _)| *user == "UserRepository" && *used == "Logger"),
-            "Should find Logger property. Found: {:?}",
-            uses
+            "Should find Logger property. Found: {uses:?}"
         );
 
         // Constructor parameter
         assert!(
             uses.iter()
                 .any(|(user, used, _)| *user == "UserRepository" && *used == "DbContext"),
-            "Should find DbContext constructor param. Found: {:?}",
-            uses
+            "Should find DbContext constructor param. Found: {uses:?}"
         );
 
         // Method return types
         assert!(
             uses.iter()
                 .any(|(user, used, _)| *user == "GetUser" && *used == "User"),
-            "Should find User return type. Found: {:?}",
-            uses
+            "Should find User return type. Found: {uses:?}"
         );
         assert!(
             uses.iter()
                 .any(|(user, used, _)| *user == "GetAll" && *used == "List"),
-            "Should find List return type. Found: {:?}",
-            uses
+            "Should find List return type. Found: {uses:?}"
         );
 
         // Method parameter types
         assert!(
             uses.iter()
                 .any(|(user, used, _)| *user == "GetUser" && *used == "UserId"),
-            "Should find UserId parameter. Found: {:?}",
-            uses
+            "Should find UserId parameter. Found: {uses:?}"
         );
     }
 
@@ -4171,15 +4519,13 @@ class UserService {
             defines
                 .iter()
                 .any(|(definer, defined, _)| *definer == "UserService" && *defined == "GetUser"),
-            "Should find UserService defines GetUser. Found: {:?}",
-            defines
+            "Should find UserService defines GetUser. Found: {defines:?}"
         );
         assert!(
             defines.iter().any(
                 |(definer, defined, _)| *definer == "UserService" && *defined == "ValidateUser"
             ),
-            "Should find UserService defines ValidateUser. Found: {:?}",
-            defines
+            "Should find UserService defines ValidateUser. Found: {defines:?}"
         );
     }
 
@@ -4202,22 +4548,19 @@ class UserService {
                 .iter()
                 .any(|(definer, defined, _)| *definer == "UserService"
                     && *defined == "_repository"),
-            "Should find UserService defines _repository. Found: {:?}",
-            defines
+            "Should find UserService defines _repository. Found: {defines:?}"
         );
         assert!(
             defines
                 .iter()
                 .any(|(definer, defined, _)| *definer == "UserService" && *defined == "_logger"),
-            "Should find UserService defines _logger. Found: {:?}",
-            defines
+            "Should find UserService defines _logger. Found: {defines:?}"
         );
         assert!(
             defines
                 .iter()
                 .any(|(definer, defined, _)| *definer == "UserService" && *defined == "count"),
-            "Should find UserService defines count. Found: {:?}",
-            defines
+            "Should find UserService defines count. Found: {defines:?}"
         );
     }
 
@@ -4240,22 +4583,19 @@ class UserService {
                 .iter()
                 .any(|(definer, defined, _)| *definer == "UserService"
                     && *defined == "CurrentUser"),
-            "Should find UserService defines CurrentUser. Found: {:?}",
-            defines
+            "Should find UserService defines CurrentUser. Found: {defines:?}"
         );
         assert!(
             defines
                 .iter()
                 .any(|(definer, defined, _)| *definer == "UserService" && *defined == "Name"),
-            "Should find UserService defines Name. Found: {:?}",
-            defines
+            "Should find UserService defines Name. Found: {defines:?}"
         );
         assert!(
             defines
                 .iter()
                 .any(|(definer, defined, _)| *definer == "UserService" && *defined == "Count"),
-            "Should find UserService defines Count. Found: {:?}",
-            defines
+            "Should find UserService defines Count. Found: {defines:?}"
         );
     }
 
@@ -4277,23 +4617,20 @@ class UserService {
             defines
                 .iter()
                 .any(|(definer, defined, _)| *definer == "UserService" && *defined == "UserAdded"),
-            "Should find UserService defines UserAdded. Found: {:?}",
-            defines
+            "Should find UserService defines UserAdded. Found: {defines:?}"
         );
         assert!(
             defines
                 .iter()
                 .any(|(definer, defined, _)| *definer == "UserService"
                     && *defined == "UserUpdated"),
-            "Should find UserService defines UserUpdated. Found: {:?}",
-            defines
+            "Should find UserService defines UserUpdated. Found: {defines:?}"
         );
         assert!(
             defines.iter().any(
                 |(definer, defined, _)| *definer == "UserService" && *defined == "_dataChanged"
             ),
-            "Should find UserService defines _dataChanged. Found: {:?}",
-            defines
+            "Should find UserService defines _dataChanged. Found: {defines:?}"
         );
     }
 
@@ -4315,22 +4652,19 @@ interface IRepository {
             defines
                 .iter()
                 .any(|(definer, defined, _)| *definer == "IRepository" && *defined == "Get"),
-            "Should find IRepository defines Get. Found: {:?}",
-            defines
+            "Should find IRepository defines Get. Found: {defines:?}"
         );
         assert!(
             defines
                 .iter()
                 .any(|(definer, defined, _)| *definer == "IRepository" && *defined == "Save"),
-            "Should find IRepository defines Save. Found: {:?}",
-            defines
+            "Should find IRepository defines Save. Found: {defines:?}"
         );
         assert!(
             defines
                 .iter()
                 .any(|(definer, defined, _)| *definer == "IRepository" && *defined == "Delete"),
-            "Should find IRepository defines Delete. Found: {:?}",
-            defines
+            "Should find IRepository defines Delete. Found: {defines:?}"
         );
     }
 
@@ -4354,22 +4688,19 @@ class UserService {
             defines
                 .iter()
                 .any(|(definer, defined, _)| *definer == "ProcessUser" && *defined == "user"),
-            "Should find ProcessUser defines user. Found: {:?}",
-            defines
+            "Should find ProcessUser defines user. Found: {defines:?}"
         );
         assert!(
             defines
                 .iter()
                 .any(|(definer, defined, _)| *definer == "ProcessUser" && *defined == "name"),
-            "Should find ProcessUser defines name. Found: {:?}",
-            defines
+            "Should find ProcessUser defines name. Found: {defines:?}"
         );
         assert!(
             defines
                 .iter()
                 .any(|(definer, defined, _)| *definer == "ProcessUser" && *defined == "count"),
-            "Should find ProcessUser defines count. Found: {:?}",
-            defines
+            "Should find ProcessUser defines count. Found: {defines:?}"
         );
     }
 
@@ -4394,22 +4725,19 @@ struct Point {
             defines
                 .iter()
                 .any(|(definer, defined, _)| *definer == "Point" && *defined == "X"),
-            "Should find Point defines X. Found: {:?}",
-            defines
+            "Should find Point defines X. Found: {defines:?}"
         );
         assert!(
             defines
                 .iter()
                 .any(|(definer, defined, _)| *definer == "Point" && *defined == "Y"),
-            "Should find Point defines Y. Found: {:?}",
-            defines
+            "Should find Point defines Y. Found: {defines:?}"
         );
         assert!(
             defines
                 .iter()
                 .any(|(definer, defined, _)| *definer == "Point" && *defined == "Distance"),
-            "Should find Point defines Distance. Found: {:?}",
-            defines
+            "Should find Point defines Distance. Found: {defines:?}"
         );
     }
 
@@ -4431,8 +4759,7 @@ record Person(string Name, int Age) {
             defines
                 .iter()
                 .any(|(definer, defined, _)| *definer == "Person" && *defined == "GetGreeting"),
-            "Should find Person defines GetGreeting. Found: {:?}",
-            defines
+            "Should find Person defines GetGreeting. Found: {defines:?}"
         );
     }
 
@@ -4455,8 +4782,7 @@ class UserService {
                 .iter()
                 .any(|(definer, defined, _)| *definer == "UserService"
                     && *defined == "UserService"),
-            "Should find UserService defines UserService constructor. Found: {:?}",
-            defines
+            "Should find UserService defines UserService constructor. Found: {defines:?}"
         );
 
         // Constructor should also define local variables
@@ -4465,8 +4791,7 @@ class UserService {
                 .iter()
                 .any(|(definer, defined, _)| *definer == "UserService"
                     && *defined == "initialized"),
-            "Should find UserService constructor defines initialized. Found: {:?}",
-            defines
+            "Should find UserService constructor defines initialized. Found: {defines:?}"
         );
     }
 
@@ -4490,22 +4815,19 @@ class DataService {
             defines
                 .iter()
                 .any(|(definer, defined, _)| *definer == "DataService" && *defined == "_count"),
-            "Should find DataService defines _count. Found: {:?}",
-            defines
+            "Should find DataService defines _count. Found: {defines:?}"
         );
         assert!(
             defines
                 .iter()
                 .any(|(definer, defined, _)| *definer == "DataService" && *defined == "_total"),
-            "Should find DataService defines _total. Found: {:?}",
-            defines
+            "Should find DataService defines _total. Found: {defines:?}"
         );
         assert!(
             defines
                 .iter()
                 .any(|(definer, defined, _)| *definer == "DataService" && *defined == "_average"),
-            "Should find DataService defines _average. Found: {:?}",
-            defines
+            "Should find DataService defines _average. Found: {defines:?}"
         );
 
         // Should find all local variable declarations
@@ -4513,22 +4835,19 @@ class DataService {
             defines
                 .iter()
                 .any(|(definer, defined, _)| *definer == "Calculate" && *defined == "x"),
-            "Should find Calculate defines x. Found: {:?}",
-            defines
+            "Should find Calculate defines x. Found: {defines:?}"
         );
         assert!(
             defines
                 .iter()
                 .any(|(definer, defined, _)| *definer == "Calculate" && *defined == "y"),
-            "Should find Calculate defines y. Found: {:?}",
-            defines
+            "Should find Calculate defines y. Found: {defines:?}"
         );
         assert!(
             defines
                 .iter()
                 .any(|(definer, defined, _)| *definer == "Calculate" && *defined == "z"),
-            "Should find Calculate defines z. Found: {:?}",
-            defines
+            "Should find Calculate defines z. Found: {defines:?}"
         );
     }
 
@@ -4563,8 +4882,7 @@ class UserRepository : IRepository {
             defines
                 .iter()
                 .any(|(definer, defined, _)| *definer == "IRepository" && *defined == "Get"),
-            "Should find IRepository defines Get. Found: {:?}",
-            defines
+            "Should find IRepository defines Get. Found: {defines:?}"
         );
 
         // Class defines field
@@ -4573,8 +4891,7 @@ class UserRepository : IRepository {
                 .iter()
                 .any(|(definer, defined, _)| *definer == "UserRepository"
                     && *defined == "_context"),
-            "Should find UserRepository defines _context. Found: {:?}",
-            defines
+            "Should find UserRepository defines _context. Found: {defines:?}"
         );
 
         // Class defines property
@@ -4582,8 +4899,7 @@ class UserRepository : IRepository {
             defines
                 .iter()
                 .any(|(definer, defined, _)| *definer == "UserRepository" && *defined == "Logger"),
-            "Should find UserRepository defines Logger. Found: {:?}",
-            defines
+            "Should find UserRepository defines Logger. Found: {defines:?}"
         );
 
         // Class defines event
@@ -4592,8 +4908,7 @@ class UserRepository : IRepository {
                 .iter()
                 .any(|(definer, defined, _)| *definer == "UserRepository"
                     && *defined == "DataChanged"),
-            "Should find UserRepository defines DataChanged. Found: {:?}",
-            defines
+            "Should find UserRepository defines DataChanged. Found: {defines:?}"
         );
 
         // Class defines constructor
@@ -4602,8 +4917,7 @@ class UserRepository : IRepository {
                 .iter()
                 .any(|(definer, defined, _)| *definer == "UserRepository"
                     && *defined == "UserRepository"),
-            "Should find UserRepository defines constructor. Found: {:?}",
-            defines
+            "Should find UserRepository defines constructor. Found: {defines:?}"
         );
 
         // Class defines method
@@ -4611,8 +4925,7 @@ class UserRepository : IRepository {
             defines
                 .iter()
                 .any(|(definer, defined, _)| *definer == "UserRepository" && *defined == "Get"),
-            "Should find UserRepository defines Get. Found: {:?}",
-            defines
+            "Should find UserRepository defines Get. Found: {defines:?}"
         );
 
         // Method defines local variable
@@ -4620,8 +4933,7 @@ class UserRepository : IRepository {
             defines
                 .iter()
                 .any(|(definer, defined, _)| *definer == "Get" && *defined == "result"),
-            "Should find Get defines result. Found: {:?}",
-            defines
+            "Should find Get defines result. Found: {defines:?}"
         );
     }
 }
@@ -4649,33 +4961,30 @@ public void Test(object obj) {
 
     fn print_tree(node: &tree_sitter::Node, code: &str, depth: usize) {
         let indent = "  ".repeat(depth);
-        println!("{}kind: {}", indent, node.kind());
+        println!("{indent}kind: {}", node.kind());
 
         if node.kind() == "is_pattern_expression" {
-            println!("{}  *** FOUND IS_PATTERN_EXPRESSION ***", indent);
-            println!("{}  text: {}", indent, &code[node.byte_range()]);
+            println!("{indent}  *** FOUND IS_PATTERN_EXPRESSION ***");
+            println!("{indent}  text: {}", &code[node.byte_range()]);
 
             // Check available fields
             if let Some(left) = node.child_by_field_name("left") {
                 println!(
-                    "{}  left: {} '{}'",
-                    indent,
+                    "{indent}  left: {} '{}'",
                     left.kind(),
                     &code[left.byte_range()]
                 );
             }
             if let Some(pattern) = node.child_by_field_name("pattern") {
                 println!(
-                    "{}  pattern: {} '{}'",
-                    indent,
+                    "{indent}  pattern: {} '{}'",
                     pattern.kind(),
                     &code[pattern.byte_range()]
                 );
             }
             if let Some(right) = node.child_by_field_name("right") {
                 println!(
-                    "{}  right: {} '{}'",
-                    indent,
+                    "{indent}  right: {} '{}'",
                     right.kind(),
                     &code[right.byte_range()]
                 );
@@ -4685,9 +4994,7 @@ public void Test(object obj) {
             let mut cursor = node.walk();
             for (i, child) in node.children(&mut cursor).enumerate() {
                 println!(
-                    "{}  child[{}]: {} '{}'",
-                    indent,
-                    i,
+                    "{indent}  child[{i}]: {} '{}'",
                     child.kind(),
                     &code[child.byte_range()]
                 );
