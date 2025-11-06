@@ -20,7 +20,6 @@
 //!
 //! # Limitations
 //!
-//! - Type usage tracking (find_uses) is not yet implemented
 //! - Define relationships (containment) are not yet implemented
 //! - External framework references (e.g., System.Console) require special handling
 
@@ -1764,6 +1763,469 @@ impl CSharpParser {
             self.register_node_recursively(child);
         }
     }
+
+    /// Extract type usage relationships recursively from AST
+    ///
+    /// Tracks where types are used in:
+    /// - Method parameters
+    /// - Return types
+    /// - Field/property types
+    /// - Base classes
+    /// - Interface implementations
+    fn extract_type_uses_recursive<'a>(
+        &self,
+        node: &Node,
+        code: &'a str,
+        uses: &mut Vec<(&'a str, &'a str, Range)>,
+    ) {
+        match node.kind() {
+            // Method declarations - track parameter and return types
+            "method_declaration" | "local_function_statement" => {
+                let method_name = node
+                    .child_by_field_name("name")
+                    .map(|n| &code[n.byte_range()])
+                    .unwrap_or("anonymous");
+
+                // Extract parameter types
+                if let Some(params) = node.child_by_field_name("parameters") {
+                    self.extract_parameter_types(&params, code, method_name, uses);
+                }
+
+                // Extract return type - try field first, then search children
+                if let Some(return_type) = node.child_by_field_name("type") {
+                    self.extract_type_from_node(&return_type, code, method_name, uses);
+                } else {
+                    // Fallback: search for return type among children
+                    // In C# tree-sitter, the return type appears before the method name
+                    let params_start = node
+                        .child_by_field_name("parameters")
+                        .map(|p| p.start_position())
+                        .unwrap_or(tree_sitter::Point {
+                            row: usize::MAX,
+                            column: usize::MAX,
+                        });
+
+                    let mut cursor = node.walk();
+                    for child in node.children(&mut cursor) {
+                        // Look for type nodes that appear before parameters
+                        if matches!(
+                            child.kind(),
+                            "predefined_type"
+                                | "identifier"
+                                | "generic_name"
+                                | "qualified_name"
+                                | "nullable_type"
+                                | "array_type"
+                        ) && child.start_position() < params_start
+                        {
+                            self.extract_type_from_node(&child, code, method_name, uses);
+                            break; // Only take the first type node (the return type)
+                        }
+                    }
+                }
+            }
+
+            // Constructor declarations - track parameter types
+            "constructor_declaration" => {
+                let constructor_name = node
+                    .child_by_field_name("name")
+                    .map(|n| &code[n.byte_range()])
+                    .unwrap_or("anonymous");
+
+                if let Some(params) = node.child_by_field_name("parameters") {
+                    self.extract_parameter_types(&params, code, constructor_name, uses);
+                }
+            }
+
+            // Class/struct/record declarations - track base classes and interfaces
+            "class_declaration" | "struct_declaration" | "record_declaration" => {
+                let type_name = node
+                    .child_by_field_name("name")
+                    .map(|n| &code[n.byte_range()])
+                    .unwrap_or("anonymous");
+
+                // Extract base classes and interfaces from base_list
+                if let Some(base_list) = node.child_by_field_name("bases") {
+                    self.extract_base_types(&base_list, code, type_name, uses);
+                } else {
+                    // Fallback: search for base_list child
+                    let mut cursor = node.walk();
+                    for child in node.children(&mut cursor) {
+                        if child.kind() == "base_list" {
+                            self.extract_base_types(&child, code, type_name, uses);
+                            break;
+                        }
+                    }
+                }
+
+                // Extract field and property types from class body
+                if let Some(body) = node.child_by_field_name("body") {
+                    self.extract_class_member_types(&body, code, type_name, uses);
+                }
+            }
+
+            // Interface declarations - track extended interfaces
+            "interface_declaration" => {
+                let interface_name = node
+                    .child_by_field_name("name")
+                    .map(|n| &code[n.byte_range()])
+                    .unwrap_or("anonymous");
+
+                if let Some(base_list) = node.child_by_field_name("bases") {
+                    self.extract_base_types(&base_list, code, interface_name, uses);
+                } else {
+                    // Fallback: search for base_list child
+                    let mut cursor = node.walk();
+                    for child in node.children(&mut cursor) {
+                        if child.kind() == "base_list" {
+                            self.extract_base_types(&child, code, interface_name, uses);
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Property declarations - track property types
+            "property_declaration" => {
+                let property_name = node
+                    .child_by_field_name("name")
+                    .map(|n| &code[n.byte_range()])
+                    .unwrap_or("anonymous");
+
+                if let Some(prop_type) = node.child_by_field_name("type") {
+                    self.extract_type_from_node(&prop_type, code, property_name, uses);
+                }
+            }
+
+            // Field declarations - track field types
+            "field_declaration" => {
+                // Fields can have multiple declarators, so we need to handle each one
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    if child.kind() == "variable_declaration" {
+                        if let Some(field_type) = child.child_by_field_name("type") {
+                            // Extract field names from variable_declarator children
+                            let mut var_cursor = child.walk();
+                            for var_child in child.children(&mut var_cursor) {
+                                if var_child.kind() == "variable_declarator" {
+                                    if let Some(name_node) = var_child.child_by_field_name("name") {
+                                        let field_name = &code[name_node.byte_range()];
+                                        self.extract_type_from_node(
+                                            &field_type,
+                                            code,
+                                            field_name,
+                                            uses,
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Variable declarations - track local variable types
+            "variable_declaration" | "local_declaration_statement" => {
+                // Only extract if there's an explicit type (not "var")
+                let type_node = if node.kind() == "variable_declaration" {
+                    node.child_by_field_name("type")
+                } else {
+                    // For local_declaration_statement, find the variable_declaration child
+                    let mut cursor = node.walk();
+                    node.children(&mut cursor)
+                        .find(|c| c.kind() == "variable_declaration")
+                        .and_then(|vd| vd.child_by_field_name("type"))
+                };
+
+                if let Some(type_node) = type_node {
+                    let type_str = &code[type_node.byte_range()];
+                    // Skip "var" keyword - we can't infer concrete type without full type analysis
+                    if type_str != "var" {
+                        // Extract variable names from declarators
+                        let mut cursor = node.walk();
+                        for child in node.children(&mut cursor) {
+                            if child.kind() == "variable_declarator" {
+                                if let Some(name_node) = child.child_by_field_name("name") {
+                                    let var_name = &code[name_node.byte_range()];
+                                    self.extract_type_from_node(&type_node, code, var_name, uses);
+                                }
+                            } else if child.kind() == "variable_declaration" {
+                                // Nested structure in local_declaration_statement
+                                let mut var_cursor = child.walk();
+                                for var_child in child.children(&mut var_cursor) {
+                                    if var_child.kind() == "variable_declarator" {
+                                        if let Some(name_node) =
+                                            var_child.child_by_field_name("name")
+                                        {
+                                            let var_name = &code[name_node.byte_range()];
+                                            self.extract_type_from_node(
+                                                &type_node, code, var_name, uses,
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Delegate declarations - track parameter and return types
+            "delegate_declaration" => {
+                let delegate_name = node
+                    .child_by_field_name("name")
+                    .map(|n| &code[n.byte_range()])
+                    .unwrap_or("anonymous");
+
+                if let Some(params) = node.child_by_field_name("parameters") {
+                    self.extract_parameter_types(&params, code, delegate_name, uses);
+                }
+
+                // Extract return type - try field first, then search children
+                if let Some(return_type) = node.child_by_field_name("type") {
+                    self.extract_type_from_node(&return_type, code, delegate_name, uses);
+                } else {
+                    // Fallback: search for return type among children
+                    let params_start = node
+                        .child_by_field_name("parameters")
+                        .map(|p| p.start_position())
+                        .unwrap_or(tree_sitter::Point {
+                            row: usize::MAX,
+                            column: usize::MAX,
+                        });
+
+                    let mut cursor = node.walk();
+                    for child in node.children(&mut cursor) {
+                        // Look for type nodes that appear before parameters
+                        if matches!(
+                            child.kind(),
+                            "predefined_type"
+                                | "identifier"
+                                | "generic_name"
+                                | "qualified_name"
+                                | "nullable_type"
+                                | "array_type"
+                        ) && child.start_position() < params_start
+                        {
+                            self.extract_type_from_node(&child, code, delegate_name, uses);
+                            break;
+                        }
+                    }
+                }
+            }
+
+            _ => {}
+        }
+
+        // Recurse to children
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            self.extract_type_uses_recursive(&child, code, uses);
+        }
+    }
+
+    /// Extract parameter types from a parameter list
+    fn extract_parameter_types<'a>(
+        &self,
+        params_node: &Node,
+        code: &'a str,
+        context_name: &'a str,
+        uses: &mut Vec<(&'a str, &'a str, Range)>,
+    ) {
+        let mut cursor = params_node.walk();
+        for param in params_node.children(&mut cursor) {
+            if param.kind() == "parameter" {
+                if let Some(param_type) = param.child_by_field_name("type") {
+                    self.extract_type_from_node(&param_type, code, context_name, uses);
+                }
+            }
+        }
+    }
+
+    /// Extract base classes and interfaces from base_list
+    fn extract_base_types<'a>(
+        &self,
+        base_list_node: &Node,
+        code: &'a str,
+        type_name: &'a str,
+        uses: &mut Vec<(&'a str, &'a str, Range)>,
+    ) {
+        let mut cursor = base_list_node.walk();
+        for child in base_list_node.children(&mut cursor) {
+            // Base list contains identifiers, generic_name, or qualified_name
+            if matches!(
+                child.kind(),
+                "identifier" | "generic_name" | "qualified_name"
+            ) {
+                if let Some(base_type) = self.extract_simple_type_name_for_uses(&child, code) {
+                    let range = Range::new(
+                        child.start_position().row as u32,
+                        child.start_position().column as u16,
+                        child.end_position().row as u32,
+                        child.end_position().column as u16,
+                    );
+                    uses.push((type_name, base_type, range));
+                }
+            }
+        }
+    }
+
+    /// Extract field and property types from class body
+    fn extract_class_member_types<'a>(
+        &self,
+        body_node: &Node,
+        code: &'a str,
+        class_name: &'a str,
+        uses: &mut Vec<(&'a str, &'a str, Range)>,
+    ) {
+        let mut cursor = body_node.walk();
+        for child in body_node.children(&mut cursor) {
+            match child.kind() {
+                "field_declaration" => {
+                    // Process field declaration
+                    let mut field_cursor = child.walk();
+                    for field_child in child.children(&mut field_cursor) {
+                        if field_child.kind() == "variable_declaration" {
+                            if let Some(field_type) = field_child.child_by_field_name("type") {
+                                // For fields in class, use class name as context
+                                self.extract_type_from_node(&field_type, code, class_name, uses);
+                            }
+                        }
+                    }
+                }
+                "property_declaration" => {
+                    if let Some(prop_type) = child.child_by_field_name("type") {
+                        self.extract_type_from_node(&prop_type, code, class_name, uses);
+                    }
+                }
+                "event_declaration" | "event_field_declaration" => {
+                    if let Some(event_type) = child.child_by_field_name("type") {
+                        self.extract_type_from_node(&event_type, code, class_name, uses);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Extract type name from a type node and add to uses
+    fn extract_type_from_node<'a>(
+        &self,
+        type_node: &Node,
+        code: &'a str,
+        context_name: &'a str,
+        uses: &mut Vec<(&'a str, &'a str, Range)>,
+    ) {
+        if let Some(type_name) = self.extract_simple_type_name_for_uses(type_node, code) {
+            // Filter out C# primitive types
+            if self.is_primitive_type(type_name) {
+                return;
+            }
+
+            let range = Range::new(
+                type_node.start_position().row as u32,
+                type_node.start_position().column as u16,
+                type_node.end_position().row as u32,
+                type_node.end_position().column as u16,
+            );
+            uses.push((context_name, type_name, range));
+        }
+    }
+
+    /// Extract simple type name from a type node (for uses tracking)
+    ///
+    /// Similar to extract_simple_type_name but optimized for uses tracking
+    #[allow(clippy::only_used_in_recursion)]
+    fn extract_simple_type_name_for_uses<'a>(
+        &self,
+        type_node: &Node,
+        code: &'a str,
+    ) -> Option<&'a str> {
+        match type_node.kind() {
+            "identifier" => Some(&code[type_node.byte_range()]),
+            "generic_name" => {
+                // For generic types like List<T>, extract the base type
+                if let Some(ident) = type_node.child_by_field_name("name") {
+                    Some(&code[ident.byte_range()])
+                } else {
+                    // Fallback: find first identifier child
+                    let mut cursor = type_node.walk();
+                    type_node
+                        .children(&mut cursor)
+                        .find(|c| c.kind() == "identifier")
+                        .map(|c| &code[c.byte_range()])
+                }
+            }
+            "qualified_name" => {
+                // For qualified names like System.Collections.List, take the last part
+                let mut cursor = type_node.walk();
+                let mut last_ident = None;
+                for child in type_node.children(&mut cursor) {
+                    if child.kind() == "identifier" {
+                        last_ident = Some(&code[child.byte_range()]);
+                    }
+                }
+                last_ident
+            }
+            "predefined_type" => {
+                // Predefined types like int, string, bool
+                Some(&code[type_node.byte_range()])
+            }
+            "nullable_type" => {
+                // For nullable types like int?, extract the underlying type
+                if let Some(inner_type) = type_node.child_by_field_name("type") {
+                    self.extract_simple_type_name_for_uses(&inner_type, code)
+                } else {
+                    None
+                }
+            }
+            "array_type" => {
+                // For array types like int[], extract the element type
+                if let Some(element_type) = type_node.child_by_field_name("type") {
+                    self.extract_simple_type_name_for_uses(&element_type, code)
+                } else {
+                    None
+                }
+            }
+            _ => {
+                // Try to find a type identifier child
+                let mut cursor = type_node.walk();
+                for child in type_node.children(&mut cursor) {
+                    if let Some(name) = self.extract_simple_type_name_for_uses(&child, code) {
+                        return Some(name);
+                    }
+                }
+                None
+            }
+        }
+    }
+
+    /// Check if a type name is a C# primitive type
+    fn is_primitive_type(&self, type_name: &str) -> bool {
+        matches!(
+            type_name,
+            "bool"
+                | "byte"
+                | "sbyte"
+                | "char"
+                | "decimal"
+                | "double"
+                | "float"
+                | "int"
+                | "uint"
+                | "long"
+                | "ulong"
+                | "short"
+                | "ushort"
+                | "object"
+                | "string"
+                | "void"
+                | "dynamic"
+                | "var"
+                | "nint"
+                | "nuint"
+        )
+    }
 }
 
 impl NodeTracker for CSharpParser {
@@ -1834,24 +2296,18 @@ impl LanguageParser for CSharpParser {
         implementations
     }
 
-    fn find_uses<'a>(&mut self, _code: &'a str) -> Vec<(&'a str, &'a str, Range)> {
-        // TODO: Implement proper type usage tracking for C#
-        //
-        // This should track where types are referenced/used, for example:
-        // - Method parameter types: `void DoWork(Helper helper)`
-        // - Return types: `Helper GetHelper()`
-        // - Field/property types: `private Helper _helper;`
-        // - Base classes/interfaces: `class Foo : IBar`
-        //
-        // Previously disabled because it was creating invalid relationships with "use" as context
-        // instead of proper semantic relationships.
-        //
-        // Implementation approach:
-        // 1. Traverse AST looking for type references
-        // 2. Extract (user_symbol, used_type, range) tuples
-        // 3. Filter out primitive types (int, string, etc.)
-        // 4. Ensure proper context (method names, not node kinds)
-        Vec::new()
+    fn find_uses<'a>(&mut self, code: &'a str) -> Vec<(&'a str, &'a str, Range)> {
+        let tree = match self.parser.parse(code, None) {
+            Some(tree) => tree,
+            None => return Vec::new(),
+        };
+
+        let root = tree.root_node();
+        let mut uses = Vec::new();
+
+        self.extract_type_uses_recursive(&root, code, &mut uses);
+
+        uses
     }
 
     fn find_defines<'a>(&mut self, _code: &'a str) -> Vec<(&'a str, &'a str, Range)> {
@@ -2126,5 +2582,212 @@ mod tests {
                 .any(|i| i.path == "System.Collections.Generic")
         );
         assert!(imports.iter().any(|i| i.path == "MyApp.Services"));
+    }
+
+    #[test]
+    fn test_csharp_find_uses_parameter_types() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public interface IRepository { }
+
+            public class UserService {
+                public void ProcessUser(IRepository repository, string name) {
+                }
+            }
+        "#;
+
+        let uses = parser.find_uses(code);
+
+        // Should find ProcessUser uses IRepository (but not string - it's primitive)
+        assert!(
+            uses.iter()
+                .any(|(context, typ, _)| *context == "ProcessUser" && *typ == "IRepository"),
+            "Should detect ProcessUser uses IRepository parameter. Found: {:?}",
+            uses
+        );
+
+        // Should NOT include primitive types like string
+        assert!(
+            !uses.iter().any(|(_, typ, _)| *typ == "string"),
+            "Should filter out primitive type 'string'"
+        );
+    }
+
+    #[test]
+    fn test_csharp_find_uses_return_types() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class Helper { }
+
+            public class Service {
+                public Helper GetHelper() {
+                    return null;
+                }
+            }
+        "#;
+
+        let uses = parser.find_uses(code);
+
+        // Should find GetHelper returns Helper
+        assert!(
+            uses.iter()
+                .any(|(context, typ, _)| *context == "GetHelper" && *typ == "Helper"),
+            "Should detect GetHelper returns Helper type. Found: {:?}",
+            uses
+        );
+    }
+
+    #[test]
+    fn test_csharp_find_uses_field_types() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class Repository { }
+
+            public class UserService {
+                private Repository _repository;
+                private int _count;
+            }
+        "#;
+
+        let uses = parser.find_uses(code);
+
+        // Should find UserService uses Repository (as field type)
+        assert!(
+            uses.iter()
+                .any(|(context, typ, _)| *context == "UserService" && *typ == "Repository"),
+            "Should detect UserService uses Repository as field type. Found: {:?}",
+            uses
+        );
+
+        // Should NOT include primitive type int
+        assert!(
+            !uses.iter().any(|(_, typ, _)| *typ == "int"),
+            "Should filter out primitive type 'int'"
+        );
+    }
+
+    #[test]
+    fn test_csharp_find_uses_property_types() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class Configuration { }
+
+            public class Application {
+                public Configuration Config { get; set; }
+            }
+        "#;
+
+        let uses = parser.find_uses(code);
+
+        // Should find Config property uses Configuration type
+        assert!(
+            uses.iter()
+                .any(|(context, typ, _)| *context == "Config" && *typ == "Configuration"),
+            "Should detect Config property uses Configuration type. Found: {:?}",
+            uses
+        );
+    }
+
+    #[test]
+    fn test_csharp_find_uses_base_classes() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class BaseEntity { }
+            public interface ILogger { }
+
+            public class User : BaseEntity, ILogger {
+            }
+        "#;
+
+        let uses = parser.find_uses(code);
+
+        // Should find User uses BaseEntity
+        assert!(
+            uses.iter()
+                .any(|(context, typ, _)| *context == "User" && *typ == "BaseEntity"),
+            "Should detect User uses BaseEntity. Found: {:?}",
+            uses
+        );
+
+        // Should find User uses ILogger
+        assert!(
+            uses.iter()
+                .any(|(context, typ, _)| *context == "User" && *typ == "ILogger"),
+            "Should detect User uses ILogger. Found: {:?}",
+            uses
+        );
+    }
+
+    #[test]
+    fn test_csharp_find_uses_generic_types() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class Item { }
+
+            public class Container {
+                private List<Item> _items;
+            }
+        "#;
+
+        let uses = parser.find_uses(code);
+
+        // Should extract List (not List<Item>)
+        assert!(
+            uses.iter()
+                .any(|(context, typ, _)| *context == "Container" && *typ == "List"),
+            "Should detect Container uses List (base type of generic). Found: {:?}",
+            uses
+        );
+    }
+
+    #[test]
+    fn test_csharp_find_uses_constructor_parameters() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class Logger { }
+
+            public class Service {
+                public Service(Logger logger) {
+                }
+            }
+        "#;
+
+        let uses = parser.find_uses(code);
+
+        // Should find Service constructor uses Logger
+        assert!(
+            uses.iter()
+                .any(|(context, typ, _)| *context == "Service" && *typ == "Logger"),
+            "Should detect Service constructor uses Logger parameter. Found: {:?}",
+            uses
+        );
+    }
+
+    #[test]
+    fn test_csharp_find_uses_filters_primitives() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class Calculator {
+                public int Add(int a, int b) {
+                    return a + b;
+                }
+
+                private string _name;
+                private bool _enabled;
+                private double _value;
+            }
+        "#;
+
+        let uses = parser.find_uses(code);
+
+        // Should NOT find any primitive types
+        let primitives = ["int", "string", "bool", "double", "void"];
+        for prim in &primitives {
+            assert!(
+                !uses.iter().any(|(_, typ, _)| typ == prim),
+                "Should filter out primitive type '{}'",
+                prim
+            );
+        }
     }
 }
