@@ -36,6 +36,29 @@ use std::any::Any;
 use std::collections::HashSet;
 use tree_sitter::{Language, Node, Parser};
 
+/// Represents an attribute (annotation) in C# code
+///
+/// Examples:
+/// - `[Serializable]` on a class
+/// - `[Required]` on a property
+/// - `[HttpGet("/api/users")]` on a method
+/// - `[Obsolete("Use NewMethod instead")]` with arguments
+#[derive(Debug, Clone, PartialEq)]
+pub struct AttributeInfo {
+    /// The name of the attribute (e.g., "Serializable", "Obsolete")
+    pub name: String,
+    /// The target symbol that this attribute is attached to (e.g., class name, method name)
+    pub target: String,
+    /// The kind of the target (Class, Method, Property, Field, Parameter, etc.)
+    pub target_kind: SymbolKind,
+    /// Positional arguments passed to the attribute
+    pub arguments: Vec<String>,
+    /// Named arguments passed to the attribute (name=value pairs)
+    pub named_arguments: Vec<(String, String)>,
+    /// Source code location of the attribute
+    pub range: Range,
+}
+
 /// C# language parser using tree-sitter
 ///
 /// This parser traverses C# Abstract Syntax Trees (AST) to extract symbols,
@@ -1764,6 +1787,276 @@ impl CSharpParser {
             self.register_node_recursively(child);
         }
     }
+
+    /// Extract attributes from C# code
+    ///
+    /// This method traverses the AST and finds all attribute (annotation) usages,
+    /// extracting the attribute name, target symbol, arguments, and location.
+    ///
+    /// # Examples
+    ///
+    /// ```csharp
+    /// [Serializable]
+    /// public class MyClass { }  // → ("Serializable", "MyClass", Class, [], [], range)
+    ///
+    /// [Required]
+    /// [MaxLength(100)]
+    /// public string Name { get; set; }  // → Multiple attributes on property
+    ///
+    /// [HttpGet("/api/users")]
+    /// [Authorize(Roles = "Admin")]
+    /// public void GetUsers() { }  // → Attributes with positional and named args
+    /// ```
+    pub fn find_attributes(&mut self, code: &str) -> Vec<AttributeInfo> {
+        let mut attributes = Vec::new();
+
+        match self.parser.parse(code, None) {
+            Some(tree) => {
+                let root_node = tree.root_node();
+                self.extract_attributes_from_node(root_node, code, &mut attributes);
+            }
+            None => {
+                eprintln!("Failed to parse C# file for attributes");
+            }
+        }
+
+        attributes
+    }
+
+    /// Recursively extract attributes from an AST node
+    fn extract_attributes_from_node(
+        &mut self,
+        node: Node,
+        code: &str,
+        attributes: &mut Vec<AttributeInfo>,
+    ) {
+        // Check if this node has attribute_list children
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if child.kind() == "attribute_list" {
+                // Found attribute list - extract all attributes and link to parent node
+                self.process_attribute_list(child, node, code, attributes);
+            }
+        }
+
+        // Recursively process children
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            self.extract_attributes_from_node(child, code, attributes);
+        }
+    }
+
+    /// Process an attribute_list node and extract all attributes within it
+    fn process_attribute_list(
+        &mut self,
+        attr_list_node: Node,
+        target_node: Node,
+        code: &str,
+        attributes: &mut Vec<AttributeInfo>,
+    ) {
+        // Determine the target symbol and its kind
+        let (target_name, target_kind) = self.determine_attribute_target(target_node, code);
+
+        // Extract each attribute in the list
+        let mut cursor = attr_list_node.walk();
+        for child in attr_list_node.children(&mut cursor) {
+            if child.kind() == "attribute" {
+                if let Some(attr_info) =
+                    self.extract_single_attribute(child, &target_name, target_kind, code)
+                {
+                    attributes.push(attr_info);
+                }
+            }
+        }
+    }
+
+    /// Determine the target symbol name and kind for an attribute
+    fn determine_attribute_target(&self, node: Node, code: &str) -> (String, SymbolKind) {
+        match node.kind() {
+            "class_declaration" => {
+                let name = self
+                    .extract_type_name(node, code)
+                    .unwrap_or_else(|| "Unknown".to_string());
+                (name, SymbolKind::Class)
+            }
+            "struct_declaration" => {
+                let name = self
+                    .extract_type_name(node, code)
+                    .unwrap_or_else(|| "Unknown".to_string());
+                (name, SymbolKind::Struct)
+            }
+            "interface_declaration" => {
+                let name = self
+                    .extract_type_name(node, code)
+                    .unwrap_or_else(|| "Unknown".to_string());
+                (name, SymbolKind::Interface)
+            }
+            "enum_declaration" => {
+                let name = self
+                    .extract_type_name(node, code)
+                    .unwrap_or_else(|| "Unknown".to_string());
+                (name, SymbolKind::Enum)
+            }
+            "record_declaration" => {
+                let name = self
+                    .extract_type_name(node, code)
+                    .unwrap_or_else(|| "Unknown".to_string());
+                (name, SymbolKind::Class)
+            }
+            "method_declaration" => {
+                let name = self
+                    .extract_type_name(node, code)
+                    .unwrap_or_else(|| "Unknown".to_string());
+                (name, SymbolKind::Method)
+            }
+            "property_declaration" => {
+                let name = self
+                    .extract_type_name(node, code)
+                    .unwrap_or_else(|| "Unknown".to_string());
+                (name, SymbolKind::Field)
+            }
+            "field_declaration" => {
+                // Fields can have multiple declarators, extract first one
+                let name = self.extract_field_name(node, code);
+                (name, SymbolKind::Variable)
+            }
+            "parameter" => {
+                let name = self.extract_parameter_name(node, code);
+                (name, SymbolKind::Variable)
+            }
+            "enum_member_declaration" => {
+                let name = node
+                    .child_by_field_name("name")
+                    .map(|n| code[n.byte_range()].to_string())
+                    .unwrap_or_else(|| "Unknown".to_string());
+                (name, SymbolKind::Constant)
+            }
+            "constructor_declaration" => {
+                let name = self
+                    .extract_type_name(node, code)
+                    .unwrap_or_else(|| "Unknown".to_string());
+                (name, SymbolKind::Method)
+            }
+            "event_declaration" | "event_field_declaration" => {
+                let name = self
+                    .extract_type_name(node, code)
+                    .unwrap_or_else(|| "Unknown".to_string());
+                (name, SymbolKind::Field)
+            }
+            "delegate_declaration" => {
+                let name = self
+                    .extract_type_name(node, code)
+                    .unwrap_or_else(|| "Unknown".to_string());
+                (name, SymbolKind::Function)
+            }
+            _ => ("Unknown".to_string(), SymbolKind::Variable),
+        }
+    }
+
+    /// Extract field name from field_declaration node
+    fn extract_field_name(&self, node: Node, code: &str) -> String {
+        // field_declaration contains variable_declaration which contains variable_declarator
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if child.kind() == "variable_declaration" {
+                let mut var_cursor = child.walk();
+                for var_child in child.children(&mut var_cursor) {
+                    if var_child.kind() == "variable_declarator" {
+                        if let Some(name_node) = var_child.child_by_field_name("name") {
+                            return code[name_node.byte_range()].to_string();
+                        }
+                    }
+                }
+            }
+        }
+        "Unknown".to_string()
+    }
+
+    /// Extract parameter name from parameter node
+    fn extract_parameter_name(&self, node: Node, code: &str) -> String {
+        if let Some(name_node) = node.child_by_field_name("name") {
+            code[name_node.byte_range()].to_string()
+        } else {
+            "Unknown".to_string()
+        }
+    }
+
+    /// Extract a single attribute with its name and arguments
+    fn extract_single_attribute(
+        &self,
+        attr_node: Node,
+        target_name: &str,
+        target_kind: SymbolKind,
+        code: &str,
+    ) -> Option<AttributeInfo> {
+        // Extract attribute name
+        let name_node = attr_node.child_by_field_name("name")?;
+        let attr_name = self.extract_simple_type_name(&name_node, code).to_string();
+
+        // Extract arguments
+        let (positional_args, named_args) = self.extract_attribute_arguments(attr_node, code);
+
+        Some(AttributeInfo {
+            name: attr_name,
+            target: target_name.to_string(),
+            target_kind,
+            arguments: positional_args,
+            named_arguments: named_args,
+            range: Range::new(
+                attr_node.start_position().row as u32,
+                attr_node.start_position().column as u16,
+                attr_node.end_position().row as u32,
+                attr_node.end_position().column as u16,
+            ),
+        })
+    }
+
+    /// Extract positional and named arguments from an attribute
+    fn extract_attribute_arguments(
+        &self,
+        attr_node: Node,
+        code: &str,
+    ) -> (Vec<String>, Vec<(String, String)>) {
+        let mut positional = Vec::new();
+        let mut named = Vec::new();
+
+        // Find attribute_argument_list as a child node (not a field)
+        let mut cursor = attr_node.walk();
+        for child in attr_node.children(&mut cursor) {
+            if child.kind() == "attribute_argument_list" {
+                // Process each attribute_argument inside the list
+                let mut arg_cursor = child.walk();
+                for arg_child in child.children(&mut arg_cursor) {
+                    if arg_child.kind() == "attribute_argument" {
+                        // Check if the first child is an assignment_expression (named argument)
+                        if let Some(first_child) = arg_child.child(0) {
+                            if first_child.kind() == "assignment_expression" {
+                                // Named argument: Name = Value
+                                // Extract left (name) and right (value) using fields
+                                if let Some(left_node) = first_child.child_by_field_name("left") {
+                                    if let Some(right_node) =
+                                        first_child.child_by_field_name("right")
+                                    {
+                                        let name = code[left_node.byte_range()].to_string();
+                                        let value =
+                                            code[right_node.byte_range()].trim().to_string();
+                                        named.push((name, value));
+                                    }
+                                }
+                            } else {
+                                // Positional argument - just extract the expression
+                                let value = code[first_child.byte_range()].trim().to_string();
+                                positional.push(value);
+                            }
+                        }
+                    }
+                }
+                break;
+            }
+        }
+
+        (positional, named)
+    }
 }
 
 impl NodeTracker for CSharpParser {
@@ -2126,5 +2419,423 @@ mod tests {
                 .any(|i| i.path == "System.Collections.Generic")
         );
         assert!(imports.iter().any(|i| i.path == "MyApp.Services"));
+    }
+
+    #[test]
+    fn test_csharp_attribute_on_class() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+[Serializable]
+public class MyClass
+{
+    public string Name { get; set; }
+}
+"#;
+
+        let attributes = parser.find_attributes(code);
+
+        // Should find one attribute on class
+        assert_eq!(
+            attributes.len(),
+            1,
+            "Expected 1 attribute, found: {}",
+            attributes.len()
+        );
+
+        let attr = &attributes[0];
+        assert_eq!(attr.name, "Serializable");
+        assert_eq!(attr.target, "MyClass");
+        assert_eq!(attr.target_kind, SymbolKind::Class);
+        assert!(
+            attr.arguments.is_empty(),
+            "Should have no positional arguments"
+        );
+        assert!(
+            attr.named_arguments.is_empty(),
+            "Should have no named arguments"
+        );
+    }
+
+    #[test]
+    fn test_csharp_attribute_on_property() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+public class MyClass
+{
+    [Required]
+    public string Name { get; set; }
+}
+"#;
+
+        let attributes = parser.find_attributes(code);
+
+        // Should find one attribute on property
+        assert_eq!(attributes.len(), 1);
+
+        let attr = &attributes[0];
+        assert_eq!(attr.name, "Required");
+        assert_eq!(attr.target, "Name");
+        assert_eq!(attr.target_kind, SymbolKind::Field);
+    }
+
+    #[test]
+    fn test_csharp_attribute_on_method() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+public class MyClass
+{
+    [HttpGet("/api/users")]
+    public void GetUsers() { }
+}
+"#;
+
+        let attributes = parser.find_attributes(code);
+
+        // Should find one attribute on method
+        assert_eq!(attributes.len(), 1);
+
+        let attr = &attributes[0];
+        assert_eq!(attr.name, "HttpGet");
+        assert_eq!(attr.target, "GetUsers");
+        assert_eq!(attr.target_kind, SymbolKind::Method);
+        assert_eq!(attr.arguments.len(), 1, "Should have 1 positional argument");
+        assert_eq!(attr.arguments[0], "\"/api/users\"");
+    }
+
+    #[test]
+    fn test_csharp_attribute_with_named_argument() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+public class MyClass
+{
+    [Authorize(Roles = "Admin")]
+    public void SecureMethod() { }
+}
+"#;
+
+        let attributes = parser.find_attributes(code);
+
+        // Should find one attribute with named argument
+        assert_eq!(attributes.len(), 1);
+
+        let attr = &attributes[0];
+        assert_eq!(attr.name, "Authorize");
+        assert_eq!(attr.target, "SecureMethod");
+        assert_eq!(
+            attr.named_arguments.len(),
+            1,
+            "Should have 1 named argument"
+        );
+        assert_eq!(attr.named_arguments[0].0, "Roles");
+        assert_eq!(attr.named_arguments[0].1, "\"Admin\"");
+    }
+
+    #[test]
+    fn test_csharp_multiple_attributes_on_one_target() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+public class MyClass
+{
+    [Required]
+    [MaxLength(100)]
+    [EmailAddress]
+    public string Email { get; set; }
+}
+"#;
+
+        let attributes = parser.find_attributes(code);
+
+        // Should find three attributes on the same property
+        assert_eq!(
+            attributes.len(),
+            3,
+            "Expected 3 attributes, found: {}",
+            attributes.len()
+        );
+
+        // All should target the same property
+        assert!(attributes.iter().all(|a| a.target == "Email"));
+
+        // Check attribute names
+        let names: Vec<&str> = attributes.iter().map(|a| a.name.as_str()).collect();
+        assert!(names.contains(&"Required"));
+        assert!(names.contains(&"MaxLength"));
+        assert!(names.contains(&"EmailAddress"));
+
+        // MaxLength should have one positional argument
+        let maxlength = attributes.iter().find(|a| a.name == "MaxLength").unwrap();
+        assert_eq!(maxlength.arguments.len(), 1);
+        assert_eq!(maxlength.arguments[0], "100");
+    }
+
+    #[test]
+    fn test_csharp_attributes_on_multiple_targets() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+[Serializable]
+public class MyClass
+{
+    [Required]
+    public string Name { get; set; }
+
+    [HttpGet("/api/users")]
+    public void GetUsers() { }
+}
+"#;
+
+        let attributes = parser.find_attributes(code);
+
+        // Should find three attributes on different targets
+        assert_eq!(attributes.len(), 3);
+
+        // One on class
+        let class_attrs: Vec<_> = attributes
+            .iter()
+            .filter(|a| a.target == "MyClass")
+            .collect();
+        assert_eq!(class_attrs.len(), 1);
+        assert_eq!(class_attrs[0].name, "Serializable");
+
+        // One on property
+        let prop_attrs: Vec<_> = attributes.iter().filter(|a| a.target == "Name").collect();
+        assert_eq!(prop_attrs.len(), 1);
+        assert_eq!(prop_attrs[0].name, "Required");
+
+        // One on method
+        let method_attrs: Vec<_> = attributes
+            .iter()
+            .filter(|a| a.target == "GetUsers")
+            .collect();
+        assert_eq!(method_attrs.len(), 1);
+        assert_eq!(method_attrs[0].name, "HttpGet");
+    }
+
+    #[test]
+    fn test_csharp_attribute_with_multiple_arguments() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+public class MyClass
+{
+    [Obsolete("Use NewMethod instead", true)]
+    public void OldMethod() { }
+}
+"#;
+
+        let attributes = parser.find_attributes(code);
+
+        assert_eq!(attributes.len(), 1);
+
+        let attr = &attributes[0];
+        assert_eq!(attr.name, "Obsolete");
+        assert_eq!(
+            attr.arguments.len(),
+            2,
+            "Should have 2 positional arguments"
+        );
+        assert_eq!(attr.arguments[0], "\"Use NewMethod instead\"");
+        assert_eq!(attr.arguments[1], "true");
+    }
+
+    #[test]
+    fn test_csharp_attribute_on_field() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+public class MyClass
+{
+    [NonSerialized]
+    private int _count;
+}
+"#;
+
+        let attributes = parser.find_attributes(code);
+
+        assert_eq!(attributes.len(), 1);
+
+        let attr = &attributes[0];
+        assert_eq!(attr.name, "NonSerialized");
+        assert_eq!(attr.target, "_count");
+        assert_eq!(attr.target_kind, SymbolKind::Variable);
+    }
+
+    #[test]
+    fn test_csharp_attribute_on_parameter() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+public class MyClass
+{
+    public void Process([FromBody] string data) { }
+}
+"#;
+
+        let attributes = parser.find_attributes(code);
+
+        assert_eq!(attributes.len(), 1);
+
+        let attr = &attributes[0];
+        assert_eq!(attr.name, "FromBody");
+        assert_eq!(attr.target, "data");
+        assert_eq!(attr.target_kind, SymbolKind::Variable);
+    }
+
+    #[test]
+    fn test_csharp_attribute_on_struct() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+[StructLayout(LayoutKind.Sequential)]
+public struct Point
+{
+    public int X;
+    public int Y;
+}
+"#;
+
+        let attributes = parser.find_attributes(code);
+
+        // Should find attribute on struct
+        let struct_attrs: Vec<_> = attributes.iter().filter(|a| a.target == "Point").collect();
+        assert_eq!(struct_attrs.len(), 1);
+        assert_eq!(struct_attrs[0].name, "StructLayout");
+        assert_eq!(struct_attrs[0].target_kind, SymbolKind::Struct);
+    }
+
+    #[test]
+    fn test_csharp_attribute_on_interface() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+[ServiceContract]
+public interface IMyService
+{
+    void DoWork();
+}
+"#;
+
+        let attributes = parser.find_attributes(code);
+
+        assert_eq!(attributes.len(), 1);
+
+        let attr = &attributes[0];
+        assert_eq!(attr.name, "ServiceContract");
+        assert_eq!(attr.target, "IMyService");
+        assert_eq!(attr.target_kind, SymbolKind::Interface);
+    }
+
+    #[test]
+    fn test_csharp_attribute_on_enum() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+[Flags]
+public enum FileAccess
+{
+    Read = 1,
+    Write = 2,
+    Execute = 4
+}
+"#;
+
+        let attributes = parser.find_attributes(code);
+
+        // Should find attribute on enum
+        let enum_attrs: Vec<_> = attributes
+            .iter()
+            .filter(|a| a.target == "FileAccess")
+            .collect();
+        assert_eq!(enum_attrs.len(), 1);
+        assert_eq!(enum_attrs[0].name, "Flags");
+        assert_eq!(enum_attrs[0].target_kind, SymbolKind::Enum);
+    }
+
+    #[test]
+    fn test_csharp_attribute_mixed_positional_and_named() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+public class MyClass
+{
+    [Route("/api/users", Name = "GetUsers", Order = 1)]
+    public void GetUsers() { }
+}
+"#;
+
+        let attributes = parser.find_attributes(code);
+
+        assert_eq!(attributes.len(), 1);
+
+        let attr = &attributes[0];
+        assert_eq!(attr.name, "Route");
+
+        // Should have 1 positional argument
+        assert_eq!(attr.arguments.len(), 1);
+        assert_eq!(attr.arguments[0], "\"/api/users\"");
+
+        // Should have 2 named arguments
+        assert_eq!(attr.named_arguments.len(), 2);
+
+        let named_map: std::collections::HashMap<_, _> = attr
+            .named_arguments
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+        assert_eq!(named_map.get("Name"), Some(&"\"GetUsers\""));
+        assert_eq!(named_map.get("Order"), Some(&"1"));
+    }
+
+    #[test]
+    fn test_csharp_no_attributes() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+public class MyClass
+{
+    public string Name { get; set; }
+    public void DoWork() { }
+}
+"#;
+
+        let attributes = parser.find_attributes(code);
+
+        // Should find no attributes
+        assert_eq!(attributes.len(), 0);
+    }
+
+    #[test]
+    fn test_debug_attribute_ast() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+public class MyClass
+{
+    [Authorize(Roles = "Admin")]
+    public void SecureMethod() { }
+}
+"#;
+
+        if let Some(tree) = parser.parser.parse(code, None) {
+            let root = tree.root_node();
+            fn print_tree(node: tree_sitter::Node, code: &str, depth: usize, max_depth: usize) {
+                if depth <= max_depth {
+                    let indent = "  ".repeat(depth);
+                    let text = &code[node.byte_range()];
+                    let preview = if text.len() > 40 {
+                        format!("{}...", &text[..40].replace('\n', "\\n"))
+                    } else {
+                        text.replace('\n', "\\n")
+                    };
+                    println!(
+                        "{}kind: {}, id: {}, fields: {:?}, text: {:?}",
+                        indent,
+                        node.kind(),
+                        node.kind_id(),
+                        (0..node.child_count())
+                            .filter_map(|i| node.field_name_for_child(i as u32))
+                            .collect::<Vec<_>>(),
+                        preview
+                    );
+
+                    let mut cursor = node.walk();
+                    for child in node.children(&mut cursor) {
+                        print_tree(child, code, depth + 1, max_depth);
+                    }
+                }
+            }
+            println!("\n=== Named Argument AST Structure ===");
+            print_tree(root, code, 0, 10);
+        }
     }
 }
