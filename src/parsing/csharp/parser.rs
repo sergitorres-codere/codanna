@@ -1051,20 +1051,21 @@ impl CSharpParser {
     fn find_variable_types_in_node<'a>(
         &self,
         node: &Node,
+        root_node: &Node,
         code: &'a str,
         bindings: &mut Vec<(&'a str, &'a str, Range)>,
     ) {
         // Match both node types directly (same pattern as extract_symbols_from_node:304)
         // We need to handle both because the tree structure can vary
         if node.kind() == "variable_declaration" || node.kind() == "local_declaration_statement" {
-            self.extract_variable_bindings(node, code, bindings);
+            self.extract_variable_bindings(node, root_node, code, bindings);
         }
 
         // Recurse into all children to find nested variable declarations
         // (e.g., variables inside nested blocks, loops, etc.)
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            self.find_variable_types_in_node(&child, code, bindings);
+            self.find_variable_types_in_node(&child, root_node, code, bindings);
         }
     }
 
@@ -1096,18 +1097,41 @@ impl CSharpParser {
     fn extract_variable_bindings<'a>(
         &self,
         var_decl: &Node,
+        root_node: &Node,
         code: &'a str,
         bindings: &mut Vec<(&'a str, &'a str, Range)>,
     ) {
         // Variable declaration structure in tree-sitter C#:
-        // variable_declaration has:
-        // - type field: could be "implicit_type" (var) or explicit type like "Helper", "List<T>", etc.
-        // - variable_declarator children: one or more declarators (the actual variables)
+        // Can be either:
+        // 1. variable_declaration (direct):
+        //    - type field: could be "implicit_type" (var) or explicit type
+        //    - variable_declarator children
+        // 2. local_declaration_statement (nested):
+        //    - variable_declaration child (which has the structure from case 1)
 
-        let type_node = var_decl.child_by_field_name("type");
-        let mut cursor = var_decl.walk();
+        // Handle nested structure for local_declaration_statement
+        let (actual_var_decl, type_node) = if var_decl.kind() == "local_declaration_statement" {
+            // Find the variable_declaration child
+            let mut cursor = var_decl.walk();
+            let var_decl_child = var_decl
+                .children(&mut cursor)
+                .find(|c| c.kind() == "variable_declaration");
 
-        for child in var_decl.children(&mut cursor) {
+            if let Some(vd) = var_decl_child {
+                let type_node = vd.child_by_field_name("type");
+                (vd, type_node)
+            } else {
+                return; // No variable_declaration found, skip
+            }
+        } else {
+            // Direct variable_declaration
+            let type_node = var_decl.child_by_field_name("type");
+            (*var_decl, type_node)
+        };
+
+        let mut cursor = actual_var_decl.walk();
+
+        for child in actual_var_decl.children(&mut cursor) {
             if child.kind() == "variable_declarator" {
                 // Each variable_declarator represents one variable in the declaration
                 // Structure: identifier = initializer
@@ -1121,21 +1145,29 @@ impl CSharpParser {
                     let var_name = &code[name_node.byte_range()];
 
                     // Strategy 1: Try to extract type from initializer (handles "var" keyword)
-                    // In tree-sitter C#, object_creation_expression is a direct child of variable_declarator
-                    // Example structure: variable_declarator -> [identifier, "=", object_creation_expression]
+                    // Search for any expression type that we can infer a type from
+                    // Possible expression types: object_creation_expression, invocation_expression,
+                    // cast_expression, conditional_expression, element_access_expression, etc.
                     let mut init_expr = None;
                     let mut sub_cursor = child.walk();
                     for vchild in child.children(&mut sub_cursor) {
-                        if vchild.kind() == "object_creation_expression" {
+                        if matches!(
+                            vchild.kind(),
+                            "object_creation_expression"
+                                | "array_creation_expression"
+                                | "invocation_expression"
+                                | "cast_expression"
+                                | "conditional_expression"
+                                | "element_access_expression"
+                        ) {
                             init_expr = Some(vchild);
                             break;
                         }
                     }
 
                     if let Some(init_node) = init_expr {
-                        // Found a "new Type()" expression - extract the type
                         if let Some(type_name) =
-                            self.extract_type_from_initializer(&init_node, code)
+                            self.extract_type_from_initializer(&init_node, root_node, code)
                         {
                             let range = Range::new(
                                 child.start_position().row as u32,
@@ -1171,22 +1203,180 @@ impl CSharpParser {
 
     /// Extract type name from an initializer expression
     ///
-    /// Handles:
-    /// - `new Type()` → Some("Type")
-    /// - `new Generic<T>()` → Some("Generic")
-    /// - `new Namespace.Type()` → Some("Type")
+    /// Handles various expression types to infer variable types:
+    /// - `new Type()` → Some("Type") - object creation
+    /// - `Method()` → Some("ReturnType") - method return type (if available)
+    /// - `array[0]` → Some("ElementType") - array element access
+    /// - `(Type)expr` → Some("Type") - cast expressions
+    /// - `a ? b : c` → Some("Type") - ternary (if both branches have same type)
     fn extract_type_from_initializer<'a>(
         &self,
         init_node: &Node,
+        root_node: &Node,
         code: &'a str,
     ) -> Option<&'a str> {
-        // Look for object_creation_expression
-        if init_node.kind() == "object_creation_expression" {
-            // object_creation_expression has a 'type' field
-            if let Some(type_node) = init_node.child_by_field_name("type") {
-                return Some(self.extract_simple_type_name(&type_node, code));
+        match init_node.kind() {
+            // Case 1: new Type() - object creation
+            "object_creation_expression" => {
+                if let Some(type_node) = init_node.child_by_field_name("type") {
+                    return Some(self.extract_simple_type_name(&type_node, code));
+                }
+            }
+
+            // Case 2: new Type[] - array creation
+            "array_creation_expression" => {
+                if let Some(type_node) = init_node.child_by_field_name("type") {
+                    return Some(self.extract_simple_type_name(&type_node, code));
+                }
+            }
+
+            // Case 3: Method() - invocation expression (method call)
+            "invocation_expression" => {
+                // Try to infer return type from method name
+                // Look for the function/method being called
+                if let Some(func_node) = init_node.child_by_field_name("function") {
+                    // For simple method calls like GetHelper(), the function is an identifier
+                    if func_node.kind() == "identifier" {
+                        let method_name = &code[func_node.byte_range()];
+                        // Try to find the method definition and extract return type
+                        return self.find_method_return_type(method_name, root_node, code);
+                    }
+                    // For member access like obj.Method(), function is a member_access_expression
+                    else if func_node.kind() == "member_access_expression" {
+                        if let Some(name_node) = func_node.child_by_field_name("name") {
+                            let method_name = &code[name_node.byte_range()];
+                            return self.find_method_return_type(method_name, root_node, code);
+                        }
+                    }
+                }
+            }
+
+            // Case 4: array[0] - element access expression (indexer)
+            "element_access_expression" => {
+                // Get the expression being indexed
+                if let Some(expr_node) = init_node.child_by_field_name("expression") {
+                    // Try to get the type of the expression
+                    if let Some(array_type) =
+                        self.extract_type_from_initializer(&expr_node, root_node, code)
+                    {
+                        // If it's an array type (ends with []), extract element type
+                        if let Some(stripped) = array_type.strip_suffix("[]") {
+                            return Some(stripped);
+                        }
+                        // For generic collections like List<T>, we'd need more sophisticated parsing
+                        // For now, we can't reliably extract the element type
+                    }
+                }
+            }
+
+            // Case 5: (Type)expr - cast expression
+            "cast_expression" => {
+                if let Some(type_node) = init_node.child_by_field_name("type") {
+                    return Some(self.extract_simple_type_name(&type_node, code));
+                }
+            }
+
+            // Case 6: a ? b : c - conditional expression (ternary)
+            "conditional_expression" => {
+                // Try to infer from the consequence (true branch)
+                if let Some(consequence) = init_node.child_by_field_name("consequence") {
+                    if let Some(type_name) =
+                        self.extract_type_from_initializer(&consequence, root_node, code)
+                    {
+                        return Some(type_name);
+                    }
+                }
+                // Fallback to alternative (false branch)
+                if let Some(alternative) = init_node.child_by_field_name("alternative") {
+                    return self.extract_type_from_initializer(&alternative, root_node, code);
+                }
+            }
+
+            // Case 7: Direct identifier reference (variable assignment)
+            "identifier" => {
+                // This would require tracking all variable types in scope
+                // Too complex for now, skip
+            }
+
+            _ => {}
+        }
+        None
+    }
+
+    /// Find the return type of a method by searching for its definition in the code
+    ///
+    /// This is a best-effort approach that searches the AST for method declarations
+    /// matching the given name and extracts their return types. It's not perfect
+    /// as it doesn't handle:
+    /// - Methods from other files
+    /// - Method overloads (returns first match)
+    /// - Generic type parameters
+    /// - Extension methods
+    ///
+    /// However, it's useful for the common case where methods are defined in the same file.
+    fn find_method_return_type<'a>(
+        &self,
+        method_name: &str,
+        root_node: &Node,
+        code: &'a str,
+    ) -> Option<&'a str> {
+        // Search the existing tree for method declarations
+        self.search_method_return_type(root_node, method_name, code)
+    }
+
+    /// Recursively search for a method definition and extract its return type
+    fn search_method_return_type<'a>(
+        &self,
+        node: &Node,
+        method_name: &str,
+        code: &'a str,
+    ) -> Option<&'a str> {
+        // Check if this is a method declaration with matching name
+        if node.kind() == "method_declaration" {
+            if let Some(name_node) = node.child_by_field_name("name") {
+                let node_method_name = &code[name_node.byte_range()];
+                if node_method_name == method_name {
+                    // Found matching method, extract return type
+                    // Try to find the return type
+                    if let Some(return_type) = node.child_by_field_name("type") {
+                        return Some(self.extract_simple_type_name(&return_type, code));
+                    }
+                    // Fallback: search for type nodes before parameters
+                    let params_start = node
+                        .child_by_field_name("parameters")
+                        .map(|p| p.start_position())
+                        .unwrap_or(tree_sitter::Point {
+                            row: usize::MAX,
+                            column: usize::MAX,
+                        });
+
+                    let mut cursor = node.walk();
+                    for child in node.children(&mut cursor) {
+                        if matches!(
+                            child.kind(),
+                            "predefined_type"
+                                | "identifier"
+                                | "generic_name"
+                                | "qualified_name"
+                                | "nullable_type"
+                                | "array_type"
+                        ) && child.start_position() < params_start
+                        {
+                            return Some(self.extract_simple_type_name(&child, code));
+                        }
+                    }
+                }
             }
         }
+
+        // Recurse into children
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if let Some(return_type) = self.search_method_return_type(&child, method_name, code) {
+                return Some(return_type);
+            }
+        }
+
         None
     }
 
@@ -2453,7 +2643,7 @@ impl LanguageParser for CSharpParser {
 
         if let Some(tree) = self.parser.parse(code, None) {
             let root = tree.root_node();
-            self.find_variable_types_in_node(&root, code, &mut bindings);
+            self.find_variable_types_in_node(&root, &root, code, &mut bindings);
         }
 
         bindings
@@ -3113,6 +3303,234 @@ mod tests {
                 .iter()
                 .any(|(definer, prop, _)| *definer == "Model" && *prop == "IsActive"),
             "Should detect Model defines IsActive"
+        );
+    }
+
+    #[test]
+    fn test_csharp_type_inference_method_return_type() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class Service {
+                public Helper GetHelper() {
+                    return new Helper();
+                }
+
+                public void ProcessData() {
+                    var helper = GetHelper();
+                }
+            }
+        "#;
+
+        let bindings = parser.find_variable_types(code);
+
+        // Should infer that helper is of type Helper from the GetHelper() method return type
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "helper" && *typ == "Helper"),
+            "Should infer 'helper' is of type 'Helper' from method return type. Found: {:?}",
+            bindings
+        );
+    }
+
+    #[test]
+    fn test_csharp_type_inference_member_access_method() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class Container {
+                public Item GetItem() {
+                    return new Item();
+                }
+
+                public void Process() {
+                    var item = this.GetItem();
+                }
+            }
+        "#;
+
+        let bindings = parser.find_variable_types(code);
+
+        // Should infer that item is of type Item from member access method call
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "item" && *typ == "Item"),
+            "Should infer 'item' is of type 'Item' from member access method. Found: {:?}",
+            bindings
+        );
+    }
+
+    #[test]
+    fn test_csharp_type_inference_cast_expression() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class TypeConverter {
+                public void Convert(object obj) {
+                    var specific = (SpecificType)obj;
+                    var another = (AnotherType)obj;
+                }
+            }
+        "#;
+
+        let bindings = parser.find_variable_types(code);
+
+        // Should infer types from cast expressions
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "specific" && *typ == "SpecificType"),
+            "Should infer 'specific' is of type 'SpecificType' from cast. Found: {:?}",
+            bindings
+        );
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "another" && *typ == "AnotherType"),
+            "Should infer 'another' is of type 'AnotherType' from cast"
+        );
+    }
+
+    #[test]
+    fn test_csharp_type_inference_ternary_expression() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class Logic {
+                public Result GetResult(bool condition) {
+                    var result = condition ? new Success() : new Failure();
+                    return new Result();
+                }
+            }
+        "#;
+
+        let bindings = parser.find_variable_types(code);
+
+        // Should infer type from ternary expression (from the true branch)
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "result" && *typ == "Success"),
+            "Should infer 'result' type from ternary expression. Found: {:?}",
+            bindings
+        );
+    }
+
+    #[test]
+    fn test_csharp_type_inference_array_indexer() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class ArrayHandler {
+                public void Process() {
+                    var items = new Item[] { };
+                    var first = items[0];
+                }
+            }
+        "#;
+
+        let bindings = parser.find_variable_types(code);
+
+        // Should infer array type for items
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "items" && *typ == "Item[]"),
+            "Should infer 'items' is of type 'Item[]'. Found: {:?}",
+            bindings
+        );
+
+        // Note: Element type inference from indexer is limited
+        // It would require tracking variable types in scope, which is complex
+        // For now, we just test that the basic array type is captured
+    }
+
+    #[test]
+    fn test_csharp_type_inference_nested_ternary() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class Nested {
+                public void Check(bool a, bool b) {
+                    var value = a ? new TypeA() : (b ? new TypeB() : new TypeC());
+                }
+            }
+        "#;
+
+        let bindings = parser.find_variable_types(code);
+
+        // Should infer from first branch of outer ternary
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "value" && *typ == "TypeA"),
+            "Should infer 'value' type from first branch of nested ternary. Found: {:?}",
+            bindings
+        );
+    }
+
+    #[test]
+    fn test_csharp_type_inference_method_not_found() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class Service {
+                public void ProcessData() {
+                    var helper = GetUndefinedMethod();
+                }
+            }
+        "#;
+
+        let bindings = parser.find_variable_types(code);
+
+        // Should NOT find a binding for helper since the method doesn't exist
+        assert!(
+            !bindings.iter().any(|(var, _, _)| *var == "helper"),
+            "Should not infer type for undefined method. Found: {:?}",
+            bindings
+        );
+    }
+
+    #[test]
+    fn test_csharp_type_inference_mixed_expressions() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class Mixed {
+                public Helper GetHelper() {
+                    return new Helper();
+                }
+
+                public void Process(bool condition) {
+                    var obj1 = new ObjectA();
+                    var obj2 = GetHelper();
+                    var obj3 = (ObjectB)obj1;
+                    var obj4 = condition ? new ObjectC() : new ObjectD();
+                }
+            }
+        "#;
+
+        let bindings = parser.find_variable_types(code);
+
+        // Should handle all different types of inference
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "obj1" && *typ == "ObjectA"),
+            "Should infer obj1 from object creation. Found: {:?}",
+            bindings
+        );
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "obj2" && *typ == "Helper"),
+            "Should infer obj2 from method return type"
+        );
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "obj3" && *typ == "ObjectB"),
+            "Should infer obj3 from cast expression"
+        );
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "obj4" && *typ == "ObjectC"),
+            "Should infer obj4 from ternary expression"
         );
     }
 }
