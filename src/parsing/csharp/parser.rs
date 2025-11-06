@@ -1284,24 +1284,22 @@ impl CSharpParser {
     ) {
         match pattern.kind() {
             "declaration_pattern" => {
-                // Structure: type + designation (variable name)
+                // Structure: type + name (variable identifier)
                 // Example: "string s" in "obj is string s"
-                if let (Some(type_node), Some(designation)) = (
+                // Fields: type (required), name (optional identifier)
+                if let (Some(type_node), Some(name_node)) = (
                     pattern.child_by_field_name("type"),
-                    pattern.child_by_field_name("designation"),
+                    pattern.child_by_field_name("name"),
                 ) {
-                    if let Some(var_name) =
-                        self.extract_identifier_from_designation(&designation, code)
-                    {
-                        let type_name = self.extract_simple_type_name(&type_node, code);
-                        let range = Range::new(
-                            pattern.start_position().row as u32,
-                            pattern.start_position().column as u16,
-                            pattern.end_position().row as u32,
-                            pattern.end_position().column as u16,
-                        );
-                        bindings.push((var_name, type_name, range));
-                    }
+                    let var_name = &code[name_node.byte_range()];
+                    let type_name = self.extract_simple_type_name(&type_node, code);
+                    let range = Range::new(
+                        pattern.start_position().row as u32,
+                        pattern.start_position().column as u16,
+                        pattern.end_position().row as u32,
+                        pattern.end_position().column as u16,
+                    );
+                    bindings.push((var_name, type_name, range));
                 }
             }
             "recursive_pattern" => {
@@ -1352,30 +1350,6 @@ impl CSharpParser {
         }
     }
 
-    /// Extract identifier from a variable designation
-    fn extract_identifier_from_designation<'a>(
-        &self,
-        designation: &Node,
-        code: &'a str,
-    ) -> Option<&'a str> {
-        // designation can be:
-        // - single_variable_designation with identifier child
-        // - identifier directly
-        match designation.kind() {
-            "single_variable_designation" => {
-                let mut cursor = designation.walk();
-                for child in designation.children(&mut cursor) {
-                    if child.kind() == "identifier" {
-                        return Some(&code[child.byte_range()]);
-                    }
-                }
-                None
-            }
-            "identifier" => Some(&code[designation.byte_range()]),
-            _ => None,
-        }
-    }
-
     /// Extract variable bindings from switch expressions (C# 8.0+)
     ///
     /// Handles switch expressions like:
@@ -1398,9 +1372,17 @@ impl CSharpParser {
         let mut cursor = switch_expr.walk();
         for child in switch_expr.children(&mut cursor) {
             if child.kind() == "switch_expression_arm" {
-                // Each arm has: pattern => expression
-                if let Some(pattern) = child.child_by_field_name("pattern") {
-                    self.extract_type_from_pattern(&pattern, code, bindings);
+                // Each arm has children: pattern and expression (no fields defined)
+                // Need to iterate children to find the pattern node
+                let mut arm_cursor = child.walk();
+                for arm_child in child.children(&mut arm_cursor) {
+                    // Look for pattern nodes (various pattern types)
+                    if arm_child.kind().contains("pattern")
+                        || arm_child.kind() == "declaration_pattern"
+                    {
+                        self.extract_type_from_pattern(&arm_child, code, bindings);
+                        break; // Only process first pattern in arm
+                    }
                 }
             }
         }
@@ -1433,18 +1415,36 @@ impl CSharpParser {
         bindings: &mut Vec<(&'a str, &'a str, Range)>,
     ) {
         // Process all clauses in the query expression
+        // Special handling: identifier after group_clause is the "into" variable
         let mut cursor = query_expr.walk();
-        for child in query_expr.children(&mut cursor) {
+        let children: Vec<_> = query_expr.children(&mut cursor).collect();
+
+        for (i, child) in children.iter().enumerate() {
             match child.kind() {
                 "from_clause" => {
-                    self.extract_from_clause_binding(&child, code, bindings);
+                    self.extract_from_clause_binding(child, code, bindings);
                 }
                 "join_clause" => {
-                    self.extract_join_clause_binding(&child, code, bindings);
+                    self.extract_join_clause_binding(child, code, bindings);
                 }
                 "group_clause" => {
-                    // group clause can have an "into" that creates a new range variable
-                    self.extract_group_into_binding(&child, code, bindings);
+                    // Look for "into" keyword followed by identifier
+                    // Pattern: group_clause ... "into" identifier
+                    for j in (i + 1)..children.len() {
+                        if &code[children[j].byte_range()] == "into" && j + 1 < children.len() {
+                            if children[j + 1].kind() == "identifier" {
+                                let into_var = &code[children[j + 1].byte_range()];
+                                let range = Range::new(
+                                    children[j + 1].start_position().row as u32,
+                                    children[j + 1].start_position().column as u16,
+                                    children[j + 1].end_position().row as u32,
+                                    children[j + 1].end_position().column as u16,
+                                );
+                                bindings.push((into_var, "IGrouping", range));
+                                break;
+                            }
+                        }
+                    }
                 }
                 _ => {}
             }
@@ -1591,46 +1591,6 @@ impl CSharpParser {
                 join_clause.end_position().column as u16,
             );
             bindings.push((var_name, type_name, range));
-        }
-    }
-
-    /// Extract range variable from group...into clause
-    ///
-    /// Example:
-    /// - `group item by item.Category into g` → track "g" as grouping variable
-    ///
-    /// Note: The type of the grouping variable is `IGrouping<TKey, TElement>` but
-    /// extracting this requires more complex type inference
-    fn extract_group_into_binding<'a>(
-        &self,
-        group_clause: &Node,
-        code: &'a str,
-        bindings: &mut Vec<(&'a str, &'a str, Range)>,
-    ) {
-        // Look for "into" identifier following the group clause
-        let mut found_into = false;
-        let mut cursor = group_clause.walk();
-        for child in group_clause.children(&mut cursor) {
-            if child.kind() == "into" {
-                found_into = true;
-                continue;
-            }
-
-            if found_into && child.kind() == "identifier" {
-                // This is the grouping variable
-                let var_name = &code[child.byte_range()];
-                // Type would be IGrouping<TKey, TElement> but we can't infer without
-                // full type analysis. For now, just track the variable name.
-                // We could use a placeholder type like "IGrouping" for basic tracking
-                let range = Range::new(
-                    child.start_position().row as u32,
-                    child.start_position().column as u16,
-                    child.end_position().row as u32,
-                    child.end_position().column as u16,
-                );
-                bindings.push((var_name, "IGrouping", range));
-                break;
-            }
         }
     }
 
@@ -3012,7 +2972,7 @@ mod tests {
         );
         // Should find both pattern and LINQ variables in switch expression
         assert!(
-            bindings.iter().any(|(var, typ, _)| *var == "people"),
+            bindings.iter().any(|(var, _, _)| *var == "people"),
             "Should find 'people' from switch pattern. Found: {:?}",
             bindings
         );
@@ -3023,5 +2983,80 @@ mod tests {
             "Should find 'p' from nested LINQ. Found: {:?}",
             bindings
         );
+    }
+}
+
+#[cfg(test)]
+mod debug {
+    use super::*;
+
+    #[test]
+    #[ignore]
+    fn debug_pattern_ast() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+public void Test(object obj) {
+    if (obj is string s) {
+        Console.WriteLine(s);
+    }
+}
+"#;
+
+        let tree = parser.parser.parse(code, None).unwrap();
+        let root = tree.root_node();
+        print_tree(&root, code, 0);
+    }
+
+    fn print_tree(node: &tree_sitter::Node, code: &str, depth: usize) {
+        let indent = "  ".repeat(depth);
+        println!("{}kind: {}", indent, node.kind());
+
+        if node.kind() == "is_pattern_expression" {
+            println!("{}  *** FOUND IS_PATTERN_EXPRESSION ***", indent);
+            println!("{}  text: {}", indent, &code[node.byte_range()]);
+
+            // Check available fields
+            if let Some(left) = node.child_by_field_name("left") {
+                println!(
+                    "{}  left: {} '{}'",
+                    indent,
+                    left.kind(),
+                    &code[left.byte_range()]
+                );
+            }
+            if let Some(pattern) = node.child_by_field_name("pattern") {
+                println!(
+                    "{}  pattern: {} '{}'",
+                    indent,
+                    pattern.kind(),
+                    &code[pattern.byte_range()]
+                );
+            }
+            if let Some(right) = node.child_by_field_name("right") {
+                println!(
+                    "{}  right: {} '{}'",
+                    indent,
+                    right.kind(),
+                    &code[right.byte_range()]
+                );
+            }
+
+            // Print all children
+            let mut cursor = node.walk();
+            for (i, child) in node.children(&mut cursor).enumerate() {
+                println!(
+                    "{}  child[{}]: {} '{}'",
+                    indent,
+                    i,
+                    child.kind(),
+                    &code[child.byte_range()]
+                );
+            }
+        }
+
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            print_tree(&child, code, depth + 1);
+        }
     }
 }
