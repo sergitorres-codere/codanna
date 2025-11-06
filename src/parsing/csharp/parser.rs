@@ -1681,7 +1681,22 @@ impl CSharpParser {
                         if let Some(symbol) =
                             self.process_method(child, code, file_id, counter, module_path)
                         {
+                            let method_name = symbol.name.to_string();
                             symbols.push(symbol);
+
+                            // Process method body for local variables
+                            self.context
+                                .enter_scope(ScopeType::Function { hoisting: false });
+                            self.context.set_current_function(Some(method_name));
+                            self.extract_method_body(
+                                child,
+                                code,
+                                file_id,
+                                counter,
+                                symbols,
+                                module_path,
+                            );
+                            self.context.exit_scope();
                         }
                     }
                     "property_declaration" => {
@@ -1705,7 +1720,22 @@ impl CSharpParser {
                         if let Some(symbol) =
                             self.process_constructor(child, code, file_id, counter, module_path)
                         {
+                            let constructor_name = symbol.name.to_string();
                             symbols.push(symbol);
+
+                            // Process constructor body for local variables
+                            self.context
+                                .enter_scope(ScopeType::Function { hoisting: false });
+                            self.context.set_current_function(Some(constructor_name));
+                            self.extract_method_body(
+                                child,
+                                code,
+                                file_id,
+                                counter,
+                                symbols,
+                                module_path,
+                            );
+                            self.context.exit_scope();
                         }
                     }
                     "event_declaration" | "event_field_declaration" => {
@@ -2100,9 +2130,19 @@ impl CSharpParser {
         symbols: &mut Vec<Symbol>,
         module_path: &str,
     ) {
+        // If we have a local_declaration_statement, find the variable_declaration child first
+        let var_decl_node = if node.kind() == "local_declaration_statement" {
+            let mut cursor = node.walk();
+            node.children(&mut cursor)
+                .find(|child| child.kind() == "variable_declaration")
+                .unwrap_or(node)
+        } else {
+            node
+        };
+
         // Look for variable_declarator nodes within the declaration
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
+        let mut cursor = var_decl_node.walk();
+        for child in var_decl_node.children(&mut cursor) {
             if child.kind() == "variable_declarator" {
                 if let Some(name_node) = child.child_by_field_name("name") {
                     let name = code[name_node.byte_range()].to_string();
@@ -2528,12 +2568,6 @@ mod tests {
         let file_id = FileId::new(1).unwrap();
         let mut counter = SymbolCounter::new();
         let symbols = parser.parse(code, file_id, &mut counter);
-
-        // Debug: print all symbols
-        println!("Total symbols: {}", symbols.len());
-        for s in &symbols {
-            println!("  {:?} '{}' sig={:?}", s.kind, s.name, s.signature);
-        }
 
         // Should infer that 'helper' variable has type 'Helper' from GetHelper() method name
         let bindings: Vec<_> = symbols
