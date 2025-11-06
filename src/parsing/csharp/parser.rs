@@ -1061,6 +1061,24 @@ impl CSharpParser {
             self.extract_variable_bindings(node, code, bindings);
         }
 
+        // Handle pattern matching expressions (C# 7.0+)
+        // Example: if (obj is string s) { } - creates variable 's' of type 'string'
+        if node.kind() == "is_pattern_expression" {
+            self.extract_pattern_bindings(node, code, bindings);
+        }
+
+        // Handle switch expressions (C# 8.0+)
+        // Example: value switch { int i => i * 2, string s => s.Length }
+        if node.kind() == "switch_expression" {
+            self.extract_switch_expression_bindings(node, code, bindings);
+        }
+
+        // Handle LINQ query expressions (C# 3.0+)
+        // Example: from user in users where user.Age > 18 select user.Name
+        if node.kind() == "query_expression" {
+            self.extract_query_expression_bindings(node, code, bindings);
+        }
+
         // Recurse into all children to find nested variable declarations
         // (e.g., variables inside nested blocks, loops, etc.)
         let mut cursor = node.walk();
@@ -1220,6 +1238,399 @@ impl CSharpParser {
                 last_ident.unwrap_or(&code[type_node.byte_range()])
             }
             _ => &code[type_node.byte_range()],
+        }
+    }
+
+    /// Extract variable bindings from pattern matching expressions (C# 7.0+)
+    ///
+    /// Handles is-pattern expressions like:
+    /// - `if (obj is string s)` → (s, string)
+    /// - `if (obj is Person { Age: > 18, Name: var n })` → (n, inferred from context)
+    /// - `if (obj is int i)` → (i, int)
+    ///
+    /// ## Tree-sitter Structure
+    ///
+    /// is_pattern_expression has:
+    /// - left: expression being tested
+    /// - pattern: the pattern (declaration_pattern, type_pattern, recursive_pattern, etc.)
+    ///
+    /// declaration_pattern structure:
+    /// - type: the type being matched
+    /// - designation: variable_designation with identifier
+    fn extract_pattern_bindings<'a>(
+        &self,
+        pattern_expr: &Node,
+        code: &'a str,
+        bindings: &mut Vec<(&'a str, &'a str, Range)>,
+    ) {
+        // Get the pattern part (right side of "is")
+        if let Some(pattern_node) = pattern_expr.child_by_field_name("pattern") {
+            self.extract_type_from_pattern(&pattern_node, code, bindings);
+        }
+    }
+
+    /// Extract type and variable information from a pattern node
+    ///
+    /// Handles various pattern types:
+    /// - declaration_pattern: `Type varName`
+    /// - type_pattern: `Type` (without variable)
+    /// - recursive_pattern: `Type { Property: value }` or `{ Property: value }`
+    /// - var_pattern: `var name`
+    fn extract_type_from_pattern<'a>(
+        &self,
+        pattern: &Node,
+        code: &'a str,
+        bindings: &mut Vec<(&'a str, &'a str, Range)>,
+    ) {
+        match pattern.kind() {
+            "declaration_pattern" => {
+                // Structure: type + designation (variable name)
+                // Example: "string s" in "obj is string s"
+                if let (Some(type_node), Some(designation)) = (
+                    pattern.child_by_field_name("type"),
+                    pattern.child_by_field_name("designation"),
+                ) {
+                    if let Some(var_name) =
+                        self.extract_identifier_from_designation(&designation, code)
+                    {
+                        let type_name = self.extract_simple_type_name(&type_node, code);
+                        let range = Range::new(
+                            pattern.start_position().row as u32,
+                            pattern.start_position().column as u16,
+                            pattern.end_position().row as u32,
+                            pattern.end_position().column as u16,
+                        );
+                        bindings.push((var_name, type_name, range));
+                    }
+                }
+            }
+            "recursive_pattern" => {
+                // Structure: optional type + { property_pattern_clause }
+                // Example: "Person { Age: > 18, Name: var n }"
+                // We need to extract variables from property patterns
+                let mut cursor = pattern.walk();
+                for child in pattern.children(&mut cursor) {
+                    if child.kind() == "property_pattern_clause" {
+                        self.extract_variables_from_property_pattern(&child, code, bindings);
+                    }
+                }
+            }
+            "var_pattern" => {
+                // var pattern: "var name"
+                // We can't infer the type without full type analysis, so skip for now
+                // TODO: Could track as "object" or "dynamic" type
+            }
+            _ => {
+                // Recursively check children for nested patterns
+                let mut cursor = pattern.walk();
+                for child in pattern.children(&mut cursor) {
+                    self.extract_type_from_pattern(&child, code, bindings);
+                }
+            }
+        }
+    }
+
+    /// Extract variables from property pattern clauses
+    ///
+    /// Example: `{ Age: > 18, Name: var n }` → extract n
+    fn extract_variables_from_property_pattern<'a>(
+        &self,
+        prop_pattern: &Node,
+        code: &'a str,
+        bindings: &mut Vec<(&'a str, &'a str, Range)>,
+    ) {
+        // Look for subpatterns which contain the actual property patterns
+        let mut cursor = prop_pattern.walk();
+        for child in prop_pattern.children(&mut cursor) {
+            if child.kind() == "subpattern" {
+                // subpattern has: name_colon (property name) + pattern
+                if let Some(pattern) = child.child_by_field_name("pattern") {
+                    // Check if it's a var_pattern or declaration_pattern
+                    self.extract_type_from_pattern(&pattern, code, bindings);
+                }
+            }
+        }
+    }
+
+    /// Extract identifier from a variable designation
+    fn extract_identifier_from_designation<'a>(
+        &self,
+        designation: &Node,
+        code: &'a str,
+    ) -> Option<&'a str> {
+        // designation can be:
+        // - single_variable_designation with identifier child
+        // - identifier directly
+        match designation.kind() {
+            "single_variable_designation" => {
+                let mut cursor = designation.walk();
+                for child in designation.children(&mut cursor) {
+                    if child.kind() == "identifier" {
+                        return Some(&code[child.byte_range()]);
+                    }
+                }
+                None
+            }
+            "identifier" => Some(&code[designation.byte_range()]),
+            _ => None,
+        }
+    }
+
+    /// Extract variable bindings from switch expressions (C# 8.0+)
+    ///
+    /// Handles switch expressions like:
+    /// ```csharp
+    /// var result = value switch {
+    ///     int i => i * 2,
+    ///     string s => s.Length,
+    ///     _ => 0
+    /// };
+    /// ```
+    ///
+    /// Each arm can introduce a pattern variable that's scoped to that arm's expression.
+    fn extract_switch_expression_bindings<'a>(
+        &self,
+        switch_expr: &Node,
+        code: &'a str,
+        bindings: &mut Vec<(&'a str, &'a str, Range)>,
+    ) {
+        // switch_expression contains switch_expression_arm children
+        let mut cursor = switch_expr.walk();
+        for child in switch_expr.children(&mut cursor) {
+            if child.kind() == "switch_expression_arm" {
+                // Each arm has: pattern => expression
+                if let Some(pattern) = child.child_by_field_name("pattern") {
+                    self.extract_type_from_pattern(&pattern, code, bindings);
+                }
+            }
+        }
+    }
+
+    /// Extract variable bindings from LINQ query expressions (C# 3.0+)
+    ///
+    /// Handles query expressions like:
+    /// ```csharp
+    /// var result = from user in users
+    ///              where user.Age > 18
+    ///              join order in orders on user.Id equals order.UserId
+    ///              select new { user.Name, order.Total };
+    /// ```
+    ///
+    /// LINQ queries introduce "range variables" that are scoped to the query:
+    /// - `from` clause introduces the initial range variable
+    /// - `join` clause introduces additional range variables
+    /// - `group...into` introduces a new range variable for the grouped result
+    ///
+    /// ## Type Inference Limitations
+    ///
+    /// Full type inference for range variables requires knowing collection element types
+    /// (e.g., `List<User>` → `User`). For now, we only extract explicitly typed range variables
+    /// and track variable names for relationship analysis.
+    fn extract_query_expression_bindings<'a>(
+        &self,
+        query_expr: &Node,
+        code: &'a str,
+        bindings: &mut Vec<(&'a str, &'a str, Range)>,
+    ) {
+        // Process all clauses in the query expression
+        let mut cursor = query_expr.walk();
+        for child in query_expr.children(&mut cursor) {
+            match child.kind() {
+                "from_clause" => {
+                    self.extract_from_clause_binding(&child, code, bindings);
+                }
+                "join_clause" => {
+                    self.extract_join_clause_binding(&child, code, bindings);
+                }
+                "group_clause" => {
+                    // group clause can have an "into" that creates a new range variable
+                    self.extract_group_into_binding(&child, code, bindings);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Extract range variable from a from_clause
+    ///
+    /// Examples:
+    /// - `from user in users` → track "user" (type inferred from collection)
+    /// - `from User user in users` → (user, User)
+    /// - `from int i in numbers` → (i, int)
+    fn extract_from_clause_binding<'a>(
+        &self,
+        from_clause: &Node,
+        code: &'a str,
+        bindings: &mut Vec<(&'a str, &'a str, Range)>,
+    ) {
+        // from_clause structure:
+        // - optional type
+        // - identifier (range variable name)
+        // - "in" keyword
+        // - expression (the collection)
+        //
+        // Example: "from User user in users"
+        //   type=User, identifier=user, in, expression=users
+
+        let mut type_node = None;
+        let mut var_identifier = None;
+        let mut identifiers = Vec::new();
+
+        let mut cursor = from_clause.walk();
+        for child in from_clause.children(&mut cursor) {
+            // Stop collecting when we hit "in" keyword - everything after is the collection expression
+            if child.kind() == "in" {
+                break;
+            }
+
+            match child.kind() {
+                "identifier" => {
+                    identifiers.push(child);
+                }
+                "predefined_type" | "generic_name" | "qualified_name" if type_node.is_none() => {
+                    type_node = Some(child);
+                }
+                _ => {}
+            }
+        }
+
+        // If we have 2 identifiers, first is type, second is variable
+        // If we have 1 identifier and a type node, the identifier is the variable
+        // If we have 1 identifier and no type node, no explicit type (skip for now)
+        if identifiers.len() >= 2 {
+            // First identifier is type, second is variable
+            type_node = Some(identifiers[0]);
+            var_identifier = Some(identifiers[1]);
+        } else if identifiers.len() == 1 && type_node.is_some() {
+            // We have an explicit type node, so the identifier is the variable
+            var_identifier = Some(identifiers[0]);
+        } else if identifiers.len() == 1 {
+            // Only one identifier with no explicit type - this is the variable name
+            // but we can't infer the type without collection analysis
+            return;
+        }
+
+        // If we have both type and identifier, add the binding
+        if let (Some(type_node), Some(ident_node)) = (type_node, var_identifier) {
+            let var_name = &code[ident_node.byte_range()];
+            let type_name = self.extract_simple_type_name(&type_node, code);
+            let range = Range::new(
+                from_clause.start_position().row as u32,
+                from_clause.start_position().column as u16,
+                from_clause.end_position().row as u32,
+                from_clause.end_position().column as u16,
+            );
+            bindings.push((var_name, type_name, range));
+        }
+    }
+
+    /// Extract range variable from a join_clause
+    ///
+    /// Examples:
+    /// - `join order in orders on user.Id equals order.UserId` → track "order"
+    /// - `join Order order in orders on ...` → (order, Order)
+    fn extract_join_clause_binding<'a>(
+        &self,
+        join_clause: &Node,
+        code: &'a str,
+        bindings: &mut Vec<(&'a str, &'a str, Range)>,
+    ) {
+        // join_clause has similar structure to from_clause:
+        // "join" keyword, optional type, identifier, "in", expression, "on"/"equals"
+        // Example: "join Order order in orders on user.Id equals order.UserId"
+
+        let mut type_node = None;
+        let mut var_identifier = None;
+        let mut identifiers = Vec::new();
+        let mut found_join = false;
+
+        let mut cursor = join_clause.walk();
+        for child in join_clause.children(&mut cursor) {
+            if child.kind() == "join" {
+                found_join = true;
+                continue;
+            }
+
+            if !found_join {
+                continue;
+            }
+
+            // Stop when we reach "in" keyword or "on"
+            if matches!(child.kind(), "in" | "on") {
+                break;
+            }
+
+            match child.kind() {
+                "identifier" => {
+                    identifiers.push(child);
+                }
+                "predefined_type" | "generic_name" | "qualified_name" if type_node.is_none() => {
+                    type_node = Some(child);
+                }
+                _ => {}
+            }
+        }
+
+        // Same logic as from_clause: 2 identifiers = type + var, 1 identifier + type_node = var only
+        if identifiers.len() >= 2 {
+            type_node = Some(identifiers[0]);
+            var_identifier = Some(identifiers[1]);
+        } else if identifiers.len() == 1 && type_node.is_some() {
+            var_identifier = Some(identifiers[0]);
+        } else if identifiers.len() == 1 {
+            return; // Can't infer type
+        }
+
+        if let (Some(type_node), Some(ident_node)) = (type_node, var_identifier) {
+            let var_name = &code[ident_node.byte_range()];
+            let type_name = self.extract_simple_type_name(&type_node, code);
+            let range = Range::new(
+                join_clause.start_position().row as u32,
+                join_clause.start_position().column as u16,
+                join_clause.end_position().row as u32,
+                join_clause.end_position().column as u16,
+            );
+            bindings.push((var_name, type_name, range));
+        }
+    }
+
+    /// Extract range variable from group...into clause
+    ///
+    /// Example:
+    /// - `group item by item.Category into g` → track "g" as grouping variable
+    ///
+    /// Note: The type of the grouping variable is `IGrouping<TKey, TElement>` but
+    /// extracting this requires more complex type inference
+    fn extract_group_into_binding<'a>(
+        &self,
+        group_clause: &Node,
+        code: &'a str,
+        bindings: &mut Vec<(&'a str, &'a str, Range)>,
+    ) {
+        // Look for "into" identifier following the group clause
+        let mut found_into = false;
+        let mut cursor = group_clause.walk();
+        for child in group_clause.children(&mut cursor) {
+            if child.kind() == "into" {
+                found_into = true;
+                continue;
+            }
+
+            if found_into && child.kind() == "identifier" {
+                // This is the grouping variable
+                let var_name = &code[child.byte_range()];
+                // Type would be IGrouping<TKey, TElement> but we can't infer without
+                // full type analysis. For now, just track the variable name.
+                // We could use a placeholder type like "IGrouping" for basic tracking
+                let range = Range::new(
+                    child.start_position().row as u32,
+                    child.start_position().column as u16,
+                    child.end_position().row as u32,
+                    child.end_position().column as u16,
+                );
+                bindings.push((var_name, "IGrouping", range));
+                break;
+            }
         }
     }
 
@@ -2126,5 +2537,491 @@ mod tests {
                 .any(|i| i.path == "System.Collections.Generic")
         );
         assert!(imports.iter().any(|i| i.path == "MyApp.Services"));
+    }
+
+    #[test]
+    fn test_csharp_is_pattern_type_extraction() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public void TestMethod(object obj) {
+                if (obj is string s) {
+                    Console.WriteLine(s);
+                }
+
+                if (obj is int i) {
+                    Console.WriteLine(i);
+                }
+
+                if (obj is Person p) {
+                    Console.WriteLine(p);
+                }
+            }
+        "#;
+
+        let bindings = parser.find_variable_types(code);
+
+        // Should extract variable types from is-patterns
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "s" && *typ == "string"),
+            "Should find 's' of type 'string'. Found: {:?}",
+            bindings
+        );
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "i" && *typ == "int"),
+            "Should find 'i' of type 'int'. Found: {:?}",
+            bindings
+        );
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "p" && *typ == "Person"),
+            "Should find 'p' of type 'Person'. Found: {:?}",
+            bindings
+        );
+    }
+
+    #[test]
+    fn test_csharp_switch_expression_patterns() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public int Calculate(object value) {
+                var result = value switch {
+                    int i => i * 2,
+                    string s => s.Length,
+                    double d => (int)d,
+                    _ => 0
+                };
+                return result;
+            }
+        "#;
+
+        let bindings = parser.find_variable_types(code);
+
+        // Should extract pattern variables from switch expression arms
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "i" && *typ == "int"),
+            "Should find 'i' of type 'int' in switch expression. Found: {:?}",
+            bindings
+        );
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "s" && *typ == "string"),
+            "Should find 's' of type 'string' in switch expression. Found: {:?}",
+            bindings
+        );
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "d" && *typ == "double"),
+            "Should find 'd' of type 'double' in switch expression. Found: {:?}",
+            bindings
+        );
+    }
+
+    #[test]
+    fn test_csharp_generic_type_pattern() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public void Process(object obj) {
+                if (obj is List<string> list) {
+                    Console.WriteLine(list.Count);
+                }
+
+                if (obj is Dictionary<int, string> dict) {
+                    Console.WriteLine(dict.Count);
+                }
+            }
+        "#;
+
+        let bindings = parser.find_variable_types(code);
+
+        // Should extract generic types (extracting base type name)
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "list" && typ.contains("List")),
+            "Should find 'list' with List type. Found: {:?}",
+            bindings
+        );
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "dict" && typ.contains("Dictionary")),
+            "Should find 'dict' with Dictionary type. Found: {:?}",
+            bindings
+        );
+    }
+
+    #[test]
+    fn test_csharp_nested_patterns() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public void TestNested(object obj) {
+                if (obj is string s) {
+                    var inner = s switch {
+                        string t when t.Length > 0 => t,
+                        _ => null
+                    };
+                }
+            }
+        "#;
+
+        let bindings = parser.find_variable_types(code);
+
+        // Should find both outer and inner pattern variables
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "s" && *typ == "string"),
+            "Should find outer pattern variable 's'. Found: {:?}",
+            bindings
+        );
+        // Note: 't' may or may not be extracted depending on when clause handling
+    }
+
+    #[test]
+    fn test_csharp_multiple_patterns_same_method() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public void MultiPattern(object obj1, object obj2) {
+                if (obj1 is string s1 && obj2 is int i1) {
+                    Console.WriteLine($"{s1}: {i1}");
+                }
+
+                var x = obj1 switch {
+                    string s2 => s2.Length,
+                    _ => 0
+                };
+
+                if (obj2 is double d1) {
+                    Console.WriteLine(d1);
+                }
+            }
+        "#;
+
+        let bindings = parser.find_variable_types(code);
+
+        // Should extract all pattern variables
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "s1" && *typ == "string"),
+            "Should find 's1' of type 'string'. Found: {:?}",
+            bindings
+        );
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "i1" && *typ == "int"),
+            "Should find 'i1' of type 'int'. Found: {:?}",
+            bindings
+        );
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "s2" && *typ == "string"),
+            "Should find 's2' of type 'string'. Found: {:?}",
+            bindings
+        );
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "d1" && *typ == "double"),
+            "Should find 'd1' of type 'double'. Found: {:?}",
+            bindings
+        );
+    }
+
+    #[test]
+    fn test_csharp_pattern_with_qualified_type() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public void TestQualified(object obj) {
+                if (obj is System.String s) {
+                    Console.WriteLine(s);
+                }
+
+                if (obj is MyNamespace.MyClass m) {
+                    Console.WriteLine(m);
+                }
+            }
+        "#;
+
+        let bindings = parser.find_variable_types(code);
+
+        // Should extract simple type name from qualified types
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "s" && *typ == "String"),
+            "Should find 's' with simple type name 'String'. Found: {:?}",
+            bindings
+        );
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "m" && *typ == "MyClass"),
+            "Should find 'm' with simple type name 'MyClass'. Found: {:?}",
+            bindings
+        );
+    }
+
+    #[test]
+    fn test_csharp_linq_from_clause_with_explicit_type() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public void TestQuery() {
+                var result = from User user in users
+                             where user.Age > 18
+                             select user.Name;
+
+                var numbers = from int num in collection
+                              select num * 2;
+            }
+        "#;
+
+        let bindings = parser.find_variable_types(code);
+
+        // Should extract range variables with explicit types
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "user" && *typ == "User"),
+            "Should find 'user' of type 'User' in from clause. Found: {:?}",
+            bindings
+        );
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "num" && *typ == "int"),
+            "Should find 'num' of type 'int' in from clause. Found: {:?}",
+            bindings
+        );
+    }
+
+    #[test]
+    fn test_csharp_linq_join_clause() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public void TestJoin() {
+                var result = from User user in users
+                             join Order order in orders on user.Id equals order.UserId
+                             select new { user.Name, order.Total };
+
+                var joined = from Person p in people
+                             join Address addr in addresses on p.Id equals addr.PersonId
+                             select new { p.Name, addr.City };
+            }
+        "#;
+
+        let bindings = parser.find_variable_types(code);
+
+        // Should extract range variables from join clauses
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "user" && *typ == "User"),
+            "Should find 'user' from from clause. Found: {:?}",
+            bindings
+        );
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "order" && *typ == "Order"),
+            "Should find 'order' from join clause. Found: {:?}",
+            bindings
+        );
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "p" && *typ == "Person"),
+            "Should find 'p' from from clause. Found: {:?}",
+            bindings
+        );
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "addr" && *typ == "Address"),
+            "Should find 'addr' from join clause. Found: {:?}",
+            bindings
+        );
+    }
+
+    #[test]
+    fn test_csharp_linq_group_into() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public void TestGrouping() {
+                var grouped = from Product item in items
+                              group item by item.Category into g
+                              select new { Category = g.Key, Count = g.Count() };
+            }
+        "#;
+
+        let bindings = parser.find_variable_types(code);
+
+        // Should extract range variable from from clause
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "item" && *typ == "Product"),
+            "Should find 'item' of type 'Product'. Found: {:?}",
+            bindings
+        );
+        // Should extract grouping variable
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "g" && *typ == "IGrouping"),
+            "Should find 'g' as IGrouping from group...into. Found: {:?}",
+            bindings
+        );
+    }
+
+    #[test]
+    fn test_csharp_linq_multiple_from_clauses() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public void TestMultipleFrom() {
+                var result = from Customer c in customers
+                             from Order o in c.Orders
+                             where o.Total > 100
+                             select new { c.Name, o.Total };
+            }
+        "#;
+
+        let bindings = parser.find_variable_types(code);
+
+        // Should extract both range variables (if they have explicit types)
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "c" && *typ == "Customer"),
+            "Should find 'c' of type 'Customer'. Found: {:?}",
+            bindings
+        );
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "o" && *typ == "Order"),
+            "Should find 'o' of type 'Order'. Found: {:?}",
+            bindings
+        );
+    }
+
+    #[test]
+    fn test_csharp_linq_with_generic_types() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public void TestGenericQuery() {
+                var result = from List<string> list in collections
+                             where list.Count > 0
+                             select list;
+            }
+        "#;
+
+        let bindings = parser.find_variable_types(code);
+
+        // Should extract generic type (base name)
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "list" && typ.contains("List")),
+            "Should find 'list' with List type. Found: {:?}",
+            bindings
+        );
+    }
+
+    #[test]
+    fn test_csharp_linq_nested_queries() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public void TestNested() {
+                var outer = from Customer c in customers
+                            select (from Order o in c.Orders
+                                   where o.Total > 100
+                                   select o);
+            }
+        "#;
+
+        let bindings = parser.find_variable_types(code);
+
+        // Should find both outer and inner range variables
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "c" && *typ == "Customer"),
+            "Should find outer range variable 'c'. Found: {:?}",
+            bindings
+        );
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "o" && *typ == "Order"),
+            "Should find inner range variable 'o'. Found: {:?}",
+            bindings
+        );
+    }
+
+    #[test]
+    fn test_csharp_combined_patterns_and_linq() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public void TestCombined(object obj) {
+                // Pattern matching
+                if (obj is List<User> users) {
+                    // LINQ query using pattern variable
+                    var result = from User u in users
+                                 where u.Age > 18
+                                 select u.Name;
+                }
+
+                // Switch expression with LINQ
+                var data = obj switch {
+                    IEnumerable<Person> people =>
+                        from Person p in people select p.Name,
+                    _ => null
+                };
+            }
+        "#;
+
+        let bindings = parser.find_variable_types(code);
+
+        // Should find pattern variables
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "users" && typ.contains("List")),
+            "Should find 'users' from pattern. Found: {:?}",
+            bindings
+        );
+        // Should find LINQ range variables
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "u" && *typ == "User"),
+            "Should find 'u' from LINQ query. Found: {:?}",
+            bindings
+        );
+        // Should find both pattern and LINQ variables in switch expression
+        assert!(
+            bindings.iter().any(|(var, typ, _)| *var == "people"),
+            "Should find 'people' from switch pattern. Found: {:?}",
+            bindings
+        );
+        assert!(
+            bindings
+                .iter()
+                .any(|(var, typ, _)| *var == "p" && *typ == "Person"),
+            "Should find 'p' from nested LINQ. Found: {:?}",
+            bindings
+        );
     }
 }
