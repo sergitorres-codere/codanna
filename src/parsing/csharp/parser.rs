@@ -59,6 +59,41 @@ pub struct AttributeInfo {
     pub range: Range,
 }
 
+/// Represents a pattern matching construct in C# code
+///
+/// Examples:
+/// - `if (obj is string s)` - Type pattern in is-expression
+/// - `int i when i > 0 => "positive"` - Pattern in switch expression with guard
+/// - `_ => "default"` - Discard pattern
+#[derive(Debug, Clone, PartialEq)]
+pub struct PatternInfo {
+    /// The type of pattern (Declaration, Discard, Constant, etc.)
+    pub pattern_type: PatternType,
+    /// The type name in the pattern (e.g., "string" in "string s")
+    pub type_name: Option<String>,
+    /// The variable name in the pattern (e.g., "s" in "string s")
+    pub variable_name: Option<String>,
+    /// The guard/when clause expression if present
+    pub guard: Option<String>,
+    /// Source code location of the pattern
+    pub range: Range,
+}
+
+/// Types of patterns in C# pattern matching
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PatternType {
+    /// Declaration pattern: `string s`, `int i`
+    Declaration,
+    /// Discard pattern: `_`
+    Discard,
+    /// Constant pattern: `null`, `5`, `"text"`
+    Constant,
+    /// Type pattern without variable: `string`
+    Type,
+    /// Recursive/property pattern: `{ Age: > 18 }`
+    Property,
+}
+
 /// C# language parser using tree-sitter
 ///
 /// This parser traverses C# Abstract Syntax Trees (AST) to extract symbols,
@@ -2057,6 +2092,264 @@ impl CSharpParser {
 
         (positional, named)
     }
+
+    /// Extract pattern matching constructs from C# code
+    ///
+    /// This method traverses the AST and finds all pattern matching usages, including:
+    /// - Type patterns in is-expressions: `if (obj is string s)`
+    /// - Patterns in switch expressions: `obj switch { int i => ..., _ => ... }`
+    /// - Guards/when clauses: `int i when i > 0 => ...`
+    ///
+    /// # Examples
+    ///
+    /// ```csharp
+    /// if (obj is string s) { }
+    /// // → PatternInfo { pattern_type: Declaration, type_name: "string", variable_name: "s", ... }
+    ///
+    /// var result = value switch {
+    ///     int i when i > 0 => "positive",
+    ///     _ => "other"
+    /// };
+    /// // → Multiple PatternInfo with guards
+    /// ```
+    pub fn find_patterns(&mut self, code: &str) -> Vec<PatternInfo> {
+        let mut patterns = Vec::new();
+
+        match self.parser.parse(code, None) {
+            Some(tree) => {
+                let root_node = tree.root_node();
+                self.extract_patterns_from_node(root_node, code, &mut patterns);
+            }
+            None => {
+                eprintln!("Failed to parse C# file for patterns");
+            }
+        }
+
+        patterns
+    }
+
+    /// Recursively extract patterns from an AST node
+    fn extract_patterns_from_node(
+        &mut self,
+        node: Node,
+        code: &str,
+        patterns: &mut Vec<PatternInfo>,
+    ) {
+        match node.kind() {
+            "is_pattern_expression" => {
+                // Extract pattern from is-expression: if (obj is string s)
+                if let Some(pattern_node) = node.child_by_field_name("pattern") {
+                    if let Some(pattern_info) = self.extract_pattern(pattern_node, code, None) {
+                        patterns.push(pattern_info);
+                    }
+                }
+            }
+            "switch_expression" => {
+                // Extract patterns from switch expression arms
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    if child.kind() == "switch_expression_arm" {
+                        self.extract_switch_arm_pattern(child, code, patterns);
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        // Recursively process children
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            self.extract_patterns_from_node(child, code, patterns);
+        }
+    }
+
+    /// Extract pattern from a switch expression arm
+    fn extract_switch_arm_pattern(
+        &self,
+        arm_node: Node,
+        code: &str,
+        patterns: &mut Vec<PatternInfo>,
+    ) {
+        // Find the pattern node (first child that's not punctuation)
+        // and optional when clause
+        let mut pattern_node = None;
+        let mut when_clause = None;
+
+        let mut cursor = arm_node.walk();
+        for child in arm_node.children(&mut cursor) {
+            match child.kind() {
+                "declaration_pattern"
+                | "discard"
+                | "constant_pattern"
+                | "type_pattern"
+                | "recursive_pattern" => {
+                    pattern_node = Some(child);
+                }
+                "when_clause" => {
+                    // Extract the condition expression from when clause
+                    let mut when_cursor = child.walk();
+                    for when_child in child.children(&mut when_cursor) {
+                        if when_child.kind() != "when" {
+                            when_clause = Some(code[when_child.byte_range()].to_string());
+                            break;
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if let Some(pattern) = pattern_node {
+            if let Some(pattern_info) = self.extract_pattern(pattern, code, when_clause) {
+                patterns.push(pattern_info);
+            }
+        }
+    }
+
+    /// Extract a single pattern from a pattern node
+    fn extract_pattern(
+        &self,
+        pattern_node: Node,
+        code: &str,
+        guard: Option<String>,
+    ) -> Option<PatternInfo> {
+        let range = Range::new(
+            pattern_node.start_position().row as u32,
+            pattern_node.start_position().column as u16,
+            pattern_node.end_position().row as u32,
+            pattern_node.end_position().column as u16,
+        );
+
+        match pattern_node.kind() {
+            "declaration_pattern" => {
+                // Extract type and variable name: "string s", "int i"
+                let type_name = pattern_node
+                    .child_by_field_name("type")
+                    .map(|n| code[n.byte_range()].to_string());
+                let variable_name = pattern_node
+                    .child_by_field_name("name")
+                    .map(|n| code[n.byte_range()].to_string());
+
+                Some(PatternInfo {
+                    pattern_type: PatternType::Declaration,
+                    type_name,
+                    variable_name,
+                    guard,
+                    range,
+                })
+            }
+            "discard" => {
+                // Wildcard pattern: "_"
+                Some(PatternInfo {
+                    pattern_type: PatternType::Discard,
+                    type_name: None,
+                    variable_name: None,
+                    guard,
+                    range,
+                })
+            }
+            "constant_pattern" => {
+                // Constant pattern: null, 5, "text"
+                Some(PatternInfo {
+                    pattern_type: PatternType::Constant,
+                    type_name: None,
+                    variable_name: Some(code[pattern_node.byte_range()].to_string()),
+                    guard,
+                    range,
+                })
+            }
+            "type_pattern" => {
+                // Type pattern without variable: "string"
+                let type_name = Some(code[pattern_node.byte_range()].to_string());
+                Some(PatternInfo {
+                    pattern_type: PatternType::Type,
+                    type_name,
+                    variable_name: None,
+                    guard,
+                    range,
+                })
+            }
+            "recursive_pattern" => {
+                // Property/recursive pattern: { Age: > 18 }
+                Some(PatternInfo {
+                    pattern_type: PatternType::Property,
+                    type_name: None,
+                    variable_name: Some(code[pattern_node.byte_range()].to_string()),
+                    guard,
+                    range,
+                })
+            }
+            _ => None,
+        }
+    }
+
+    /// Extract pattern variables and integrate them into find_variable_types
+    ///
+    /// This extracts variables declared in patterns (e.g., `if (obj is string s)`)
+    /// and adds them to the variable type bindings.
+    fn extract_pattern_variables<'a>(
+        &self,
+        node: &Node,
+        code: &'a str,
+        bindings: &mut Vec<(&'a str, &'a str, Range)>,
+    ) {
+        match node.kind() {
+            "is_pattern_expression" => {
+                // Extract pattern variable from is-expression
+                if let Some(pattern_node) = node.child_by_field_name("pattern") {
+                    if pattern_node.kind() == "declaration_pattern" {
+                        if let Some(type_node) = pattern_node.child_by_field_name("type") {
+                            if let Some(name_node) = pattern_node.child_by_field_name("name") {
+                                let type_str = &code[type_node.byte_range()];
+                                let var_name = &code[name_node.byte_range()];
+                                let range = Range::new(
+                                    pattern_node.start_position().row as u32,
+                                    pattern_node.start_position().column as u16,
+                                    pattern_node.end_position().row as u32,
+                                    pattern_node.end_position().column as u16,
+                                );
+                                bindings.push((var_name, type_str, range));
+                            }
+                        }
+                    }
+                }
+            }
+            "switch_expression" => {
+                // Extract pattern variables from switch expression arms
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    if child.kind() == "switch_expression_arm" {
+                        // Find declaration_pattern in the arm
+                        let mut arm_cursor = child.walk();
+                        for arm_child in child.children(&mut arm_cursor) {
+                            if arm_child.kind() == "declaration_pattern" {
+                                if let Some(type_node) = arm_child.child_by_field_name("type") {
+                                    if let Some(name_node) = arm_child.child_by_field_name("name") {
+                                        let type_str = &code[type_node.byte_range()];
+                                        let var_name = &code[name_node.byte_range()];
+                                        let range = Range::new(
+                                            arm_child.start_position().row as u32,
+                                            arm_child.start_position().column as u16,
+                                            arm_child.end_position().row as u32,
+                                            arm_child.end_position().column as u16,
+                                        );
+                                        bindings.push((var_name, type_str, range));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        // Recursively process children
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            self.extract_pattern_variables(&child, code, bindings);
+        }
+    }
 }
 
 impl NodeTracker for CSharpParser {
@@ -2205,7 +2498,10 @@ impl LanguageParser for CSharpParser {
 
         if let Some(tree) = self.parser.parse(code, None) {
             let root = tree.root_node();
+            // Extract regular variable declarations
             self.find_variable_types_in_node(&root, code, &mut bindings);
+            // Extract pattern variables from is-expressions and switch expressions
+            self.extract_pattern_variables(&root, code, &mut bindings);
         }
 
         bindings
@@ -2796,13 +3092,230 @@ public class MyClass
     }
 
     #[test]
-    fn test_debug_attribute_ast() {
+    fn test_csharp_pattern_type_in_is_expression() {
         let mut parser = CSharpParser::new().unwrap();
         let code = r#"
 public class MyClass
 {
-    [Authorize(Roles = "Admin")]
-    public void SecureMethod() { }
+    public void Test(object obj)
+    {
+        if (obj is string s)
+        {
+            Console.WriteLine(s);
+        }
+    }
+}
+"#;
+
+        let patterns = parser.find_patterns(code);
+
+        // Should find one declaration pattern
+        assert_eq!(patterns.len(), 1);
+
+        let pattern = &patterns[0];
+        assert_eq!(pattern.pattern_type, PatternType::Declaration);
+        assert_eq!(pattern.type_name, Some("string".to_string()));
+        assert_eq!(pattern.variable_name, Some("s".to_string()));
+        assert!(pattern.guard.is_none());
+    }
+
+    #[test]
+    fn test_csharp_pattern_variables_in_find_variable_types() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+public class MyClass
+{
+    public void Test(object obj)
+    {
+        if (obj is string s)
+        {
+            Console.WriteLine(s.Length);
+        }
+    }
+}
+"#;
+
+        let bindings = parser.find_variable_types(code);
+
+        // Should find pattern variable
+        assert!(
+            bindings
+                .iter()
+                .any(|(name, ty, _)| *name == "s" && *ty == "string"),
+            "Should find pattern variable 's' of type 'string'. Found: {:?}",
+            bindings
+        );
+    }
+
+    #[test]
+    fn test_csharp_switch_expression_patterns() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+public class MyClass
+{
+    public string Test(object obj)
+    {
+        return obj switch
+        {
+            int i => "integer",
+            string s => s,
+            _ => "other"
+        };
+    }
+}
+"#;
+
+        let patterns = parser.find_patterns(code);
+
+        // Should find three patterns
+        assert_eq!(
+            patterns.len(),
+            3,
+            "Expected 3 patterns, found {}",
+            patterns.len()
+        );
+
+        // First pattern: declaration pattern for int
+        assert_eq!(patterns[0].pattern_type, PatternType::Declaration);
+        assert_eq!(patterns[0].type_name, Some("int".to_string()));
+        assert_eq!(patterns[0].variable_name, Some("i".to_string()));
+
+        // Second pattern: declaration pattern for string
+        assert_eq!(patterns[1].pattern_type, PatternType::Declaration);
+        assert_eq!(patterns[1].type_name, Some("string".to_string()));
+        assert_eq!(patterns[1].variable_name, Some("s".to_string()));
+
+        // Third pattern: discard
+        assert_eq!(patterns[2].pattern_type, PatternType::Discard);
+    }
+
+    #[test]
+    fn test_csharp_switch_expression_with_guard() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+public class MyClass
+{
+    public string Test(object obj)
+    {
+        return obj switch
+        {
+            int i when i > 0 => "positive",
+            int i when i < 0 => "negative",
+            int i => "zero",
+            _ => "other"
+        };
+    }
+}
+"#;
+
+        let patterns = parser.find_patterns(code);
+
+        // Should find four patterns
+        assert_eq!(patterns.len(), 4);
+
+        // First pattern: with guard "i > 0"
+        assert_eq!(patterns[0].pattern_type, PatternType::Declaration);
+        assert_eq!(patterns[0].type_name, Some("int".to_string()));
+        assert_eq!(patterns[0].variable_name, Some("i".to_string()));
+        assert_eq!(patterns[0].guard, Some("i > 0".to_string()));
+
+        // Second pattern: with guard "i < 0"
+        assert_eq!(patterns[1].pattern_type, PatternType::Declaration);
+        assert_eq!(patterns[1].guard, Some("i < 0".to_string()));
+
+        // Third pattern: without guard
+        assert_eq!(patterns[2].pattern_type, PatternType::Declaration);
+        assert!(patterns[2].guard.is_none());
+
+        // Fourth pattern: discard
+        assert_eq!(patterns[3].pattern_type, PatternType::Discard);
+    }
+
+    #[test]
+    fn test_csharp_multiple_is_patterns() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+public class MyClass
+{
+    public void Test(object obj1, object obj2)
+    {
+        if (obj1 is string s1)
+        {
+            Console.WriteLine(s1);
+        }
+
+        if (obj2 is int i2)
+        {
+            Console.WriteLine(i2);
+        }
+    }
+}
+"#;
+
+        let patterns = parser.find_patterns(code);
+
+        // Should find two patterns
+        assert_eq!(patterns.len(), 2);
+
+        // First pattern: string s1
+        assert_eq!(patterns[0].type_name, Some("string".to_string()));
+        assert_eq!(patterns[0].variable_name, Some("s1".to_string()));
+
+        // Second pattern: int i2
+        assert_eq!(patterns[1].type_name, Some("int".to_string()));
+        assert_eq!(patterns[1].variable_name, Some("i2".to_string()));
+    }
+
+    #[test]
+    fn test_csharp_switch_expression_pattern_variables() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+public class MyClass
+{
+    public void Test(object obj)
+    {
+        var result = obj switch
+        {
+            int i => i * 2,
+            string s => s.Length,
+            _ => 0
+        };
+    }
+}
+"#;
+
+        let bindings = parser.find_variable_types(code);
+
+        // Should find pattern variables from switch expression
+        assert!(
+            bindings
+                .iter()
+                .any(|(name, ty, _)| *name == "i" && *ty == "int"),
+            "Should find pattern variable 'i' of type 'int'"
+        );
+        assert!(
+            bindings
+                .iter()
+                .any(|(name, ty, _)| *name == "s" && *ty == "string"),
+            "Should find pattern variable 's' of type 'string'"
+        );
+    }
+
+    #[test]
+    fn test_debug_switch_expression_ast() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+public class MyClass
+{
+    public string Test(object obj)
+    {
+        return obj switch
+        {
+            int i when i > 0 => "positive",
+            string s => s,
+            _ => "other"
+        };
+    }
 }
 "#;
 
@@ -2812,8 +3325,8 @@ public class MyClass
                 if depth <= max_depth {
                     let indent = "  ".repeat(depth);
                     let text = &code[node.byte_range()];
-                    let preview = if text.len() > 40 {
-                        format!("{}...", &text[..40].replace('\n', "\\n"))
+                    let preview = if text.len() > 50 {
+                        format!("{}...", &text[..50].replace('\n', "\\n"))
                     } else {
                         text.replace('\n', "\\n")
                     };
@@ -2834,8 +3347,8 @@ public class MyClass
                     }
                 }
             }
-            println!("\n=== Named Argument AST Structure ===");
-            print_tree(root, code, 0, 10);
+            println!("\n=== Switch Expression AST Structure ===");
+            print_tree(root, code, 0, 12);
         }
     }
 }
