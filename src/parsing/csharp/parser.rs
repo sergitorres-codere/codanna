@@ -890,9 +890,36 @@ impl CSharpParser {
     }
 
     /// Extract interface implementations from a node tree
+    /// Collect all interface declarations in the file
+    /// This is used to distinguish interfaces from base classes in inheritance
+    fn collect_interface_declarations<'a>(
+        node: Node,
+        code: &'a str,
+        interfaces: &mut std::collections::HashSet<&'a str>,
+    ) {
+        if node.kind() == "interface_declaration" {
+            // Find the interface name
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                if child.kind() == "identifier" {
+                    let interface_name = &code[child.byte_range()];
+                    interfaces.insert(interface_name);
+                    break;
+                }
+            }
+        }
+
+        // Recurse into children
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            Self::collect_interface_declarations(child, code, interfaces);
+        }
+    }
+
     fn extract_implementations_from_node<'a>(
         node: Node,
         code: &'a str,
+        declared_interfaces: &std::collections::HashSet<&'a str>,
         implementations: &mut Vec<(&'a str, &'a str, Range)>,
     ) {
         match node.kind() {
@@ -917,16 +944,38 @@ impl CSharpParser {
                             if base_child.kind() == "identifier"
                                 || base_child.kind() == "generic_name"
                             {
-                                let interface_name = &code[base_child.byte_range()];
-                                // Filter out base classes (heuristic: interfaces start with 'I')
-                                if interface_name.starts_with('I') && interface_name.len() > 1 {
+                                let base_name = &code[base_child.byte_range()];
+
+                                // Extract the simple name for generic types (e.g., "IEnumerable" from "IEnumerable<T>")
+                                let simple_name = if base_child.kind() == "generic_name" {
+                                    base_child
+                                        .child_by_field_name("name")
+                                        .map(|n| &code[n.byte_range()])
+                                        .unwrap_or(base_name)
+                                } else {
+                                    base_name
+                                };
+
+                                // Determine if this is an interface using a hybrid approach:
+                                // 1. If it's declared as an interface in this file, it's definitely an interface
+                                // 2. Otherwise, use the 'I' prefix heuristic for external interfaces (like IDisposable, IEnumerable)
+                                // This hybrid approach handles both same-file and external interfaces
+                                let is_interface = declared_interfaces.contains(simple_name)
+                                    || (simple_name.starts_with('I')
+                                        && simple_name.len() > 1
+                                        && simple_name
+                                            .chars()
+                                            .nth(1)
+                                            .is_some_and(|c| c.is_uppercase()));
+
+                                if is_interface {
                                     let range = Range::new(
                                         base_child.start_position().row as u32,
                                         base_child.start_position().column as u16,
                                         base_child.end_position().row as u32,
                                         base_child.end_position().column as u16,
                                     );
-                                    implementations.push((class_name, interface_name, range));
+                                    implementations.push((class_name, base_name, range));
                                 }
                             }
                         }
@@ -938,7 +987,12 @@ impl CSharpParser {
                 // Recursively check children
                 let mut cursor = node.walk();
                 for child in node.children(&mut cursor) {
-                    Self::extract_implementations_from_node(child, code, implementations);
+                    Self::extract_implementations_from_node(
+                        child,
+                        code,
+                        declared_interfaces,
+                        implementations,
+                    );
                 }
             }
         }
@@ -2565,7 +2619,18 @@ impl LanguageParser for CSharpParser {
         match self.parser.parse(code, None) {
             Some(tree) => {
                 let root_node = tree.root_node();
-                Self::extract_implementations_from_node(root_node, code, &mut implementations);
+
+                // First pass: collect all interface declarations in the file
+                let mut declared_interfaces = std::collections::HashSet::new();
+                Self::collect_interface_declarations(root_node, code, &mut declared_interfaces);
+
+                // Second pass: extract implementations using the interface set
+                Self::extract_implementations_from_node(
+                    root_node,
+                    code,
+                    &declared_interfaces,
+                    &mut implementations,
+                );
             }
             None => {
                 eprintln!("Failed to parse C# file for implementations");
@@ -2706,6 +2771,128 @@ mod tests {
                 .iter()
                 .any(|(from, to, _)| *from == "ConsoleLogger" && *to == "ILogger"),
             "Should detect ConsoleLogger implements ILogger. Found: {implementations:?}"
+        );
+    }
+
+    #[test]
+    fn test_csharp_interface_detection_non_standard_naming() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public interface Drawable {
+                void Draw();
+            }
+
+            public interface Movable {
+                void Move();
+            }
+
+            public class GameObject : Drawable, Movable {
+                public void Draw() { }
+                public void Move() { }
+            }
+        "#;
+
+        let implementations = parser.find_implementations(code);
+
+        // Should find both interfaces even though they don't follow 'I' prefix convention
+        assert!(
+            implementations
+                .iter()
+                .any(|(from, to, _)| *from == "GameObject" && *to == "Drawable"),
+            "Should detect GameObject implements Drawable (non-standard naming). Found: {implementations:?}"
+        );
+        assert!(
+            implementations
+                .iter()
+                .any(|(from, to, _)| *from == "GameObject" && *to == "Movable"),
+            "Should detect GameObject implements Movable (non-standard naming). Found: {implementations:?}"
+        );
+    }
+
+    #[test]
+    fn test_csharp_base_class_vs_interface_distinction() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public interface ILogger {
+                void Log(string message);
+            }
+
+            public class BaseService {
+                public virtual void Process() { }
+            }
+
+            public class MyService : BaseService, ILogger {
+                public void Log(string message) { }
+                public override void Process() { }
+            }
+        "#;
+
+        let implementations = parser.find_implementations(code);
+
+        // Should detect ILogger as interface
+        assert!(
+            implementations
+                .iter()
+                .any(|(from, to, _)| *from == "MyService" && *to == "ILogger"),
+            "Should detect MyService implements ILogger. Found: {implementations:?}"
+        );
+
+        // Should NOT detect BaseService as interface (it's a base class)
+        // Note: BaseService doesn't start with 'I' and is not declared as interface
+        assert!(
+            !implementations
+                .iter()
+                .any(|(from, to, _)| *from == "MyService" && *to == "BaseService"),
+            "Should NOT detect BaseService as interface implementation. Found: {implementations:?}"
+        );
+    }
+
+    #[test]
+    fn test_csharp_interface_detection_generic() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public interface IRepository<T> {
+                T GetById(int id);
+            }
+
+            public class UserRepository : IRepository<User> {
+                public User GetById(int id) { return null; }
+            }
+        "#;
+
+        let implementations = parser.find_implementations(code);
+
+        // Should detect generic interface implementation
+        assert!(
+            implementations
+                .iter()
+                .any(|(from, to, _)| *from == "UserRepository" && to.contains("IRepository")),
+            "Should detect UserRepository implements IRepository<User>. Found: {implementations:?}"
+        );
+    }
+
+    #[test]
+    fn test_csharp_interface_detection_mixed_case_filtering() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public interface ILogger {
+                void Log();
+            }
+
+            // This should be detected because it starts with uppercase I followed by uppercase
+            public class Service : ILogger {
+                public void Log() { }
+            }
+        "#;
+
+        let implementations = parser.find_implementations(code);
+
+        // Should detect ILogger
+        assert!(
+            implementations
+                .iter()
+                .any(|(from, to, _)| *from == "Service" && *to == "ILogger"),
+            "Should detect ILogger implementation. Found: {implementations:?}"
         );
     }
 
