@@ -429,6 +429,18 @@ impl CSharpParser {
                 }
             }
 
+            // Operator declarations (operator overloading)
+            "operator_declaration" => {
+                // Register ALL child nodes for audit tracking
+                self.register_node_recursively(node);
+
+                if let Some(symbol) =
+                    self.process_operator(node, code, file_id, counter, module_path)
+                {
+                    symbols.push(symbol);
+                }
+            }
+
             // Variable declarations
             "variable_declaration" | "local_declaration_statement" => {
                 self.register_handled_node(node.kind(), node.kind_id());
@@ -864,6 +876,11 @@ impl CSharpParser {
     /// Extract constructor signature
     fn extract_constructor_signature(&self, node: Node, code: &str) -> String {
         self.extract_signature_excluding_body(node, code, "constructor_body")
+    }
+
+    /// Extract operator signature
+    fn extract_operator_signature(&self, node: Node, code: &str) -> String {
+        self.extract_signature_excluding_body(node, code, "block")
     }
 
     /// Extract field signature
@@ -1591,6 +1608,13 @@ impl CSharpParser {
                             symbols.push(symbol);
                         }
                     }
+                    "operator_declaration" => {
+                        if let Some(symbol) =
+                            self.process_operator(child, code, file_id, counter, module_path)
+                        {
+                            symbols.push(symbol);
+                        }
+                    }
                     "event_declaration" | "event_field_declaration" => {
                         if let Some(symbol) =
                             self.process_event(child, code, file_id, counter, module_path)
@@ -1780,10 +1804,17 @@ impl CSharpParser {
         counter: &mut SymbolCounter,
         module_path: &str,
     ) -> Option<Symbol> {
-        let name = self.extract_type_name(node, code)?;
+        let base_name = self.extract_type_name(node, code)?;
         let signature = self.extract_method_signature(node, code);
         let doc_comment = self.extract_doc_comment(&node, code);
         let visibility = self.determine_visibility(node, code);
+
+        // Check if this is an extension method and augment the name if so
+        let name = if let Some(extended_type) = self.extract_extension_type(node, code) {
+            format!("{base_name} [ext:{extended_type}]")
+        } else {
+            base_name
+        };
 
         Some(self.create_symbol(
             counter.next_id(),
@@ -1972,6 +2003,181 @@ impl CSharpParser {
             module_path,
             visibility,
         ))
+    }
+
+    fn process_operator(
+        &mut self,
+        node: Node,
+        code: &str,
+        file_id: FileId,
+        counter: &mut SymbolCounter,
+        module_path: &str,
+    ) -> Option<Symbol> {
+        // Extract operator symbol from the operator_declaration node
+        // The structure is: operator_declaration -> overloadable_operator -> operator symbol
+        let operator_symbol = self.extract_operator_symbol(node, code)?;
+        // For word-based operators (true, false, etc.), add a space. For symbolic operators, no space needed.
+        let name = if operator_symbol.chars().all(|c| c.is_alphabetic()) {
+            format!("operator {operator_symbol}")
+        } else {
+            format!("operator{operator_symbol}")
+        };
+        let signature = self.extract_operator_signature(node, code);
+        let doc_comment = self.extract_doc_comment(&node, code);
+        let visibility = self.determine_visibility(node, code);
+
+        Some(self.create_symbol(
+            counter.next_id(),
+            name,
+            SymbolKind::Method, // Operators are method-like
+            file_id,
+            Range::new(
+                node.start_position().row as u32,
+                node.start_position().column as u16,
+                node.end_position().row as u32,
+                node.end_position().column as u16,
+            ),
+            Some(signature),
+            doc_comment,
+            module_path,
+            visibility,
+        ))
+    }
+
+    /// Extract operator symbol from operator_declaration node
+    ///
+    /// This method finds the actual operator symbol (+, -, *, ==, !=, etc.)
+    /// from the operator_declaration AST node.
+    ///
+    /// # Tree-sitter Structure
+    ///
+    /// operator_declaration
+    ///   ├── modifier (public, static)
+    ///   ├── return_type
+    ///   ├── "operator" keyword
+    ///   ├── operator symbol (the actual operator like +, -, *, etc. - node kind IS the operator)
+    ///   ├── parameter_list
+    ///   └── block (method body)
+    fn extract_operator_symbol(&self, node: Node, _code: &str) -> Option<String> {
+        // In tree-sitter-c-sharp, the operator symbol is a direct child node
+        // where the node kind itself is the operator (e.g., "+", "-", "*", "==", etc.)
+        // We need to find the child that comes after the "operator" keyword
+        let mut cursor = node.walk();
+        let mut found_operator_keyword = false;
+
+        for child in node.children(&mut cursor) {
+            if child.kind() == "operator" {
+                found_operator_keyword = true;
+                continue;
+            }
+
+            // The operator symbol should be the next meaningful node after "operator" keyword
+            if found_operator_keyword
+                && !child.kind().is_empty()
+                && child.kind() != "parameter_list"
+                && child.kind() != "block"
+            {
+                // This should be the operator symbol
+                return Some(child.kind().to_string());
+            }
+        }
+
+        None
+    }
+
+    /// Extract the extended type from an extension method's first parameter
+    ///
+    /// Extension methods in C# are static methods where the first parameter
+    /// has the `this` modifier. This method checks if the given method_declaration
+    /// is an extension method and extracts the type being extended.
+    ///
+    /// # Tree-sitter Structure
+    ///
+    /// method_declaration
+    ///   ├── modifier (public, static)
+    ///   ├── return_type
+    ///   ├── name (identifier)
+    ///   └── parameter_list
+    ///       └── parameter
+    ///           ├── this (keyword) ← indicates extension method
+    ///           ├── type
+    ///           └── identifier (parameter name)
+    ///
+    /// # Returns
+    ///
+    /// Some(type_name) if this is an extension method, None otherwise
+    fn extract_extension_type(&self, node: Node, code: &str) -> Option<String> {
+        // First, check if the method has a "static" modifier
+        let mut is_static = false;
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if child.kind() == "modifier" && &code[child.byte_range()] == "static" {
+                is_static = true;
+                break;
+            }
+        }
+
+        if !is_static {
+            return None;
+        }
+
+        // Find the parameter_list
+        let param_list = node.child_by_field_name("parameters")?;
+
+        // Get the first parameter
+        let mut param_cursor = param_list.walk();
+        for child in param_list.children(&mut param_cursor) {
+            if child.kind() == "parameter" {
+                // Check if this parameter has a "this" modifier
+                // The parameter structure is: this <type> <name>
+                // We want to extract <type>
+                let mut found_this = false;
+                let mut found_type = false;
+                let mut type_text = String::new();
+
+                let mut child_cursor = child.walk();
+                for param_child in child.children(&mut child_cursor) {
+                    let kind = param_child.kind();
+                    let text = &code[param_child.byte_range()];
+
+                    // 'this' appears as a modifier node with text "this"
+                    if kind == "modifier" && text == "this" {
+                        found_this = true;
+                        continue;
+                    }
+
+                    // After finding 'this', the next non-whitespace node should be the type
+                    if found_this && !found_type {
+                        // Common type node kinds in tree-sitter-c-sharp:
+                        // - predefined_type (int, string, bool, etc.)
+                        // - identifier (custom types, single generic param like T)
+                        // - generic_name (List<T>, IEnumerable<T>, etc.)
+                        // - array_type (T[], int[], etc.)
+                        // - nullable_type (int?, string?, etc.)
+                        if kind == "predefined_type"
+                            || kind == "identifier"
+                            || kind == "generic_name"
+                            || kind == "array_type"
+                            || kind == "nullable_type"
+                            || kind == "qualified_name"
+                        {
+                            type_text = code[param_child.byte_range()].trim().to_string();
+                            found_type = true;
+                            break;
+                        }
+                    }
+                }
+
+                if found_this && found_type && !type_text.is_empty() {
+                    return Some(type_text);
+                }
+
+                // Only check the first parameter
+                break;
+            }
+        }
+
+        None
     }
 
     fn process_variable_declaration(

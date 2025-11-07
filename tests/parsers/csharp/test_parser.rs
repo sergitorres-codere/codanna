@@ -152,3 +152,1061 @@ public class Calculator
         assert!(doc.contains("Calculates a result using addition"));
     }
 }
+
+#[test]
+fn test_csharp_operator_overloading_arithmetic() {
+    let code = r#"
+/// <summary>
+/// A vector class demonstrating operator overloading
+/// </summary>
+public class Vector
+{
+    public double X { get; set; }
+    public double Y { get; set; }
+
+    /// <summary>
+    /// Adds two vectors together
+    /// </summary>
+    public static Vector operator +(Vector a, Vector b)
+    {
+        return new Vector { X = a.X + b.X, Y = a.Y + b.Y };
+    }
+
+    /// <summary>
+    /// Subtracts one vector from another
+    /// </summary>
+    public static Vector operator -(Vector a, Vector b)
+    {
+        return new Vector { X = a.X - b.X, Y = a.Y - b.Y };
+    }
+
+    /// <summary>
+    /// Multiplies a vector by a scalar
+    /// </summary>
+    public static Vector operator *(Vector v, double scalar)
+    {
+        return new Vector { X = v.X * scalar, Y = v.Y * scalar };
+    }
+}
+"#;
+
+    let mut parser = CSharpParser::new().expect("Failed to create parser");
+    let file_id = FileId::new(1).unwrap();
+    let mut counter = SymbolCounter::new();
+
+    let symbols = parser.parse(code, file_id, &mut counter);
+
+    // Check that operator+ is detected
+    let plus_op = symbols.iter().find(|s| &*s.name == "operator+");
+    assert!(
+        plus_op.is_some(),
+        "Should detect operator+ overload. Found symbols: {:?}",
+        symbols.iter().map(|s| &*s.name).collect::<Vec<_>>()
+    );
+
+    // Verify operator+ has proper signature
+    let plus_symbol = plus_op.unwrap();
+    assert!(
+        plus_symbol.signature.is_some(),
+        "Operator+ should have a signature"
+    );
+    let sig = plus_symbol.signature.as_ref().unwrap();
+    assert!(
+        sig.contains("operator"),
+        "Signature should contain 'operator', got: {sig}"
+    );
+    assert!(
+        sig.contains("+"),
+        "Signature should contain '+', got: {sig}"
+    );
+
+    // Verify documentation
+    assert!(
+        plus_symbol.doc_comment.is_some(),
+        "Operator+ should have documentation"
+    );
+    let doc = plus_symbol.doc_comment.as_ref().unwrap();
+    assert!(
+        doc.contains("Adds two vectors together"),
+        "Documentation should be preserved, got: {doc}"
+    );
+
+    // Check that operator- is detected
+    let minus_op = symbols.iter().find(|s| &*s.name == "operator-");
+    assert!(minus_op.is_some(), "Should detect operator- overload");
+
+    // Check that operator* is detected
+    let mult_op = symbols.iter().find(|s| &*s.name == "operator*");
+    assert!(mult_op.is_some(), "Should detect operator* overload");
+}
+
+#[test]
+fn test_csharp_operator_overloading_comparison() {
+    let code = r#"
+public class Point
+{
+    public int X { get; set; }
+    public int Y { get; set; }
+
+    /// <summary>
+    /// Determines if two points are equal
+    /// </summary>
+    public static bool operator ==(Point a, Point b)
+    {
+        return a.X == b.X && a.Y == b.Y;
+    }
+
+    /// <summary>
+    /// Determines if two points are not equal
+    /// </summary>
+    public static bool operator !=(Point a, Point b)
+    {
+        return !(a == b);
+    }
+
+    public override bool Equals(object obj)
+    {
+        if (obj is Point p) return this == p;
+        return false;
+    }
+
+    public override int GetHashCode()
+    {
+        return X.GetHashCode() ^ Y.GetHashCode();
+    }
+}
+"#;
+
+    let mut parser = CSharpParser::new().expect("Failed to create parser");
+    let file_id = FileId::new(1).unwrap();
+    let mut counter = SymbolCounter::new();
+
+    let symbols = parser.parse(code, file_id, &mut counter);
+
+    // Check that operator== is detected
+    let eq_op = symbols.iter().find(|s| &*s.name == "operator==");
+    assert!(
+        eq_op.is_some(),
+        "Should detect operator== overload. Found symbols: {:?}",
+        symbols.iter().map(|s| &*s.name).collect::<Vec<_>>()
+    );
+
+    // Verify operator== has documentation
+    let eq_symbol = eq_op.unwrap();
+    assert!(
+        eq_symbol.doc_comment.is_some(),
+        "Operator== should have documentation"
+    );
+    let doc = eq_symbol.doc_comment.as_ref().unwrap();
+    assert!(
+        doc.contains("equal"),
+        "Documentation should mention equality, got: {doc}"
+    );
+
+    // Check that operator!= is detected
+    let neq_op = symbols.iter().find(|s| &*s.name == "operator!=");
+    assert!(neq_op.is_some(), "Should detect operator!= overload");
+
+    // Verify both operators return bool
+    let eq_sig = eq_symbol.signature.as_ref().unwrap();
+    assert!(
+        eq_sig.contains("bool"),
+        "Operator== should return bool, got: {eq_sig}"
+    );
+}
+
+#[test]
+fn test_csharp_operator_overloading_unary() {
+    let code = r#"
+public class Counter
+{
+    public int Value { get; set; }
+
+    /// <summary>
+    /// Increments the counter
+    /// </summary>
+    public static Counter operator ++(Counter c)
+    {
+        return new Counter { Value = c.Value + 1 };
+    }
+
+    /// <summary>
+    /// Decrements the counter
+    /// </summary>
+    public static Counter operator --(Counter c)
+    {
+        return new Counter { Value = c.Value - 1 };
+    }
+
+    /// <summary>
+    /// Negates the counter value
+    /// </summary>
+    public static Counter operator -(Counter c)
+    {
+        return new Counter { Value = -c.Value };
+    }
+}
+"#;
+
+    let mut parser = CSharpParser::new().expect("Failed to create parser");
+    let file_id = FileId::new(1).unwrap();
+    let mut counter = SymbolCounter::new();
+
+    let symbols = parser.parse(code, file_id, &mut counter);
+
+    // Check that operator++ is detected
+    let inc_op = symbols.iter().find(|s| &*s.name == "operator++");
+    assert!(
+        inc_op.is_some(),
+        "Should detect operator++ overload. Found symbols: {:?}",
+        symbols.iter().map(|s| &*s.name).collect::<Vec<_>>()
+    );
+
+    // Check that operator-- is detected
+    let dec_op = symbols.iter().find(|s| &*s.name == "operator--");
+    assert!(dec_op.is_some(), "Should detect operator-- overload");
+
+    // Check that unary operator- is detected (same name as binary minus)
+    let neg_ops: Vec<_> = symbols.iter().filter(|s| &*s.name == "operator-").collect();
+    assert!(!neg_ops.is_empty(), "Should detect operator- overload");
+}
+
+#[test]
+fn test_csharp_operator_overloading_advanced() {
+    let code = r#"
+public class Matrix
+{
+    private double[,] data;
+
+    /// <summary>
+    /// Performs matrix multiplication
+    /// </summary>
+    public static Matrix operator *(Matrix a, Matrix b)
+    {
+        // Matrix multiplication logic
+        return new Matrix();
+    }
+
+    /// <summary>
+    /// Converts matrix to boolean (true if non-zero)
+    /// </summary>
+    public static bool operator true(Matrix m)
+    {
+        return m != null && m.data != null;
+    }
+
+    /// <summary>
+    /// Converts matrix to boolean (false if zero)
+    /// </summary>
+    public static bool operator false(Matrix m)
+    {
+        return m == null || m.data == null;
+    }
+
+    /// <summary>
+    /// Accesses matrix elements by index
+    /// </summary>
+    public double this[int row, int col]
+    {
+        get { return data[row, col]; }
+        set { data[row, col] = value; }
+    }
+}
+"#;
+
+    let mut parser = CSharpParser::new().expect("Failed to create parser");
+    let file_id = FileId::new(1).unwrap();
+    let mut counter = SymbolCounter::new();
+
+    let symbols = parser.parse(code, file_id, &mut counter);
+
+    // Check that operator* is detected
+    let mult_op = symbols.iter().find(|s| &*s.name == "operator*");
+    assert!(mult_op.is_some(), "Should detect operator* overload");
+
+    // Check that operator true is detected
+    let true_op = symbols.iter().find(|s| &*s.name == "operator true");
+    assert!(
+        true_op.is_some(),
+        "Should detect operator true overload. Found symbols: {:?}",
+        symbols.iter().map(|s| &*s.name).collect::<Vec<_>>()
+    );
+
+    // Check that operator false is detected
+    let false_op = symbols.iter().find(|s| &*s.name == "operator false");
+    assert!(false_op.is_some(), "Should detect operator false overload");
+}
+
+#[test]
+fn test_csharp_async_method_signatures() {
+    let code = r#"
+public class DataService
+{
+    /// <summary>
+    /// Asynchronously fetches data from the server
+    /// </summary>
+    public async Task<string> GetDataAsync()
+    {
+        await Task.Delay(100);
+        return "data";
+    }
+
+    /// <summary>
+    /// Asynchronously saves data to the server
+    /// </summary>
+    public async Task SaveDataAsync(string data)
+    {
+        await Task.Delay(50);
+        // Save logic here
+    }
+
+    /// <summary>
+    /// Asynchronously processes multiple items
+    /// </summary>
+    private async Task<List<int>> ProcessItemsAsync(int count)
+    {
+        await Task.Delay(10);
+        return new List<int>();
+    }
+}
+"#;
+
+    let mut parser = CSharpParser::new().expect("Failed to create parser");
+    let file_id = FileId::new(1).unwrap();
+    let mut counter = SymbolCounter::new();
+
+    let symbols = parser.parse(code, file_id, &mut counter);
+
+    // Check that async method is detected
+    let get_data_method = symbols.iter().find(|s| &*s.name == "GetDataAsync");
+    assert!(
+        get_data_method.is_some(),
+        "Should detect GetDataAsync method. Found symbols: {:?}",
+        symbols.iter().map(|s| &*s.name).collect::<Vec<_>>()
+    );
+
+    // Verify async modifier appears in signature
+    let method = get_data_method.unwrap();
+    let sig = method.signature.as_ref().unwrap();
+    assert!(
+        sig.contains("async"),
+        "Method signature should include 'async' modifier, got: {sig}"
+    );
+    assert!(
+        sig.contains("Task"),
+        "Method signature should include Task return type, got: {sig}"
+    );
+    assert!(
+        sig.contains("<string>"),
+        "Method signature should include generic type parameter, got: {sig}"
+    );
+
+    // Check SaveDataAsync with Task return type (no result)
+    let save_data_method = symbols.iter().find(|s| &*s.name == "SaveDataAsync");
+    assert!(
+        save_data_method.is_some(),
+        "Should detect SaveDataAsync method"
+    );
+    let save_sig = save_data_method.unwrap().signature.as_ref().unwrap();
+    assert!(
+        save_sig.contains("async"),
+        "SaveDataAsync should have async modifier, got: {save_sig}"
+    );
+    assert!(
+        save_sig.contains("Task"),
+        "SaveDataAsync should have Task return type, got: {save_sig}"
+    );
+
+    // Check private async method
+    let process_method = symbols.iter().find(|s| &*s.name == "ProcessItemsAsync");
+    assert!(
+        process_method.is_some(),
+        "Should detect ProcessItemsAsync method"
+    );
+    let process_sig = process_method.unwrap().signature.as_ref().unwrap();
+    assert!(
+        process_sig.contains("async"),
+        "ProcessItemsAsync should have async modifier, got: {process_sig}"
+    );
+}
+
+#[test]
+fn test_csharp_async_interface_and_implementation() {
+    let code = r#"
+/// <summary>
+/// Interface for asynchronous data operations
+/// </summary>
+public interface IDataRepository
+{
+    /// <summary>
+    /// Gets an item by ID asynchronously
+    /// </summary>
+    Task<Item> GetByIdAsync(int id);
+
+    /// <summary>
+    /// Saves an item asynchronously
+    /// </summary>
+    Task SaveAsync(Item item);
+}
+
+public class DataRepository : IDataRepository
+{
+    public async Task<Item> GetByIdAsync(int id)
+    {
+        await Task.Delay(10);
+        return new Item();
+    }
+
+    public async Task SaveAsync(Item item)
+    {
+        await Task.Delay(10);
+    }
+}
+
+public class Item
+{
+    public int Id { get; set; }
+}
+"#;
+
+    let mut parser = CSharpParser::new().expect("Failed to create parser");
+    let file_id = FileId::new(1).unwrap();
+    let mut counter = SymbolCounter::new();
+
+    let symbols = parser.parse(code, file_id, &mut counter);
+
+    // Check interface method declarations have Task return types
+    let interface_methods: Vec<_> = symbols
+        .iter()
+        .filter(|s| s.signature.as_ref().is_some_and(|sig| sig.contains("Task")))
+        .collect();
+
+    assert!(
+        interface_methods.len() >= 4,
+        "Should find at least 4 methods with Task return types (2 in interface + 2 in implementation), found: {}",
+        interface_methods.len()
+    );
+
+    // Check that implementation methods have async modifier
+    let get_by_id_impl = symbols.iter().find(|s| {
+        &*s.name == "GetByIdAsync"
+            && s.signature
+                .as_ref()
+                .is_some_and(|sig| sig.contains("async"))
+    });
+    assert!(
+        get_by_id_impl.is_some(),
+        "Should find async GetByIdAsync implementation"
+    );
+
+    // Check interface implementation tracking
+    let implementations = parser.find_implementations(code);
+    assert!(
+        implementations
+            .iter()
+            .any(|(from, to, _)| *from == "DataRepository" && *to == "IDataRepository"),
+        "Should detect DataRepository implements IDataRepository"
+    );
+}
+
+#[test]
+fn test_csharp_async_await_expressions() {
+    let code = r#"
+public class AsyncService
+{
+    /// <summary>
+    /// Chains multiple async operations
+    /// </summary>
+    public async Task<string> ChainOperationsAsync()
+    {
+        var step1 = await Step1Async();
+        var step2 = await Step2Async(step1);
+        var step3 = await Step3Async(step2);
+        return step3;
+    }
+
+    private async Task<string> Step1Async()
+    {
+        await Task.Delay(10);
+        return "step1";
+    }
+
+    private async Task<string> Step2Async(string input)
+    {
+        await Task.Delay(10);
+        return input + "_step2";
+    }
+
+    private async Task<string> Step3Async(string input)
+    {
+        await Task.Delay(10);
+        return input + "_step3";
+    }
+}
+"#;
+
+    let mut parser = CSharpParser::new().expect("Failed to create parser");
+    let file_id = FileId::new(1).unwrap();
+    let mut counter = SymbolCounter::new();
+
+    let symbols = parser.parse(code, file_id, &mut counter);
+
+    // Verify all async methods are detected
+    let async_methods: Vec<_> = symbols
+        .iter()
+        .filter(|s| {
+            s.signature
+                .as_ref()
+                .is_some_and(|sig| sig.contains("async"))
+        })
+        .collect();
+
+    assert!(
+        async_methods.len() >= 4,
+        "Should detect all 4 async methods, found: {}",
+        async_methods.len()
+    );
+
+    // Check that ChainOperationsAsync is detected
+    let chain_method = symbols.iter().find(|s| &*s.name == "ChainOperationsAsync");
+    assert!(
+        chain_method.is_some(),
+        "Should detect ChainOperationsAsync method"
+    );
+
+    // Verify method calls are tracked (await calls to other async methods)
+    let method_calls = parser.find_method_calls(code);
+
+    // Should find calls from ChainOperationsAsync to Step1Async, Step2Async, Step3Async
+    let chain_calls: Vec<_> = method_calls
+        .iter()
+        .filter(|c| c.caller == "ChainOperationsAsync")
+        .collect();
+
+    assert!(
+        chain_calls.len() >= 3,
+        "Should find at least 3 method calls from ChainOperationsAsync, found: {}",
+        chain_calls.len()
+    );
+}
+
+#[test]
+fn test_csharp_async_void_and_task_variations() {
+    let code = r#"
+public class EventHandlers
+{
+    /// <summary>
+    /// Async event handler (async void - not recommended but valid)
+    /// </summary>
+    public async void OnButtonClick()
+    {
+        await Task.Delay(100);
+    }
+
+    /// <summary>
+    /// Returns ValueTask for performance
+    /// </summary>
+    public async ValueTask<int> GetCachedValueAsync()
+    {
+        await Task.Yield();
+        return 42;
+    }
+
+    /// <summary>
+    /// Uses ConfigureAwait for library code
+    /// </summary>
+    public async Task<string> LibraryMethodAsync()
+    {
+        await Task.Delay(10).ConfigureAwait(false);
+        return "result";
+    }
+
+    /// <summary>
+    /// Returns Task.FromResult for synchronous completion
+    /// </summary>
+    public Task<int> GetImmediateValueAsync()
+    {
+        return Task.FromResult(100);
+    }
+}
+"#;
+
+    let mut parser = CSharpParser::new().expect("Failed to create parser");
+    let file_id = FileId::new(1).unwrap();
+    let mut counter = SymbolCounter::new();
+
+    let symbols = parser.parse(code, file_id, &mut counter);
+
+    // Check async void method
+    let async_void_method = symbols.iter().find(|s| &*s.name == "OnButtonClick");
+    assert!(
+        async_void_method.is_some(),
+        "Should detect async void method"
+    );
+    let async_void_sig = async_void_method.unwrap().signature.as_ref().unwrap();
+    assert!(
+        async_void_sig.contains("async"),
+        "OnButtonClick should have async modifier, got: {async_void_sig}"
+    );
+
+    // Check ValueTask method
+    let value_task_method = symbols.iter().find(|s| &*s.name == "GetCachedValueAsync");
+    assert!(
+        value_task_method.is_some(),
+        "Should detect ValueTask method"
+    );
+    let value_task_sig = value_task_method.unwrap().signature.as_ref().unwrap();
+    assert!(
+        value_task_sig.contains("ValueTask"),
+        "GetCachedValueAsync should have ValueTask return type, got: {value_task_sig}"
+    );
+
+    // Check ConfigureAwait method
+    let configure_await_method = symbols.iter().find(|s| &*s.name == "LibraryMethodAsync");
+    assert!(
+        configure_await_method.is_some(),
+        "Should detect LibraryMethodAsync"
+    );
+
+    // Check non-async method returning Task
+    let sync_task_method = symbols
+        .iter()
+        .find(|s| &*s.name == "GetImmediateValueAsync");
+    assert!(
+        sync_task_method.is_some(),
+        "Should detect GetImmediateValueAsync"
+    );
+    let sync_task_sig = sync_task_method.unwrap().signature.as_ref().unwrap();
+    assert!(
+        sync_task_sig.contains("Task"),
+        "GetImmediateValueAsync should have Task return type, got: {sync_task_sig}"
+    );
+    // This method should NOT have async modifier
+    assert!(
+        !sync_task_sig.contains("async"),
+        "GetImmediateValueAsync should NOT have async modifier (it's synchronous), got: {sync_task_sig}"
+    );
+}
+
+#[test]
+fn test_csharp_extension_methods_basic() {
+    let code = r#"
+/// <summary>
+/// Extension methods for string manipulation
+/// </summary>
+public static class StringExtensions
+{
+    /// <summary>
+    /// Checks if a string is null or empty
+    /// </summary>
+    public static bool IsEmpty(this string str)
+    {
+        return string.IsNullOrEmpty(str);
+    }
+
+    /// <summary>
+    /// Reverses a string
+    /// </summary>
+    public static string Reverse(this string str)
+    {
+        char[] charArray = str.ToCharArray();
+        Array.Reverse(charArray);
+        return new string(charArray);
+    }
+
+    /// <summary>
+    /// Not an extension method - regular static method
+    /// </summary>
+    public static string Concat(string a, string b)
+    {
+        return a + b;
+    }
+}
+"#;
+
+    let mut parser = CSharpParser::new().expect("Failed to create parser");
+    let file_id = FileId::new(1).unwrap();
+    let mut counter = SymbolCounter::new();
+
+    let symbols = parser.parse(code, file_id, &mut counter);
+
+    // Check that IsEmpty extension method is detected with extended type
+    let is_empty = symbols
+        .iter()
+        .find(|s| s.name.starts_with("IsEmpty") && s.name.contains("[ext:"));
+    assert!(
+        is_empty.is_some(),
+        "Should detect IsEmpty as extension method. Found symbols: {:?}",
+        symbols.iter().map(|s| &*s.name).collect::<Vec<_>>()
+    );
+
+    let is_empty_symbol = is_empty.unwrap();
+    assert!(
+        is_empty_symbol.name.contains("[ext:string]"),
+        "IsEmpty should extend string, got: {}",
+        is_empty_symbol.name
+    );
+
+    // Verify signature contains 'this' modifier
+    let sig = is_empty_symbol.signature.as_ref().unwrap();
+    assert!(
+        sig.contains("this"),
+        "Extension method signature should contain 'this', got: {sig}"
+    );
+    assert!(
+        sig.contains("string"),
+        "Extension method signature should contain extended type, got: {sig}"
+    );
+
+    // Check Reverse extension method
+    let reverse = symbols
+        .iter()
+        .find(|s| s.name.starts_with("Reverse") && s.name.contains("[ext:"));
+    assert!(
+        reverse.is_some(),
+        "Should detect Reverse as extension method"
+    );
+    assert!(
+        reverse.unwrap().name.contains("[ext:string]"),
+        "Reverse should extend string"
+    );
+
+    // Check that regular static method is NOT marked as extension
+    let concat = symbols.iter().find(|s| &*s.name == "Concat");
+    assert!(concat.is_some(), "Should find Concat method");
+    assert!(
+        !concat.unwrap().name.contains("[ext:"),
+        "Concat should NOT be marked as extension method"
+    );
+}
+
+#[test]
+fn test_csharp_extension_methods_custom_types() {
+    let code = r#"
+public class Person
+{
+    public string Name { get; set; }
+    public int Age { get; set; }
+}
+
+public static class PersonExtensions
+{
+    /// <summary>
+    /// Checks if person is an adult
+    /// </summary>
+    public static bool IsAdult(this Person person)
+    {
+        return person.Age >= 18;
+    }
+
+    /// <summary>
+    /// Gets formatted name
+    /// </summary>
+    public static string GetFormattedName(this Person person, string prefix)
+    {
+        return $"{prefix} {person.Name}";
+    }
+}
+"#;
+
+    let mut parser = CSharpParser::new().expect("Failed to create parser");
+    let file_id = FileId::new(1).unwrap();
+    let mut counter = SymbolCounter::new();
+
+    let symbols = parser.parse(code, file_id, &mut counter);
+
+    // Check IsAdult extension method
+    let is_adult = symbols
+        .iter()
+        .find(|s| s.name.starts_with("IsAdult") && s.name.contains("[ext:"));
+    assert!(
+        is_adult.is_some(),
+        "Should detect IsAdult as extension method. Found symbols: {:?}",
+        symbols.iter().map(|s| &*s.name).collect::<Vec<_>>()
+    );
+    assert!(
+        is_adult.unwrap().name.contains("[ext:Person]"),
+        "IsAdult should extend Person type"
+    );
+
+    // Check GetFormattedName with multiple parameters
+    let formatted = symbols
+        .iter()
+        .find(|s| s.name.starts_with("GetFormattedName") && s.name.contains("[ext:"));
+    assert!(
+        formatted.is_some(),
+        "Should detect GetFormattedName as extension method"
+    );
+    assert!(
+        formatted.unwrap().name.contains("[ext:Person]"),
+        "GetFormattedName should extend Person type"
+    );
+
+    // Verify signature has both parameters
+    let sig = formatted.unwrap().signature.as_ref().unwrap();
+    assert!(
+        sig.contains("this Person person"),
+        "Should have 'this Person person' parameter, got: {sig}"
+    );
+    assert!(
+        sig.contains("string prefix"),
+        "Should have additional parameter, got: {sig}"
+    );
+}
+
+#[test]
+fn test_csharp_extension_methods_generic_types() {
+    let code = r#"
+public static class CollectionExtensions
+{
+    /// <summary>
+    /// Checks if collection is null or empty
+    /// </summary>
+    public static bool IsNullOrEmpty<T>(this IEnumerable<T> collection)
+    {
+        return collection == null || !collection.Any();
+    }
+
+    /// <summary>
+    /// Converts to list
+    /// </summary>
+    public static List<T> ToListOrEmpty<T>(this IEnumerable<T> source)
+    {
+        return source?.ToList() ?? new List<T>();
+    }
+}
+"#;
+
+    let mut parser = CSharpParser::new().expect("Failed to create parser");
+    let file_id = FileId::new(1).unwrap();
+    let mut counter = SymbolCounter::new();
+
+    let symbols = parser.parse(code, file_id, &mut counter);
+
+    // Check IsNullOrEmpty extension method with generic type
+    let is_null_empty = symbols
+        .iter()
+        .find(|s| s.name.starts_with("IsNullOrEmpty") && s.name.contains("[ext:"));
+    assert!(
+        is_null_empty.is_some(),
+        "Should detect IsNullOrEmpty as extension method. Found symbols: {:?}",
+        symbols.iter().map(|s| &*s.name).collect::<Vec<_>>()
+    );
+
+    let ext_type = &is_null_empty.unwrap().name;
+    assert!(
+        ext_type.contains("[ext:IEnumerable<T>]"),
+        "Should extend IEnumerable<T>, got: {ext_type}"
+    );
+
+    // Check ToListOrEmpty
+    let to_list = symbols
+        .iter()
+        .find(|s| s.name.starts_with("ToListOrEmpty") && s.name.contains("[ext:"));
+    assert!(to_list.is_some(), "Should detect ToListOrEmpty");
+    assert!(
+        to_list.unwrap().name.contains("[ext:IEnumerable<T>]"),
+        "ToListOrEmpty should extend IEnumerable<T>"
+    );
+}
+
+#[test]
+fn test_csharp_extension_methods_multiple_classes() {
+    let code = r#"
+public static class StringHelpers
+{
+    public static bool IsNumeric(this string str)
+    {
+        return int.TryParse(str, out _);
+    }
+}
+
+public static class IntHelpers
+{
+    public static bool IsEven(this int number)
+    {
+        return number % 2 == 0;
+    }
+
+    public static bool IsOdd(this int number)
+    {
+        return number % 2 != 0;
+    }
+}
+"#;
+
+    let mut parser = CSharpParser::new().expect("Failed to create parser");
+    let file_id = FileId::new(1).unwrap();
+    let mut counter = SymbolCounter::new();
+
+    let symbols = parser.parse(code, file_id, &mut counter);
+
+    // Check string extension
+    let is_numeric = symbols
+        .iter()
+        .find(|s| s.name.starts_with("IsNumeric") && s.name.contains("[ext:"));
+    assert!(is_numeric.is_some(), "Should find IsNumeric extension");
+    assert!(
+        is_numeric.unwrap().name.contains("[ext:string]"),
+        "IsNumeric should extend string"
+    );
+
+    // Check int extensions
+    let is_even = symbols
+        .iter()
+        .find(|s| s.name.starts_with("IsEven") && s.name.contains("[ext:"));
+    assert!(is_even.is_some(), "Should find IsEven extension");
+    assert!(
+        is_even.unwrap().name.contains("[ext:int]"),
+        "IsEven should extend int"
+    );
+
+    let is_odd = symbols
+        .iter()
+        .find(|s| s.name.starts_with("IsOdd") && s.name.contains("[ext:"));
+    assert!(is_odd.is_some(), "Should find IsOdd extension");
+    assert!(
+        is_odd.unwrap().name.contains("[ext:int]"),
+        "IsOdd should extend int"
+    );
+}
+
+#[test]
+fn test_csharp_extension_methods_complex_types() {
+    let code = r#"
+public static class ArrayExtensions
+{
+    /// <summary>
+    /// Extension for arrays
+    /// </summary>
+    public static T[] Shuffle<T>(this T[] array)
+    {
+        return array.OrderBy(x => Guid.NewGuid()).ToArray();
+    }
+
+    /// <summary>
+    /// Extension for 2D arrays
+    /// </summary>
+    public static int GetSum(this int[,] matrix)
+    {
+        int sum = 0;
+        foreach (int val in matrix) sum += val;
+        return sum;
+    }
+}
+
+public static class DictionaryExtensions
+{
+    public static V GetValueOrDefault<K, V>(this Dictionary<K, V> dict, K key, V defaultValue)
+    {
+        return dict.TryGetValue(key, out var value) ? value : defaultValue;
+    }
+}
+"#;
+
+    let mut parser = CSharpParser::new().expect("Failed to create parser");
+    let file_id = FileId::new(1).unwrap();
+    let mut counter = SymbolCounter::new();
+
+    let symbols = parser.parse(code, file_id, &mut counter);
+
+    // Check array extension
+    let shuffle = symbols
+        .iter()
+        .find(|s| s.name.starts_with("Shuffle") && s.name.contains("[ext:"));
+    assert!(shuffle.is_some(), "Should find Shuffle extension");
+    assert!(
+        shuffle.unwrap().name.contains("[ext:T[]]"),
+        "Shuffle should extend T[]"
+    );
+
+    // Check 2D array extension
+    let get_sum = symbols
+        .iter()
+        .find(|s| s.name.starts_with("GetSum") && s.name.contains("[ext:"));
+    assert!(get_sum.is_some(), "Should find GetSum extension");
+    assert!(
+        get_sum.unwrap().name.contains("[ext:int[,]]"),
+        "GetSum should extend int[,]"
+    );
+
+    // Check dictionary extension
+    let get_value = symbols
+        .iter()
+        .find(|s| s.name.starts_with("GetValueOrDefault") && s.name.contains("[ext:"));
+    assert!(
+        get_value.is_some(),
+        "Should find GetValueOrDefault extension"
+    );
+    assert!(
+        get_value.unwrap().name.contains("[ext:Dictionary<K, V>]"),
+        "GetValueOrDefault should extend Dictionary<K, V>"
+    );
+}
+
+#[test]
+fn test_csharp_extension_methods_instance_vs_static() {
+    let code = r#"
+public class MixedClass
+{
+    // Instance method - should NOT be extension
+    public bool CheckSomething(this string str)
+    {
+        return true;
+    }
+}
+
+public static class ProperExtensions
+{
+    // Proper extension method
+    public static bool IsValidEmail(this string email)
+    {
+        return email.Contains("@");
+    }
+
+    // Static method without 'this' - NOT an extension
+    public static string Join(string a, string b)
+    {
+        return a + b;
+    }
+}
+"#;
+
+    let mut parser = CSharpParser::new().expect("Failed to create parser");
+    let file_id = FileId::new(1).unwrap();
+    let mut counter = SymbolCounter::new();
+
+    let symbols = parser.parse(code, file_id, &mut counter);
+
+    // Instance method with 'this' parameter should NOT be extension
+    let check_something = symbols.iter().find(|s| &*s.name == "CheckSomething");
+    assert!(
+        check_something.is_some(),
+        "Should find CheckSomething method"
+    );
+    assert!(
+        !check_something.unwrap().name.contains("[ext:"),
+        "Instance method should NOT be marked as extension even with 'this' parameter"
+    );
+
+    // Proper extension method should be marked
+    let is_valid = symbols
+        .iter()
+        .find(|s| s.name.starts_with("IsValidEmail") && s.name.contains("[ext:"));
+    assert!(
+        is_valid.is_some(),
+        "Should find IsValidEmail as extension method"
+    );
+    assert!(
+        is_valid.unwrap().name.contains("[ext:string]"),
+        "IsValidEmail should extend string"
+    );
+
+    // Static method without 'this' should NOT be extension
+    let join = symbols.iter().find(|s| &*s.name == "Join");
+    assert!(join.is_some(), "Should find Join method");
+    assert!(
+        !join.unwrap().name.contains("[ext:"),
+        "Static method without 'this' should NOT be extension"
+    );
+}
