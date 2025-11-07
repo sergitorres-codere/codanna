@@ -373,6 +373,18 @@ impl CSharpParser {
                 }
             }
 
+            // Operator declarations (operator overloading)
+            "operator_declaration" => {
+                // Register ALL child nodes for audit tracking
+                self.register_node_recursively(node);
+
+                if let Some(symbol) =
+                    self.process_operator(node, code, file_id, counter, module_path)
+                {
+                    symbols.push(symbol);
+                }
+            }
+
             // Variable declarations
             "variable_declaration" | "local_declaration_statement" => {
                 self.register_handled_node(node.kind(), node.kind_id());
@@ -673,6 +685,11 @@ impl CSharpParser {
     /// Extract constructor signature
     fn extract_constructor_signature(&self, node: Node, code: &str) -> String {
         self.extract_signature_excluding_body(node, code, "constructor_body")
+    }
+
+    /// Extract operator signature
+    fn extract_operator_signature(&self, node: Node, code: &str) -> String {
+        self.extract_signature_excluding_body(node, code, "block")
     }
 
     /// Extract field signature
@@ -1330,6 +1347,13 @@ impl CSharpParser {
                             symbols.push(symbol);
                         }
                     }
+                    "operator_declaration" => {
+                        if let Some(symbol) =
+                            self.process_operator(child, code, file_id, counter, module_path)
+                        {
+                            symbols.push(symbol);
+                        }
+                    }
                     "event_declaration" | "event_field_declaration" => {
                         if let Some(symbol) =
                             self.process_event(child, code, file_id, counter, module_path)
@@ -1711,6 +1735,86 @@ impl CSharpParser {
             module_path,
             visibility,
         ))
+    }
+
+    fn process_operator(
+        &mut self,
+        node: Node,
+        code: &str,
+        file_id: FileId,
+        counter: &mut SymbolCounter,
+        module_path: &str,
+    ) -> Option<Symbol> {
+        // Extract operator symbol from the operator_declaration node
+        // The structure is: operator_declaration -> overloadable_operator -> operator symbol
+        let operator_symbol = self.extract_operator_symbol(node, code)?;
+        // For word-based operators (true, false, etc.), add a space. For symbolic operators, no space needed.
+        let name = if operator_symbol.chars().all(|c| c.is_alphabetic()) {
+            format!("operator {operator_symbol}")
+        } else {
+            format!("operator{operator_symbol}")
+        };
+        let signature = self.extract_operator_signature(node, code);
+        let doc_comment = self.extract_doc_comment(&node, code);
+        let visibility = self.determine_visibility(node, code);
+
+        Some(self.create_symbol(
+            counter.next_id(),
+            name,
+            SymbolKind::Method, // Operators are method-like
+            file_id,
+            Range::new(
+                node.start_position().row as u32,
+                node.start_position().column as u16,
+                node.end_position().row as u32,
+                node.end_position().column as u16,
+            ),
+            Some(signature),
+            doc_comment,
+            module_path,
+            visibility,
+        ))
+    }
+
+    /// Extract operator symbol from operator_declaration node
+    ///
+    /// This method finds the actual operator symbol (+, -, *, ==, !=, etc.)
+    /// from the operator_declaration AST node.
+    ///
+    /// # Tree-sitter Structure
+    ///
+    /// operator_declaration
+    ///   ├── modifier (public, static)
+    ///   ├── return_type
+    ///   ├── "operator" keyword
+    ///   ├── operator symbol (the actual operator like +, -, *, etc. - node kind IS the operator)
+    ///   ├── parameter_list
+    ///   └── block (method body)
+    fn extract_operator_symbol(&self, node: Node, _code: &str) -> Option<String> {
+        // In tree-sitter-c-sharp, the operator symbol is a direct child node
+        // where the node kind itself is the operator (e.g., "+", "-", "*", "==", etc.)
+        // We need to find the child that comes after the "operator" keyword
+        let mut cursor = node.walk();
+        let mut found_operator_keyword = false;
+
+        for child in node.children(&mut cursor) {
+            if child.kind() == "operator" {
+                found_operator_keyword = true;
+                continue;
+            }
+
+            // The operator symbol should be the next meaningful node after "operator" keyword
+            if found_operator_keyword
+                && !child.kind().is_empty()
+                && child.kind() != "parameter_list"
+                && child.kind() != "block"
+            {
+                // This should be the operator symbol
+                return Some(child.kind().to_string());
+            }
+        }
+
+        None
     }
 
     fn process_variable_declaration(
