@@ -578,11 +578,7 @@ public class Item
     // Check interface method declarations have Task return types
     let interface_methods: Vec<_> = symbols
         .iter()
-        .filter(|s| {
-            s.signature
-                .as_ref()
-                .is_some_and(|sig| sig.contains("Task"))
-        })
+        .filter(|s| s.signature.as_ref().is_some_and(|sig| sig.contains("Task")))
         .collect();
 
     assert!(
@@ -789,5 +785,428 @@ public class EventHandlers
     assert!(
         !sync_task_sig.contains("async"),
         "GetImmediateValueAsync should NOT have async modifier (it's synchronous), got: {sync_task_sig}"
+    );
+}
+
+#[test]
+fn test_csharp_extension_methods_basic() {
+    let code = r#"
+/// <summary>
+/// Extension methods for string manipulation
+/// </summary>
+public static class StringExtensions
+{
+    /// <summary>
+    /// Checks if a string is null or empty
+    /// </summary>
+    public static bool IsEmpty(this string str)
+    {
+        return string.IsNullOrEmpty(str);
+    }
+
+    /// <summary>
+    /// Reverses a string
+    /// </summary>
+    public static string Reverse(this string str)
+    {
+        char[] charArray = str.ToCharArray();
+        Array.Reverse(charArray);
+        return new string(charArray);
+    }
+
+    /// <summary>
+    /// Not an extension method - regular static method
+    /// </summary>
+    public static string Concat(string a, string b)
+    {
+        return a + b;
+    }
+}
+"#;
+
+    let mut parser = CSharpParser::new().expect("Failed to create parser");
+    let file_id = FileId::new(1).unwrap();
+    let mut counter = SymbolCounter::new();
+
+    let symbols = parser.parse(code, file_id, &mut counter);
+
+    // Check that IsEmpty extension method is detected with extended type
+    let is_empty = symbols
+        .iter()
+        .find(|s| s.name.starts_with("IsEmpty") && s.name.contains("[ext:"));
+    assert!(
+        is_empty.is_some(),
+        "Should detect IsEmpty as extension method. Found symbols: {:?}",
+        symbols.iter().map(|s| &*s.name).collect::<Vec<_>>()
+    );
+
+    let is_empty_symbol = is_empty.unwrap();
+    assert!(
+        is_empty_symbol.name.contains("[ext:string]"),
+        "IsEmpty should extend string, got: {}",
+        is_empty_symbol.name
+    );
+
+    // Verify signature contains 'this' modifier
+    let sig = is_empty_symbol.signature.as_ref().unwrap();
+    assert!(
+        sig.contains("this"),
+        "Extension method signature should contain 'this', got: {sig}"
+    );
+    assert!(
+        sig.contains("string"),
+        "Extension method signature should contain extended type, got: {sig}"
+    );
+
+    // Check Reverse extension method
+    let reverse = symbols
+        .iter()
+        .find(|s| s.name.starts_with("Reverse") && s.name.contains("[ext:"));
+    assert!(
+        reverse.is_some(),
+        "Should detect Reverse as extension method"
+    );
+    assert!(
+        reverse.unwrap().name.contains("[ext:string]"),
+        "Reverse should extend string"
+    );
+
+    // Check that regular static method is NOT marked as extension
+    let concat = symbols.iter().find(|s| &*s.name == "Concat");
+    assert!(concat.is_some(), "Should find Concat method");
+    assert!(
+        !concat.unwrap().name.contains("[ext:"),
+        "Concat should NOT be marked as extension method"
+    );
+}
+
+#[test]
+fn test_csharp_extension_methods_custom_types() {
+    let code = r#"
+public class Person
+{
+    public string Name { get; set; }
+    public int Age { get; set; }
+}
+
+public static class PersonExtensions
+{
+    /// <summary>
+    /// Checks if person is an adult
+    /// </summary>
+    public static bool IsAdult(this Person person)
+    {
+        return person.Age >= 18;
+    }
+
+    /// <summary>
+    /// Gets formatted name
+    /// </summary>
+    public static string GetFormattedName(this Person person, string prefix)
+    {
+        return $"{prefix} {person.Name}";
+    }
+}
+"#;
+
+    let mut parser = CSharpParser::new().expect("Failed to create parser");
+    let file_id = FileId::new(1).unwrap();
+    let mut counter = SymbolCounter::new();
+
+    let symbols = parser.parse(code, file_id, &mut counter);
+
+    // Check IsAdult extension method
+    let is_adult = symbols
+        .iter()
+        .find(|s| s.name.starts_with("IsAdult") && s.name.contains("[ext:"));
+    assert!(
+        is_adult.is_some(),
+        "Should detect IsAdult as extension method. Found symbols: {:?}",
+        symbols.iter().map(|s| &*s.name).collect::<Vec<_>>()
+    );
+    assert!(
+        is_adult.unwrap().name.contains("[ext:Person]"),
+        "IsAdult should extend Person type"
+    );
+
+    // Check GetFormattedName with multiple parameters
+    let formatted = symbols
+        .iter()
+        .find(|s| s.name.starts_with("GetFormattedName") && s.name.contains("[ext:"));
+    assert!(
+        formatted.is_some(),
+        "Should detect GetFormattedName as extension method"
+    );
+    assert!(
+        formatted.unwrap().name.contains("[ext:Person]"),
+        "GetFormattedName should extend Person type"
+    );
+
+    // Verify signature has both parameters
+    let sig = formatted.unwrap().signature.as_ref().unwrap();
+    assert!(
+        sig.contains("this Person person"),
+        "Should have 'this Person person' parameter, got: {sig}"
+    );
+    assert!(
+        sig.contains("string prefix"),
+        "Should have additional parameter, got: {sig}"
+    );
+}
+
+#[test]
+fn test_csharp_extension_methods_generic_types() {
+    let code = r#"
+public static class CollectionExtensions
+{
+    /// <summary>
+    /// Checks if collection is null or empty
+    /// </summary>
+    public static bool IsNullOrEmpty<T>(this IEnumerable<T> collection)
+    {
+        return collection == null || !collection.Any();
+    }
+
+    /// <summary>
+    /// Converts to list
+    /// </summary>
+    public static List<T> ToListOrEmpty<T>(this IEnumerable<T> source)
+    {
+        return source?.ToList() ?? new List<T>();
+    }
+}
+"#;
+
+    let mut parser = CSharpParser::new().expect("Failed to create parser");
+    let file_id = FileId::new(1).unwrap();
+    let mut counter = SymbolCounter::new();
+
+    let symbols = parser.parse(code, file_id, &mut counter);
+
+    // Check IsNullOrEmpty extension method with generic type
+    let is_null_empty = symbols
+        .iter()
+        .find(|s| s.name.starts_with("IsNullOrEmpty") && s.name.contains("[ext:"));
+    assert!(
+        is_null_empty.is_some(),
+        "Should detect IsNullOrEmpty as extension method. Found symbols: {:?}",
+        symbols.iter().map(|s| &*s.name).collect::<Vec<_>>()
+    );
+
+    let ext_type = &is_null_empty.unwrap().name;
+    assert!(
+        ext_type.contains("[ext:IEnumerable<T>]"),
+        "Should extend IEnumerable<T>, got: {ext_type}"
+    );
+
+    // Check ToListOrEmpty
+    let to_list = symbols
+        .iter()
+        .find(|s| s.name.starts_with("ToListOrEmpty") && s.name.contains("[ext:"));
+    assert!(to_list.is_some(), "Should detect ToListOrEmpty");
+    assert!(
+        to_list.unwrap().name.contains("[ext:IEnumerable<T>]"),
+        "ToListOrEmpty should extend IEnumerable<T>"
+    );
+}
+
+#[test]
+fn test_csharp_extension_methods_multiple_classes() {
+    let code = r#"
+public static class StringHelpers
+{
+    public static bool IsNumeric(this string str)
+    {
+        return int.TryParse(str, out _);
+    }
+}
+
+public static class IntHelpers
+{
+    public static bool IsEven(this int number)
+    {
+        return number % 2 == 0;
+    }
+
+    public static bool IsOdd(this int number)
+    {
+        return number % 2 != 0;
+    }
+}
+"#;
+
+    let mut parser = CSharpParser::new().expect("Failed to create parser");
+    let file_id = FileId::new(1).unwrap();
+    let mut counter = SymbolCounter::new();
+
+    let symbols = parser.parse(code, file_id, &mut counter);
+
+    // Check string extension
+    let is_numeric = symbols
+        .iter()
+        .find(|s| s.name.starts_with("IsNumeric") && s.name.contains("[ext:"));
+    assert!(is_numeric.is_some(), "Should find IsNumeric extension");
+    assert!(
+        is_numeric.unwrap().name.contains("[ext:string]"),
+        "IsNumeric should extend string"
+    );
+
+    // Check int extensions
+    let is_even = symbols
+        .iter()
+        .find(|s| s.name.starts_with("IsEven") && s.name.contains("[ext:"));
+    assert!(is_even.is_some(), "Should find IsEven extension");
+    assert!(
+        is_even.unwrap().name.contains("[ext:int]"),
+        "IsEven should extend int"
+    );
+
+    let is_odd = symbols
+        .iter()
+        .find(|s| s.name.starts_with("IsOdd") && s.name.contains("[ext:"));
+    assert!(is_odd.is_some(), "Should find IsOdd extension");
+    assert!(
+        is_odd.unwrap().name.contains("[ext:int]"),
+        "IsOdd should extend int"
+    );
+}
+
+#[test]
+fn test_csharp_extension_methods_complex_types() {
+    let code = r#"
+public static class ArrayExtensions
+{
+    /// <summary>
+    /// Extension for arrays
+    /// </summary>
+    public static T[] Shuffle<T>(this T[] array)
+    {
+        return array.OrderBy(x => Guid.NewGuid()).ToArray();
+    }
+
+    /// <summary>
+    /// Extension for 2D arrays
+    /// </summary>
+    public static int GetSum(this int[,] matrix)
+    {
+        int sum = 0;
+        foreach (int val in matrix) sum += val;
+        return sum;
+    }
+}
+
+public static class DictionaryExtensions
+{
+    public static V GetValueOrDefault<K, V>(this Dictionary<K, V> dict, K key, V defaultValue)
+    {
+        return dict.TryGetValue(key, out var value) ? value : defaultValue;
+    }
+}
+"#;
+
+    let mut parser = CSharpParser::new().expect("Failed to create parser");
+    let file_id = FileId::new(1).unwrap();
+    let mut counter = SymbolCounter::new();
+
+    let symbols = parser.parse(code, file_id, &mut counter);
+
+    // Check array extension
+    let shuffle = symbols
+        .iter()
+        .find(|s| s.name.starts_with("Shuffle") && s.name.contains("[ext:"));
+    assert!(shuffle.is_some(), "Should find Shuffle extension");
+    assert!(
+        shuffle.unwrap().name.contains("[ext:T[]]"),
+        "Shuffle should extend T[]"
+    );
+
+    // Check 2D array extension
+    let get_sum = symbols
+        .iter()
+        .find(|s| s.name.starts_with("GetSum") && s.name.contains("[ext:"));
+    assert!(get_sum.is_some(), "Should find GetSum extension");
+    assert!(
+        get_sum.unwrap().name.contains("[ext:int[,]]"),
+        "GetSum should extend int[,]"
+    );
+
+    // Check dictionary extension
+    let get_value = symbols
+        .iter()
+        .find(|s| s.name.starts_with("GetValueOrDefault") && s.name.contains("[ext:"));
+    assert!(
+        get_value.is_some(),
+        "Should find GetValueOrDefault extension"
+    );
+    assert!(
+        get_value.unwrap().name.contains("[ext:Dictionary<K, V>]"),
+        "GetValueOrDefault should extend Dictionary<K, V>"
+    );
+}
+
+#[test]
+fn test_csharp_extension_methods_instance_vs_static() {
+    let code = r#"
+public class MixedClass
+{
+    // Instance method - should NOT be extension
+    public bool CheckSomething(this string str)
+    {
+        return true;
+    }
+}
+
+public static class ProperExtensions
+{
+    // Proper extension method
+    public static bool IsValidEmail(this string email)
+    {
+        return email.Contains("@");
+    }
+
+    // Static method without 'this' - NOT an extension
+    public static string Join(string a, string b)
+    {
+        return a + b;
+    }
+}
+"#;
+
+    let mut parser = CSharpParser::new().expect("Failed to create parser");
+    let file_id = FileId::new(1).unwrap();
+    let mut counter = SymbolCounter::new();
+
+    let symbols = parser.parse(code, file_id, &mut counter);
+
+    // Instance method with 'this' parameter should NOT be extension
+    let check_something = symbols.iter().find(|s| &*s.name == "CheckSomething");
+    assert!(
+        check_something.is_some(),
+        "Should find CheckSomething method"
+    );
+    assert!(
+        !check_something.unwrap().name.contains("[ext:"),
+        "Instance method should NOT be marked as extension even with 'this' parameter"
+    );
+
+    // Proper extension method should be marked
+    let is_valid = symbols
+        .iter()
+        .find(|s| s.name.starts_with("IsValidEmail") && s.name.contains("[ext:"));
+    assert!(
+        is_valid.is_some(),
+        "Should find IsValidEmail as extension method"
+    );
+    assert!(
+        is_valid.unwrap().name.contains("[ext:string]"),
+        "IsValidEmail should extend string"
+    );
+
+    // Static method without 'this' should NOT be extension
+    let join = symbols.iter().find(|s| &*s.name == "Join");
+    assert!(join.is_some(), "Should find Join method");
+    assert!(
+        !join.unwrap().name.contains("[ext:"),
+        "Static method without 'this' should NOT be extension"
     );
 }
