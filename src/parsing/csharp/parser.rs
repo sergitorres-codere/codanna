@@ -728,11 +728,69 @@ impl CSharpParser {
             current_function
         };
 
+        // Handle await expressions - unwrap to find the actual invocation
+        // Pattern: await _httpClient.GetAsync()
+        // The await wraps the invocation, so we need to unwrap it transparently
+        if node.kind() == "await_expression" {
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                // Process children with inherited function context
+                Self::extract_calls_recursive(&child, code, function_context, calls);
+            }
+            return; // Don't fall through to default recursion
+        }
+
+        // Handle object creation (constructor calls)
+        // Pattern: new Service() or new List<T>()
+        if node.kind() == "object_creation_expression" {
+            let caller = function_context.unwrap_or("");
+
+            if let Some(type_node) = node.child_by_field_name("type") {
+                let type_name = match type_node.kind() {
+                    "identifier" => &code[type_node.byte_range()],
+                    "generic_name" => {
+                        // For Generic<T>, extract just "Generic"
+                        type_node
+                            .child_by_field_name("name")
+                            .map(|n| &code[n.byte_range()])
+                            .unwrap_or(&code[type_node.byte_range()])
+                    }
+                    "qualified_name" => {
+                        // For Namespace.Type, extract just "Type" (rightmost identifier)
+                        let mut last_ident = None;
+                        let mut cursor = type_node.walk();
+                        for child in type_node.children(&mut cursor) {
+                            if child.kind() == "identifier" {
+                                last_ident = Some(&code[child.byte_range()]);
+                            }
+                        }
+                        last_ident.unwrap_or(&code[type_node.byte_range()])
+                    }
+                    _ => &code[type_node.byte_range()],
+                };
+
+                let range = Range::new(
+                    node.start_position().row as u32,
+                    node.start_position().column as u16,
+                    node.end_position().row as u32,
+                    node.end_position().column as u16,
+                );
+                calls.push((caller, type_name, range));
+            }
+
+            // Still recurse to catch any method calls in constructor arguments
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                Self::extract_calls_recursive(&child, code, function_context, calls);
+            }
+            return;
+        }
+
         // Handle invocation expressions with proper caller context
         if node.kind() == "invocation_expression" {
             if let Some(expression_node) = node.child(0) {
                 let caller = function_context.unwrap_or("");
-                let callee = match expression_node.kind() {
+                let callee_raw = match expression_node.kind() {
                     "member_access_expression" => {
                         // obj.Method() - get method name
                         expression_node
@@ -745,6 +803,14 @@ impl CSharpParser {
                         &code[expression_node.byte_range()]
                     }
                     _ => &code[expression_node.byte_range()],
+                };
+
+                // Strip generic type parameters for better resolution
+                // e.g., "GetFromJsonAsync<List<T>>" -> "GetFromJsonAsync"
+                let callee = if let Some(idx) = callee_raw.find('<') {
+                    &callee_raw[..idx]
+                } else {
+                    callee_raw
                 };
 
                 let range = Range::new(
@@ -789,6 +855,49 @@ impl CSharpParser {
         method_calls: &mut Vec<MethodCall>,
     ) {
         match node.kind() {
+            // Handle await expressions - unwrap to find the actual invocation
+            "await_expression" => {
+                // Await wraps invocation, process children transparently
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    self.extract_method_calls_from_node(child, code, method_calls);
+                }
+                // Don't fall through to default case
+            }
+            // Handle object creation (constructor calls)
+            "object_creation_expression" => {
+                let caller = self
+                    .context
+                    .current_function()
+                    .or_else(|| self.context.current_class())
+                    .unwrap_or("unknown");
+
+                if let Some(type_node) = node.child_by_field_name("type") {
+                    let type_name = match type_node.kind() {
+                        "identifier" => code[type_node.byte_range()].to_string(),
+                        "generic_name" => type_node
+                            .child_by_field_name("name")
+                            .map(|n| code[n.byte_range()].to_string())
+                            .unwrap_or_else(|| code[type_node.byte_range()].to_string()),
+                        _ => code[type_node.byte_range()].to_string(),
+                    };
+
+                    let range = Range::new(
+                        node.start_position().row as u32,
+                        node.start_position().column as u16,
+                        node.end_position().row as u32,
+                        node.end_position().column as u16,
+                    );
+                    method_calls.push(MethodCall::new(caller, &type_name, range));
+                }
+
+                // Still recurse for nested calls in constructor arguments
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    self.extract_method_calls_from_node(child, code, method_calls);
+                }
+                // Don't fall through to default case
+            }
             // Track scope changes to maintain caller context
             "class_declaration"
             | "struct_declaration"
@@ -850,22 +959,46 @@ impl CSharpParser {
                                 {
                                     let receiver = code[object_node.byte_range()].to_string();
                                     let method = code[name_node.byte_range()].to_string();
+
+                                    // Strip generic type parameters for better resolution
+                                    // e.g., "GetFromJsonAsync<List<T>>" -> "GetFromJsonAsync"
+                                    let method_name = if let Some(idx) = method.find('<') {
+                                        &method[..idx]
+                                    } else {
+                                        &method
+                                    };
+
                                     let range = Range::new(
                                         node.start_position().row as u32,
                                         node.start_position().column as u16,
                                         node.end_position().row as u32,
                                         node.end_position().column as u16,
                                     );
-                                    method_calls.push(
-                                        MethodCall::new(caller, &method, range)
-                                            .with_receiver(&receiver),
-                                    );
+
+                                    // Detect static method calls: if receiver starts with uppercase,
+                                    // it's likely a class/type name (PascalCase convention in C#)
+                                    let mut call = MethodCall::new(caller, method_name, range)
+                                        .with_receiver(&receiver);
+
+                                    if receiver.chars().next().is_some_and(|c| c.is_uppercase()) {
+                                        call = call.static_method();
+                                    }
+
+                                    method_calls.push(call);
                                 }
                             }
                         }
                         "identifier" => {
                             // Simple method calls like Method()
                             let method = code[expression_node.byte_range()].to_string();
+
+                            // Strip generic type parameters for better resolution
+                            let method_name = if let Some(idx) = method.find('<') {
+                                &method[..idx]
+                            } else {
+                                &method
+                            };
+
                             let range = Range::new(
                                 node.start_position().row as u32,
                                 node.start_position().column as u16,
@@ -873,7 +1006,7 @@ impl CSharpParser {
                                 node.end_position().column as u16,
                             );
                             method_calls.push(
-                                MethodCall::new(caller, &method, range).with_receiver("this"),
+                                MethodCall::new(caller, method_name, range).with_receiver("this"),
                             );
                         }
                         _ => {}
@@ -1303,7 +1436,22 @@ impl CSharpParser {
                         if let Some(symbol) =
                             self.process_method(child, code, file_id, counter, module_path)
                         {
+                            let method_name = symbol.name.to_string();
                             symbols.push(symbol);
+
+                            // Process method body for local variables and functions
+                            self.context
+                                .enter_scope(ScopeType::Function { hoisting: false });
+                            self.context.set_current_function(Some(method_name));
+                            self.extract_method_body(
+                                child,
+                                code,
+                                file_id,
+                                counter,
+                                symbols,
+                                module_path,
+                            );
+                            self.context.exit_scope();
                         }
                     }
                     "property_declaration" => {
@@ -1475,37 +1623,58 @@ impl CSharpParser {
     ) {
         // Look for local functions and variable declarations within method body
         if let Some(body_node) = method_node.child_by_field_name("body") {
-            let mut cursor = body_node.walk();
-            for child in body_node.children(&mut cursor) {
-                match child.kind() {
-                    "local_function_statement" => {
-                        if let Some(symbol) =
-                            self.process_local_function(child, code, file_id, counter, module_path)
-                        {
-                            symbols.push(symbol);
-                        }
-                    }
-                    "local_declaration_statement" => {
-                        self.process_variable_declaration(
-                            child,
-                            code,
-                            file_id,
-                            counter,
-                            symbols,
-                            module_path,
-                        );
-                    }
-                    _ => {
-                        // Continue recursively for nested blocks
-                        self.extract_method_body(
-                            child,
-                            code,
-                            file_id,
-                            counter,
-                            symbols,
-                            module_path,
-                        );
-                    }
+            self.extract_method_body_recursive(
+                body_node,
+                code,
+                file_id,
+                counter,
+                symbols,
+                module_path,
+            );
+        }
+    }
+
+    /// Recursively extract local variables and functions from any node
+    fn extract_method_body_recursive(
+        &mut self,
+        node: Node,
+        code: &str,
+        file_id: FileId,
+        counter: &mut SymbolCounter,
+        symbols: &mut Vec<Symbol>,
+        module_path: &str,
+    ) {
+        // Process the current node
+        match node.kind() {
+            "local_function_statement" => {
+                if let Some(symbol) =
+                    self.process_local_function(node, code, file_id, counter, module_path)
+                {
+                    symbols.push(symbol);
+                }
+            }
+            "local_declaration_statement" => {
+                self.process_variable_declaration(
+                    node,
+                    code,
+                    file_id,
+                    counter,
+                    symbols,
+                    module_path,
+                );
+            }
+            _ => {
+                // Recursively process all children
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    self.extract_method_body_recursive(
+                        child,
+                        code,
+                        file_id,
+                        counter,
+                        symbols,
+                        module_path,
+                    );
                 }
             }
         }
@@ -1722,32 +1891,53 @@ impl CSharpParser {
         symbols: &mut Vec<Symbol>,
         module_path: &str,
     ) {
-        // Look for variable_declarator nodes within the declaration
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
-            if child.kind() == "variable_declarator" {
-                if let Some(name_node) = child.child_by_field_name("name") {
-                    let name = code[name_node.byte_range()].to_string();
-                    let signature = self.extract_variable_signature(node, code);
-                    let doc_comment = self.extract_doc_comment(&node, code);
+        // Handle the nested structure of local_declaration_statement and variable_declaration
+        // Structure:
+        //   local_declaration_statement -> variable_declaration -> variable_declarator
+        //   OR
+        //   variable_declaration -> variable_declarator
 
-                    let symbol = self.create_symbol(
-                        counter.next_id(),
-                        name,
-                        SymbolKind::Variable,
-                        file_id,
-                        Range::new(
-                            child.start_position().row as u32,
-                            child.start_position().column as u16,
-                            child.end_position().row as u32,
-                            child.end_position().column as u16,
-                        ),
-                        Some(signature.clone()),
-                        doc_comment.clone(),
-                        module_path,
-                        Visibility::Private, // Local variables are private
-                    );
-                    symbols.push(symbol);
+        // First, find the variable_declaration node if we're starting from local_declaration_statement
+        let var_decl_node = if node.kind() == "local_declaration_statement" {
+            // Find the variable_declaration child
+            let mut cursor = node.walk();
+            node.children(&mut cursor)
+                .find(|child| child.kind() == "variable_declaration")
+        } else if node.kind() == "variable_declaration" {
+            // Already have the variable_declaration
+            Some(node)
+        } else {
+            None
+        };
+
+        // If we found a variable_declaration node, extract its declarators
+        if let Some(var_decl) = var_decl_node {
+            let mut cursor = var_decl.walk();
+            for child in var_decl.children(&mut cursor) {
+                if child.kind() == "variable_declarator" {
+                    if let Some(name_node) = child.child_by_field_name("name") {
+                        let name = code[name_node.byte_range()].to_string();
+                        let signature = self.extract_variable_signature(node, code);
+                        let doc_comment = self.extract_doc_comment(&node, code);
+
+                        let symbol = self.create_symbol(
+                            counter.next_id(),
+                            name,
+                            SymbolKind::Variable,
+                            file_id,
+                            Range::new(
+                                child.start_position().row as u32,
+                                child.start_position().column as u16,
+                                child.end_position().row as u32,
+                                child.end_position().column as u16,
+                            ),
+                            Some(signature.clone()),
+                            doc_comment.clone(),
+                            module_path,
+                            Visibility::Private, // Local variables are private
+                        );
+                        symbols.push(symbol);
+                    }
                 }
             }
         }
@@ -2097,7 +2287,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "find_imports implementation needs to be completed - currently returns empty"]
     fn test_csharp_using_directive_extraction() {
         let mut parser = CSharpParser::new().unwrap();
         let code = r#"
@@ -2126,5 +2315,48 @@ mod tests {
                 .any(|i| i.path == "System.Collections.Generic")
         );
         assert!(imports.iter().any(|i| i.path == "MyApp.Services"));
+    }
+
+    #[test]
+    fn test_csharp_local_variable_extraction() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class TestClass {
+                public void TestMethod() {
+                    var localVar = new Helper();
+                    int count = 5;
+                }
+            }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        // Should extract the class, method, and local variables
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name.as_ref() == "TestClass" && s.kind == SymbolKind::Class),
+            "Should find TestClass"
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name.as_ref() == "TestMethod" && s.kind == SymbolKind::Method),
+            "Should find TestMethod"
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name.as_ref() == "localVar" && s.kind == SymbolKind::Variable),
+            "Should find localVar"
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name.as_ref() == "count" && s.kind == SymbolKind::Variable),
+            "Should find count"
+        );
     }
 }
