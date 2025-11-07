@@ -1,11 +1,11 @@
 # C# Parser Coverage Report
 
-*Generated: 2025-11-03 17:26:58 UTC*
+*Generated: 2025-11-07 18:28:43 UTC*
 
 ## Summary
 - Nodes in file: 142
 - Nodes handled by parser: 142
-- Symbol kinds extracted: 9
+- Symbol kinds extracted: 10
 
 ## Coverage Table
 
