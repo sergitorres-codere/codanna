@@ -2785,7 +2785,7 @@ mod tests {
             s.name.as_ref() == "Name"
                 && s.signature
                     .as_ref()
-                    .map_or(false, |sig| sig.contains("string"))
+                    .is_some_and(|sig| sig.contains("string"))
         }));
         assert!(symbols.iter().any(|s| s.name.as_ref() == "Age"));
 
