@@ -631,17 +631,23 @@ impl CSharpParser {
 
     /// Extract class signature (including generics, base classes, interfaces)
     fn extract_class_signature(&self, node: Node, code: &str) -> String {
-        self.extract_signature_excluding_body(node, code, "class_body")
+        let base_sig = self.extract_signature_excluding_body(node, code, "class_body");
+        let constraints = self.extract_generic_constraints(node, code);
+        format!("{base_sig}{constraints}")
     }
 
     /// Extract interface signature
     fn extract_interface_signature(&self, node: Node, code: &str) -> String {
-        self.extract_signature_excluding_body(node, code, "interface_body")
+        let base_sig = self.extract_signature_excluding_body(node, code, "interface_body");
+        let constraints = self.extract_generic_constraints(node, code);
+        format!("{base_sig}{constraints}")
     }
 
     /// Extract struct signature
     fn extract_struct_signature(&self, node: Node, code: &str) -> String {
-        self.extract_signature_excluding_body(node, code, "struct_body")
+        let base_sig = self.extract_signature_excluding_body(node, code, "struct_body");
+        let constraints = self.extract_generic_constraints(node, code);
+        format!("{base_sig}{constraints}")
     }
 
     /// Extract enum signature
@@ -662,7 +668,9 @@ impl CSharpParser {
 
     /// Extract method signature (including return type, parameters, generics)
     fn extract_method_signature(&self, node: Node, code: &str) -> String {
-        self.extract_signature_excluding_body(node, code, "method_body")
+        let base_sig = self.extract_signature_excluding_body(node, code, "method_body");
+        let constraints = self.extract_generic_constraints(node, code);
+        format!("{base_sig}{constraints}")
     }
 
     /// Extract property signature (including type and accessors)
@@ -946,6 +954,12 @@ impl CSharpParser {
     }
 
     /// Extract imports from a node tree
+    ///
+    /// Supports:
+    /// - Basic using: `using System;`
+    /// - Static using: `using static System.Math;`
+    /// - Global using: `global using System;`
+    /// - Alias using: `using Json = System.Text.Json;`
     fn extract_imports_from_node(
         node: Node,
         code: &str,
@@ -954,34 +968,71 @@ impl CSharpParser {
     ) {
         match node.kind() {
             "using_directive" => {
-                // Try standard field extraction first
-                if let Some(name_node) = node.child_by_field_name("name") {
-                    let import_path = code[name_node.byte_range()].to_string();
+                // Check for alias (using Alias = Namespace.Type)
+                let mut alias: Option<String> = None;
+                let mut import_path = String::new();
+                let mut is_static = false;
+                let full_text = code[node.byte_range()].trim();
+
+                // Check if it's a static using
+                if full_text.contains("using static ") {
+                    is_static = true;
+                }
+
+                // Check for alias pattern using text parsing as fallback
+                // Pattern: using [global] [static] Alias = Namespace.Type;
+                if full_text.contains(" = ") {
+                    // This is an alias using
+                    let parts: Vec<&str> = full_text.split(" = ").collect();
+                    if parts.len() == 2 {
+                        // Extract alias (after "using" keyword)
+                        let alias_part = parts[0].trim();
+                        // Remove "using", "global", "static" keywords
+                        let alias_name = alias_part
+                            .replace("using", "")
+                            .replace("global", "")
+                            .replace("static", "")
+                            .trim()
+                            .to_string();
+
+                        if !alias_name.is_empty() {
+                            alias = Some(alias_name);
+                        }
+
+                        // Extract import path (before semicolon)
+                        import_path = parts[1].trim().trim_end_matches(';').trim().to_string();
+                    }
+                } else {
+                    // Not an alias - try standard field extraction
+                    if let Some(name_node) = node.child_by_field_name("name") {
+                        import_path = code[name_node.byte_range()].to_string();
+                    } else {
+                        // Fallback: tree-sitter-c-sharp doesn't consistently expose "name" field
+                        // for using_directive nodes. Iterate child nodes to find qualified_name
+                        // or identifier nodes.
+                        let mut cursor = node.walk();
+                        for child in node.children(&mut cursor) {
+                            if child.kind() == "qualified_name" || child.kind() == "identifier" {
+                                import_path = code[child.byte_range()].to_string();
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if !import_path.is_empty() {
+                    // Add prefix for static usings to distinguish them
+                    if is_static {
+                        import_path = format!("static {import_path}");
+                    }
+
                     imports.push(Import {
                         path: import_path,
-                        alias: None,
+                        alias,
                         file_id,
                         is_glob: false,
                         is_type_only: false,
                     });
-                } else {
-                    // Fallback: tree-sitter-c-sharp doesn't consistently expose "name" field
-                    // for using_directive nodes. Iterate child nodes to find qualified_name
-                    // or identifier nodes directly.
-                    let mut cursor = node.walk();
-                    for child in node.children(&mut cursor) {
-                        if child.kind() == "qualified_name" || child.kind() == "identifier" {
-                            let import_path = code[child.byte_range()].to_string();
-                            imports.push(Import {
-                                path: import_path,
-                                alias: None,
-                                file_id,
-                                is_glob: false,
-                                is_type_only: false,
-                            });
-                            break;
-                        }
-                    }
                 }
             }
             _ => {
@@ -1223,6 +1274,86 @@ impl CSharpParser {
         }
     }
 
+    /// Extract generic constraints from a node (class, interface, struct, or method)
+    ///
+    /// Looks for type_parameter_constraints_clause children and formats them
+    /// into a where clause string.
+    ///
+    /// Returns: " where T : IEntity, new()" or empty string if no constraints
+    fn extract_generic_constraints(&self, node: Node, code: &str) -> String {
+        let mut constraints = Vec::new();
+        let mut cursor = node.walk();
+
+        for child in node.children(&mut cursor) {
+            if child.kind() == "type_parameter_constraints_clause" {
+                // Structure: type_parameter_constraints_clause has:
+                // - identifier (the type parameter, e.g., "T")
+                // - one or more type_constraint nodes
+
+                let mut type_param = None;
+                let mut constraint_parts = Vec::new();
+
+                let mut constraint_cursor = child.walk();
+                for constraint_child in child.children(&mut constraint_cursor) {
+                    match constraint_child.kind() {
+                        "identifier" if type_param.is_none() => {
+                            type_param = Some(&code[constraint_child.byte_range()]);
+                        }
+                        "type_constraint"
+                        | "class_constraint"
+                        | "struct_constraint"
+                        | "constructor_constraint"
+                        | "notnull_constraint" => {
+                            constraint_parts.push(&code[constraint_child.byte_range()]);
+                        }
+                        _ => {}
+                    }
+                }
+
+                if let Some(param) = type_param {
+                    if !constraint_parts.is_empty() {
+                        constraints.push(format!("{} : {}", param, constraint_parts.join(", ")));
+                    }
+                }
+            }
+        }
+
+        if constraints.is_empty() {
+            String::new()
+        } else {
+            format!(" where {}", constraints.join(" where "))
+        }
+    }
+
+    /// Extract type name including nullable marker
+    ///
+    /// Returns "string?" if the type is nullable, "string" otherwise
+    #[allow(dead_code)]
+    fn extract_type_with_nullable(&self, type_node: Node, code: &str) -> String {
+        match type_node.kind() {
+            "nullable_type" => {
+                // nullable_type wraps the actual type and adds "?"
+                // Get the inner type and append "?"
+                let mut cursor = type_node.walk();
+                for child in type_node.children(&mut cursor) {
+                    if child.kind() != "?" {
+                        return format!("{}?", &code[child.byte_range()]);
+                    }
+                }
+                // Fallback: just get the whole text
+                code[type_node.byte_range()].to_string()
+            }
+            "predefined_type" | "identifier_name" | "generic_name" | "qualified_name" => {
+                // Non-nullable type
+                code[type_node.byte_range()].to_string()
+            }
+            _ => {
+                // Unknown type node, get text as-is
+                code[type_node.byte_range()].to_string()
+            }
+        }
+    }
+
     /// Determine visibility from modifiers
     fn determine_visibility(&self, node: Node, code: &str) -> Visibility {
         let mut cursor = node.walk();
@@ -1237,6 +1368,9 @@ impl CSharpParser {
                     return Visibility::Module; // Closest approximation
                 } else if modifier_text.contains("internal") {
                     return Visibility::Module;
+                } else if modifier_text.contains("file") {
+                    // File-scoped types (C# 11) - only visible in current file
+                    return Visibility::Private; // Map to Private as closest match
                 }
             }
         }
@@ -2097,7 +2231,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "find_imports implementation needs to be completed - currently returns empty"]
     fn test_csharp_using_directive_extraction() {
         let mut parser = CSharpParser::new().unwrap();
         let code = r#"
@@ -2126,5 +2259,691 @@ mod tests {
                 .any(|i| i.path == "System.Collections.Generic")
         );
         assert!(imports.iter().any(|i| i.path == "MyApp.Services"));
+    }
+
+    #[test]
+    fn test_csharp_static_using() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            using static System.Math;
+            using static System.Console;
+
+            namespace TestNamespace {
+                public class Calculator {
+                    public double Calculate() {
+                        return Sqrt(16); // Using static Math.Sqrt
+                    }
+                }
+            }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let imports = parser.find_imports(code, file_id);
+
+        assert!(
+            imports.len() >= 2,
+            "Should find at least 2 static imports, found: {}",
+            imports.len()
+        );
+        assert!(
+            imports.iter().any(|i| i.path == "static System.Math"),
+            "Should find static System.Math import"
+        );
+        assert!(
+            imports.iter().any(|i| i.path == "static System.Console"),
+            "Should find static System.Console import"
+        );
+    }
+
+    #[test]
+    fn test_csharp_using_alias() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            using Json = System.Text.Json;
+            using Http = System.Net.Http;
+
+            namespace TestNamespace {
+                public class ApiClient {
+                    private Http.HttpClient client;
+                }
+            }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let imports = parser.find_imports(code, file_id);
+
+        assert!(
+            imports.len() >= 2,
+            "Should find at least 2 alias imports, found: {}",
+            imports.len()
+        );
+
+        let json_import = imports
+            .iter()
+            .find(|i| i.path == "System.Text.Json")
+            .expect("Should find System.Text.Json import");
+        assert_eq!(
+            json_import.alias.as_deref(),
+            Some("Json"),
+            "Should have Json alias"
+        );
+
+        let http_import = imports
+            .iter()
+            .find(|i| i.path == "System.Net.Http")
+            .expect("Should find System.Net.Http import");
+        assert_eq!(
+            http_import.alias.as_deref(),
+            Some("Http"),
+            "Should have Http alias"
+        );
+    }
+
+    #[test]
+    fn test_csharp_global_using() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            global using System;
+            global using System.Linq;
+
+            namespace TestNamespace {
+                public class TestClass { }
+            }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let imports = parser.find_imports(code, file_id);
+
+        // Global usings should be extracted just like regular usings
+        assert!(
+            imports.len() >= 2,
+            "Should find at least 2 global imports, found: {}",
+            imports.len()
+        );
+        assert!(
+            imports.iter().any(|i| i.path == "System"),
+            "Should find System import"
+        );
+        assert!(
+            imports.iter().any(|i| i.path == "System.Linq"),
+            "Should find System.Linq import"
+        );
+    }
+
+    #[test]
+    fn test_csharp_mixed_using_directives() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            using System;
+            using static System.Math;
+            using Json = System.Text.Json;
+            global using System.Linq;
+
+            namespace TestNamespace {
+                public class MixedUsings { }
+            }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let imports = parser.find_imports(code, file_id);
+
+        assert!(
+            imports.len() >= 4,
+            "Should find at least 4 imports, found: {}",
+            imports.len()
+        );
+
+        // Regular using
+        assert!(imports.iter().any(|i| i.path == "System"));
+
+        // Static using
+        assert!(imports.iter().any(|i| i.path == "static System.Math"));
+
+        // Alias using
+        assert!(
+            imports
+                .iter()
+                .any(|i| { i.path == "System.Text.Json" && i.alias.as_deref() == Some("Json") })
+        );
+
+        // Global using
+        assert!(imports.iter().any(|i| i.path == "System.Linq"));
+    }
+
+    // === Generic Constraints Tests ===
+
+    #[test]
+    fn test_generic_class_with_single_constraint() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class Repository<T> where T : IEntity
+            {
+            }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        let class_symbol = symbols
+            .iter()
+            .find(|s| s.name.as_ref() == "Repository")
+            .expect("Should find Repository class");
+
+        assert!(
+            class_symbol
+                .signature
+                .as_ref()
+                .unwrap()
+                .contains("where T : IEntity"),
+            "Signature should include constraint clause. Got: {}",
+            class_symbol.signature.as_ref().unwrap()
+        );
+    }
+
+    #[test]
+    fn test_generic_class_with_multiple_constraints() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class Repository<T> where T : IEntity, new()
+            {
+            }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        let class_symbol = symbols
+            .iter()
+            .find(|s| s.name.as_ref() == "Repository")
+            .expect("Should find Repository class");
+
+        let sig = class_symbol.signature.as_ref().unwrap();
+        assert!(sig.contains("where T : IEntity"));
+        assert!(sig.contains("new()"));
+    }
+
+    #[test]
+    fn test_generic_class_with_multiple_type_parameters() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class Cache<TKey, TValue>
+                where TKey : notnull
+                where TValue : class, ISerializable
+            {
+            }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        let class_symbol = symbols
+            .iter()
+            .find(|s| s.name.as_ref() == "Cache")
+            .expect("Should find Cache class");
+
+        let sig = class_symbol.signature.as_ref().unwrap();
+        assert!(sig.contains("where TKey : notnull"));
+        assert!(sig.contains("where TValue : class"));
+    }
+
+    #[test]
+    fn test_generic_method_with_constraints() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class Repository<T>
+            {
+                public void Add<U>(U item) where U : T, IComparable<U>
+                {
+                }
+            }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        let method_symbol = symbols
+            .iter()
+            .find(|s| s.name.as_ref() == "Add")
+            .expect("Should find Add method");
+
+        let sig = method_symbol.signature.as_ref().unwrap();
+        assert!(sig.contains("where U : T, IComparable<U>"));
+    }
+
+    #[test]
+    fn test_struct_with_constraints() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public struct ValueWrapper<T> where T : struct
+            {
+            }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        let struct_symbol = symbols
+            .iter()
+            .find(|s| s.name.as_ref() == "ValueWrapper")
+            .expect("Should find ValueWrapper struct");
+
+        assert!(
+            struct_symbol
+                .signature
+                .as_ref()
+                .unwrap()
+                .contains("where T : struct")
+        );
+    }
+
+    #[test]
+    fn test_interface_with_constraints() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public interface IRepository<T> where T : IEntity
+            {
+            }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        let interface_symbol = symbols
+            .iter()
+            .find(|s| s.name.as_ref() == "IRepository")
+            .expect("Should find IRepository interface");
+
+        assert!(
+            interface_symbol
+                .signature
+                .as_ref()
+                .unwrap()
+                .contains("where T : IEntity")
+        );
+    }
+
+    // === File-scoped Types Tests (C# 11) ===
+
+    #[test]
+    fn test_file_scoped_class() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            file class InternalHelper
+            {
+                public void Process() { }
+            }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        let class_symbol = symbols
+            .iter()
+            .find(|s| s.name.as_ref() == "InternalHelper")
+            .expect("Should find InternalHelper class");
+
+        // File-scoped types should have Private visibility (file-level)
+        assert_eq!(
+            class_symbol.visibility,
+            Visibility::Private,
+            "File-scoped class should have Private visibility"
+        );
+
+        // Signature should include "file" modifier
+        assert!(
+            class_symbol
+                .signature
+                .as_ref()
+                .unwrap()
+                .contains("file class"),
+            "Signature should include 'file class'. Got: {}",
+            class_symbol.signature.as_ref().unwrap()
+        );
+    }
+
+    #[test]
+    fn test_file_scoped_interface() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            file interface IInternalService
+            {
+                void Execute();
+            }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        let interface_symbol = symbols
+            .iter()
+            .find(|s| s.name.as_ref() == "IInternalService")
+            .expect("Should find IInternalService interface");
+
+        assert_eq!(
+            interface_symbol.visibility,
+            Visibility::Private,
+            "File-scoped interface should have Private visibility"
+        );
+
+        assert!(
+            interface_symbol
+                .signature
+                .as_ref()
+                .unwrap()
+                .contains("file interface"),
+            "Signature should include 'file interface'"
+        );
+    }
+
+    #[test]
+    fn test_file_scoped_struct() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            file struct Point
+            {
+                public int X;
+                public int Y;
+            }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        let struct_symbol = symbols
+            .iter()
+            .find(|s| s.name.as_ref() == "Point" && s.kind == SymbolKind::Struct)
+            .expect("Should find Point struct");
+
+        assert_eq!(
+            struct_symbol.visibility,
+            Visibility::Private,
+            "File-scoped struct should have Private visibility"
+        );
+
+        assert!(
+            struct_symbol
+                .signature
+                .as_ref()
+                .unwrap()
+                .contains("file struct"),
+            "Signature should include 'file struct'"
+        );
+    }
+
+    #[test]
+    fn test_file_scoped_record() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            file record InternalData(string Name, int Value);
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        let record_symbol = symbols
+            .iter()
+            .find(|s| s.name.as_ref() == "InternalData")
+            .expect("Should find InternalData record");
+
+        assert_eq!(
+            record_symbol.visibility,
+            Visibility::Private,
+            "File-scoped record should have Private visibility"
+        );
+
+        assert!(
+            record_symbol
+                .signature
+                .as_ref()
+                .unwrap()
+                .contains("file record"),
+            "Signature should include 'file record'"
+        );
+    }
+
+    #[test]
+    fn test_mixed_file_and_public_types() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class PublicService { }
+            file class InternalHelper { }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        let public_class = symbols
+            .iter()
+            .find(|s| s.name.as_ref() == "PublicService")
+            .expect("Should find PublicService");
+
+        let file_class = symbols
+            .iter()
+            .find(|s| s.name.as_ref() == "InternalHelper")
+            .expect("Should find InternalHelper");
+
+        assert_eq!(
+            public_class.visibility,
+            Visibility::Public,
+            "PublicService should be Public"
+        );
+
+        assert_eq!(
+            file_class.visibility,
+            Visibility::Private,
+            "InternalHelper should be Private (file-scoped)"
+        );
+    }
+
+    // === Nullable Reference Types Tests ===
+
+    #[test]
+    fn test_nullable_property() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class User
+            {
+                public string? Email { get; set; }
+            }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        let prop_symbol = symbols
+            .iter()
+            .find(|s| s.name.as_ref() == "Email")
+            .expect("Should find Email property");
+
+        assert!(
+            prop_symbol.signature.as_ref().unwrap().contains("string?"),
+            "Property signature should show nullable type. Got: {}",
+            prop_symbol.signature.as_ref().unwrap()
+        );
+    }
+
+    #[test]
+    fn test_non_nullable_property() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class User
+            {
+                public string Name { get; set; }
+            }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        let prop_symbol = symbols
+            .iter()
+            .find(|s| s.name.as_ref() == "Name")
+            .expect("Should find Name property");
+
+        let sig = prop_symbol.signature.as_ref().unwrap();
+        assert!(sig.contains("string"));
+        assert!(!sig.contains("string?"), "Should NOT be nullable");
+    }
+
+    #[test]
+    fn test_nullable_method_return_type() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class UserService
+            {
+                public string? FindEmail(int userId)
+                {
+                    return null;
+                }
+            }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        let method_symbol = symbols
+            .iter()
+            .find(|s| s.name.as_ref() == "FindEmail")
+            .expect("Should find FindEmail method");
+
+        assert!(
+            method_symbol
+                .signature
+                .as_ref()
+                .unwrap()
+                .contains("string?"),
+            "Method return type should be nullable. Got: {}",
+            method_symbol.signature.as_ref().unwrap()
+        );
+    }
+
+    #[test]
+    fn test_nullable_method_parameters() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class UserService
+            {
+                public string? ProcessEmail(string? input)
+                {
+                    return input?.Trim();
+                }
+            }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        let method_symbol = symbols
+            .iter()
+            .find(|s| s.name.as_ref() == "ProcessEmail")
+            .expect("Should find ProcessEmail method");
+
+        let sig = method_symbol.signature.as_ref().unwrap();
+        // Both return type and parameter should be nullable
+        assert!(sig.contains("string? ProcessEmail") || sig.contains("string?"));
+        assert!(sig.contains("string? input") || sig.contains("(string? input)"));
+    }
+
+    #[test]
+    fn test_nullable_generic_types() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class DataService
+            {
+                public List<string>? GetNames()
+                {
+                    return null;
+                }
+            }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        let method_symbol = symbols
+            .iter()
+            .find(|s| s.name.as_ref() == "GetNames")
+            .expect("Should find GetNames method");
+
+        assert!(
+            method_symbol
+                .signature
+                .as_ref()
+                .unwrap()
+                .contains("List<string>?"),
+            "Generic type should be nullable. Got: {}",
+            method_symbol.signature.as_ref().unwrap()
+        );
+    }
+
+    #[test]
+    fn test_mixed_nullable_and_non_nullable_parameters() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class UserService
+            {
+                public void Update(int id, string name, string? email)
+                {
+                }
+            }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        let method_symbol = symbols
+            .iter()
+            .find(|s| s.name.as_ref() == "Update")
+            .expect("Should find Update method");
+
+        let sig = method_symbol.signature.as_ref().unwrap();
+        // id is int (value type, can't be nullable in this context)
+        assert!(sig.contains("int id"));
+        // name is non-nullable reference type
+        assert!(sig.contains("string name"));
+        // email is nullable reference type
+        assert!(sig.contains("string? email"));
+    }
+
+    #[test]
+    fn test_nullable_field() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class User
+            {
+                private string? _cachedEmail;
+            }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        let field_symbol = symbols
+            .iter()
+            .find(|s| s.name.as_ref() == "_cachedEmail")
+            .expect("Should find _cachedEmail field");
+
+        assert!(
+            field_symbol.signature.as_ref().unwrap().contains("string?"),
+            "Field signature should show nullable type"
+        );
     }
 }
