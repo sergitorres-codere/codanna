@@ -2,12 +2,13 @@
 
 **Document Date:** 2025-11-07
 **Session ID:** claude/csharp-linq-query-syntax-011CUs3A3tkdUYzZbbmUEgrx
+**Last Updated:** 2025-11-07 (Session 2)
 
 ---
 
 ## 📊 Current Status Summary
 
-### ✅ Completed Features (4/9 from original plan)
+### ✅ Completed Features (6/9 from original plan)
 
 1. **Attributes/Annotations Extraction** ✅ (Previous session)
    - Full support with 12 tests
@@ -18,15 +19,30 @@
    - 6 comprehensive tests
    - Commit: `feat(csharp): add pattern matching and LINQ query syntax support`
 
-3. **Generic Constraints Tracking** ✅ (This session - 2025-11-07)
+3. **Generic Constraints Tracking** ✅ (Session 1 - 2025-11-07)
    - Where clauses on types and methods
    - 6 comprehensive tests
    - Commit: `feat(csharp): add generic constraints and nullable reference type tracking`
 
-4. **Nullable Reference Types** ✅ (This session - 2025-11-07)
+4. **Nullable Reference Types** ✅ (Session 1 - 2025-11-07)
    - Nullable markers preserved in signatures
    - 8 comprehensive tests
    - Commit: `feat(csharp): add generic constraints and nullable reference type tracking`
+
+5. **Using Directives / Imports** ✅ (Session 2 - 2025-11-07)
+   - Basic using directives (using System;)
+   - Static usings (using static System.Math;)
+   - Global usings (global using System;)
+   - Using aliases (using Json = System.Text.Json;)
+   - 5 comprehensive tests
+   - Commit: `feat(csharp): add enhanced using directives and file-scoped types support`
+
+6. **File-scoped Types (C# 11)** ✅ (Session 2 - 2025-11-07)
+   - File-scoped classes, interfaces, structs, records
+   - Proper visibility mapping (Private)
+   - Signature includes "file" modifier
+   - 5 comprehensive tests
+   - Commit: `feat(csharp): add enhanced using directives and file-scoped types support`
 
 ### ❌ Attempted But Failed
 
@@ -622,28 +638,29 @@ fn test_csharp_using_directive_extraction() {
 
 ## 📋 Recommended Implementation Order
 
-### Session 1 (Quick Wins - 3-5 hours)
+### ✅ Session 1 (Quick Wins - COMPLETED)
 
-**Recommended Next Session Focus:**
+**Completed Features:**
 
-1. **Using Directives / Imports** (2-3 hours) ⚡ QUICK WIN
-   - Un-ignore test and verify implementation
-   - Fix any issues
-   - Add enhanced import types
+1. ✅ **Using Directives / Imports** (~2 hours)
+   - Un-ignored test and enhanced implementation
+   - Added static, global, and alias using support
+   - 5 comprehensive tests
 
-2. **File-scoped Types** (1-2 hours) ⚡ EASY FEATURE
-   - Simple modifier check
-   - Low complexity, clear value
+2. ✅ **File-scoped Types** (~1-2 hours)
+   - Added file modifier detection
+   - Proper visibility mapping and signature tracking
+   - 5 comprehensive tests
 
-**Why these first:**
-- Both are relatively simple
-- Using directives test already exists, may just work
-- File-scoped types is straightforward
-- Good warm-up before tackling complex features
+**Results:**
+- Both features implemented successfully
+- All tests passing
+- Quality checks clean (cargo test, check, fmt, clippy)
+- Commit: `feat(csharp): add enhanced using directives and file-scoped types support`
 
 ---
 
-### Session 2 (Modern C# Features - 5-7 hours)
+### 🔲 Session 2 (Modern C# Features - 5-7 hours) - NEXT RECOMMENDED
 
 1. **Primary Constructors** (2-3 hours)
    - C# 12 feature
@@ -687,14 +704,14 @@ fn test_csharp_using_directive_extraction() {
 ## 🎯 Priority Recommendations
 
 ### Must Implement (High Value)
-1. ✅ Generic Constraints - DONE
-2. ✅ Nullable Reference Types - DONE
-3. 🔲 Using Directives - Quick win, test exists
+1. ✅ Generic Constraints - DONE (Session 1)
+2. ✅ Nullable Reference Types - DONE (Session 1)
+3. ✅ Using Directives - DONE (Session 2)
 4. 🔲 Primary Constructors - C# 12 growing adoption
 5. 🔲 Enhanced Records - Modern C# pattern
 
 ### Should Implement (Medium Value)
-6. 🔲 File-scoped Types - Easy, complete feature set
+6. ✅ File-scoped Types - DONE (Session 2)
 7. 🔲 Extension Methods - Useful pattern understanding
 8. 🔲 Improved Documentation - Benefits all features
 
@@ -706,12 +723,17 @@ fn test_csharp_using_directive_extraction() {
 
 ## 📊 Total Effort Estimates
 
-| Priority | Features | Time Estimate |
-|----------|----------|---------------|
-| Must Implement | 3 features | 6-10 hours |
-| Should Implement | 3 features | 9-13 hours |
-| Nice to Have | 2 features | 4-6 hours |
-| **TOTAL** | **8 features** | **19-29 hours** |
+| Priority | Features | Status | Time Spent/Estimate |
+|----------|----------|--------|---------------------|
+| Must Implement | 5 features | 3/5 complete | ~7-9 hours spent, 4-7 hours remain |
+| Should Implement | 3 features | 1/3 complete | ~2 hours spent, 7-11 hours remain |
+| Nice to Have | 2 features | 0/2 complete | 4-6 hours remain |
+| **TOTAL** | **10 features** | **4/10 complete** | **~9-11 hours spent, 15-24 hours remain** |
+
+### Session Progress
+- **Session 1**: Generic Constraints + Nullable Types (~4-5 hours)
+- **Session 2**: Using Directives + File-scoped Types (~3-4 hours)
+- **Total Progress**: 40% complete
 
 ---
 
