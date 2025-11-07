@@ -2287,6 +2287,7 @@ impl CSharpParser {
     ///
     /// This extracts variables declared in patterns (e.g., `if (obj is string s)`)
     /// and adds them to the variable type bindings.
+    #[allow(clippy::only_used_in_recursion)]
     fn extract_pattern_variables<'a>(
         &self,
         node: &Node,
@@ -3142,8 +3143,7 @@ public class MyClass
             bindings
                 .iter()
                 .any(|(name, ty, _)| *name == "s" && *ty == "string"),
-            "Should find pattern variable 's' of type 'string'. Found: {:?}",
-            bindings
+            "Should find pattern variable 's' of type 'string'. Found: {bindings:?}"
         );
     }
 
