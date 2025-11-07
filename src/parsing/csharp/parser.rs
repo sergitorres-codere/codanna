@@ -328,6 +328,16 @@ impl CSharpParser {
                         }
                     }
 
+                    // Extract positional record properties (C# 9+)
+                    self.process_record_properties(
+                        node,
+                        code,
+                        file_id,
+                        counter,
+                        module_path,
+                        symbols,
+                    );
+
                     // Process record members
                     self.context.enter_scope(ScopeType::Class);
                     self.extract_class_members(
@@ -562,6 +572,92 @@ impl CSharpParser {
             module_path,
             visibility_mods,
         ))
+    }
+
+    /// Process positional record properties (C# 9+)
+    ///
+    /// For records with positional parameters, create property symbols for each parameter
+    /// Example: `record Person(string FirstName, string LastName)` creates FirstName and LastName properties
+    fn process_record_properties(
+        &mut self,
+        node: Node,
+        code: &str,
+        file_id: FileId,
+        counter: &mut SymbolCounter,
+        module_path: &str,
+        symbols: &mut Vec<Symbol>,
+    ) {
+        let (has_params, _param_sig, param_info) =
+            self.extract_primary_constructor_info(node, code);
+
+        if !has_params || param_info.is_empty() {
+            return;
+        }
+
+        // Get parameter list node to extract individual parameter details
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if child.kind() == "parameter_list" {
+                let mut param_cursor = child.walk();
+                for param in child.children(&mut param_cursor) {
+                    if param.kind() == "parameter" {
+                        // Extract parameter type and name
+                        let mut type_str = String::new();
+                        let mut name_str = String::new();
+                        let mut identifiers = Vec::new();
+
+                        let mut inner_cursor = param.walk();
+                        for inner_child in param.children(&mut inner_cursor) {
+                            match inner_child.kind() {
+                                "predefined_type" | "generic_name" | "qualified_name"
+                                | "nullable_type" | "array_type" => {
+                                    type_str = code[inner_child.byte_range()].to_string();
+                                }
+                                "identifier" => {
+                                    identifiers.push(code[inner_child.byte_range()].to_string());
+                                }
+                                _ => {}
+                            }
+                        }
+
+                        // Determine type and name
+                        if type_str.is_empty() && !identifiers.is_empty() {
+                            type_str = identifiers[0].clone();
+                            if identifiers.len() > 1 {
+                                name_str = identifiers[1].clone();
+                            }
+                        } else if !identifiers.is_empty() {
+                            name_str = identifiers[0].clone();
+                        }
+
+                        // Create property symbol for each parameter
+                        if !type_str.is_empty() && !name_str.is_empty() {
+                            let property_sig =
+                                format!("public {type_str} {name_str} {{ get; init; }}");
+
+                            let property_symbol = self.create_symbol(
+                                counter.next_id(),
+                                name_str,
+                                SymbolKind::Field, // Properties are field-like
+                                file_id,
+                                Range::new(
+                                    param.start_position().row as u32,
+                                    param.start_position().column as u16,
+                                    param.end_position().row as u32,
+                                    param.end_position().column as u16,
+                                ),
+                                Some(property_sig),
+                                None, // Positional record properties don't have individual doc comments
+                                module_path,
+                                Visibility::Public, // Record properties are always public
+                            );
+                            symbols.push(property_symbol);
+                        }
+                    }
+                }
+                break;
+            }
+        }
     }
 
     /// Process interface declaration
@@ -2570,5 +2666,241 @@ mod tests {
 
         // Should have exactly one constructor (the traditional one)
         assert_eq!(ctors.len(), 1, "Should have exactly one constructor");
+    }
+
+    #[test]
+    fn test_csharp_positional_record_properties() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public record Person(string FirstName, string LastName, int Age);
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        // Should extract Person record
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name.as_ref() == "Person" && s.kind == SymbolKind::Class),
+            "Should extract Person record"
+        );
+
+        // Should extract constructor
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name.as_ref() == "Person" && s.kind == SymbolKind::Method),
+            "Should extract primary constructor"
+        );
+
+        // Should extract properties for each positional parameter
+        let first_name = symbols.iter().find(|s| s.name.as_ref() == "FirstName");
+        assert!(first_name.is_some(), "Should extract FirstName property");
+        let first_name_sig = first_name.unwrap().signature.as_ref().unwrap();
+        assert!(
+            first_name_sig.contains("string"),
+            "FirstName should be string type"
+        );
+        assert!(
+            first_name_sig.contains("{ get; init; }"),
+            "FirstName should have get/init accessors"
+        );
+
+        let last_name = symbols.iter().find(|s| s.name.as_ref() == "LastName");
+        assert!(last_name.is_some(), "Should extract LastName property");
+
+        let age = symbols.iter().find(|s| s.name.as_ref() == "Age");
+        assert!(age.is_some(), "Should extract Age property");
+        let age_sig = age.unwrap().signature.as_ref().unwrap();
+        assert!(age_sig.contains("int"), "Age should be int type");
+    }
+
+    #[test]
+    fn test_csharp_record_struct_with_properties() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public record struct Temperature(double Celsius)
+            {
+                public double Fahrenheit => Celsius * 9/5 + 32;
+            }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        // Should extract Temperature as class (records are class-like)
+        let record_struct = symbols
+            .iter()
+            .find(|s| s.name.as_ref() == "Temperature" && s.kind == SymbolKind::Class);
+        assert!(
+            record_struct.is_some(),
+            "Should extract Temperature record struct"
+        );
+
+        // Signature should include "record struct"
+        let sig = record_struct.unwrap().signature.as_ref().unwrap();
+        assert!(
+            sig.contains("record struct"),
+            "Signature should include 'record struct'"
+        );
+
+        // Should extract positional property
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name.as_ref() == "Celsius" && s.kind == SymbolKind::Field),
+            "Should extract Celsius property from positional parameter"
+        );
+
+        // Should extract additional property
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name.as_ref() == "Fahrenheit" && s.kind == SymbolKind::Field),
+            "Should extract Fahrenheit property"
+        );
+    }
+
+    #[test]
+    fn test_csharp_record_with_inheritance() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public record Person(string Name, int Age);
+            public record Employee(string Name, int Id, string Department) : Person(Name, 0);
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        // Should extract both records
+        assert!(symbols.iter().any(|s| s.name.as_ref() == "Person"));
+        assert!(symbols.iter().any(|s| s.name.as_ref() == "Employee"));
+
+        // Person should have Name and Age properties
+        assert!(symbols.iter().any(|s| {
+            s.name.as_ref() == "Name"
+                && s.signature
+                    .as_ref()
+                    .map_or(false, |sig| sig.contains("string"))
+        }));
+        assert!(symbols.iter().any(|s| s.name.as_ref() == "Age"));
+
+        // Employee should have its own properties
+        assert!(symbols.iter().any(|s| s.name.as_ref() == "Id"));
+        assert!(symbols.iter().any(|s| s.name.as_ref() == "Department"));
+    }
+
+    #[test]
+    fn test_csharp_record_signature_includes_record_keyword() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public record Point(int X, int Y);
+            public record struct Size(int Width, int Height);
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        // Check Point record signature
+        let point = symbols
+            .iter()
+            .find(|s| s.name.as_ref() == "Point" && s.kind == SymbolKind::Class);
+        assert!(point.is_some());
+        let point_sig = point.unwrap().signature.as_ref().unwrap();
+        assert!(
+            point_sig.contains("record"),
+            "Point signature should contain 'record' keyword"
+        );
+
+        // Check Size record struct signature
+        let size = symbols
+            .iter()
+            .find(|s| s.name.as_ref() == "Size" && s.kind == SymbolKind::Class);
+        assert!(size.is_some());
+        let size_sig = size.unwrap().signature.as_ref().unwrap();
+        assert!(
+            size_sig.contains("record struct"),
+            "Size signature should contain 'record struct' keywords"
+        );
+    }
+
+    #[test]
+    fn test_csharp_record_with_additional_members() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public record Customer(string Name, int Id)
+            {
+                public string Email { get; set; }
+
+                public void UpdateEmail(string newEmail)
+                {
+                    Email = newEmail;
+                }
+            }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        // Should extract record
+        assert!(symbols.iter().any(|s| s.name.as_ref() == "Customer"));
+
+        // Should extract positional properties
+        assert!(
+            symbols.iter().any(|s| s.name.as_ref() == "Name"),
+            "Should extract Name property"
+        );
+        assert!(
+            symbols.iter().any(|s| s.name.as_ref() == "Id"),
+            "Should extract Id property"
+        );
+
+        // Should extract additional members
+        assert!(
+            symbols.iter().any(|s| s.name.as_ref() == "Email"),
+            "Should extract Email property"
+        );
+        assert!(
+            symbols.iter().any(|s| s.name.as_ref() == "UpdateEmail"),
+            "Should extract UpdateEmail method"
+        );
+    }
+
+    #[test]
+    fn test_csharp_empty_record_no_properties() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public record EmptyRecord;
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        // Should extract record
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name.as_ref() == "EmptyRecord" && s.kind == SymbolKind::Class)
+        );
+
+        // Should not extract any properties or constructor (no positional parameters)
+        let empty_record_symbols: Vec<_> = symbols
+            .iter()
+            .filter(|s| s.name.as_ref() == "EmptyRecord")
+            .collect();
+
+        // Should only have the class symbol, no constructor
+        assert_eq!(
+            empty_record_symbols.len(),
+            1,
+            "Empty record should only have class symbol"
+        );
     }
 }
