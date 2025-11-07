@@ -57,6 +57,10 @@ pub enum SymbolKind {
     Parameter,
     TypeAlias,
     Macro,
+    /// External type reference (not defined in source code)
+    /// Used primarily for tracking references to types from external assemblies/libraries
+    /// in compiled languages like C# and Java
+    ExternalType,
 }
 
 impl SymbolId {
@@ -135,6 +139,7 @@ impl FromStr for SymbolKind {
             "Parameter" => Ok(SymbolKind::Parameter),
             "TypeAlias" => Ok(SymbolKind::TypeAlias),
             "Macro" => Ok(SymbolKind::Macro),
+            "ExternalType" => Ok(SymbolKind::ExternalType),
             _ => Err("Unknown symbol kind"),
         }
     }
@@ -216,9 +221,10 @@ mod tests {
             SymbolKind::Parameter,
             SymbolKind::TypeAlias,
             SymbolKind::Macro,
+            SymbolKind::ExternalType,
         ];
 
-        assert_eq!(kinds.len(), 14);
+        assert_eq!(kinds.len(), 15);
     }
 
     #[test]
