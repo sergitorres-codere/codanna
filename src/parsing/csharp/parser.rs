@@ -954,6 +954,12 @@ impl CSharpParser {
     }
 
     /// Extract imports from a node tree
+    ///
+    /// Supports:
+    /// - Basic using: `using System;`
+    /// - Static using: `using static System.Math;`
+    /// - Global using: `global using System;`
+    /// - Alias using: `using Json = System.Text.Json;`
     fn extract_imports_from_node(
         node: Node,
         code: &str,
@@ -962,34 +968,71 @@ impl CSharpParser {
     ) {
         match node.kind() {
             "using_directive" => {
-                // Try standard field extraction first
-                if let Some(name_node) = node.child_by_field_name("name") {
-                    let import_path = code[name_node.byte_range()].to_string();
+                // Check for alias (using Alias = Namespace.Type)
+                let mut alias: Option<String> = None;
+                let mut import_path = String::new();
+                let mut is_static = false;
+                let full_text = code[node.byte_range()].trim();
+
+                // Check if it's a static using
+                if full_text.contains("using static ") {
+                    is_static = true;
+                }
+
+                // Check for alias pattern using text parsing as fallback
+                // Pattern: using [global] [static] Alias = Namespace.Type;
+                if full_text.contains(" = ") {
+                    // This is an alias using
+                    let parts: Vec<&str> = full_text.split(" = ").collect();
+                    if parts.len() == 2 {
+                        // Extract alias (after "using" keyword)
+                        let alias_part = parts[0].trim();
+                        // Remove "using", "global", "static" keywords
+                        let alias_name = alias_part
+                            .replace("using", "")
+                            .replace("global", "")
+                            .replace("static", "")
+                            .trim()
+                            .to_string();
+
+                        if !alias_name.is_empty() {
+                            alias = Some(alias_name);
+                        }
+
+                        // Extract import path (before semicolon)
+                        import_path = parts[1].trim().trim_end_matches(';').trim().to_string();
+                    }
+                } else {
+                    // Not an alias - try standard field extraction
+                    if let Some(name_node) = node.child_by_field_name("name") {
+                        import_path = code[name_node.byte_range()].to_string();
+                    } else {
+                        // Fallback: tree-sitter-c-sharp doesn't consistently expose "name" field
+                        // for using_directive nodes. Iterate child nodes to find qualified_name
+                        // or identifier nodes.
+                        let mut cursor = node.walk();
+                        for child in node.children(&mut cursor) {
+                            if child.kind() == "qualified_name" || child.kind() == "identifier" {
+                                import_path = code[child.byte_range()].to_string();
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if !import_path.is_empty() {
+                    // Add prefix for static usings to distinguish them
+                    if is_static {
+                        import_path = format!("static {import_path}");
+                    }
+
                     imports.push(Import {
                         path: import_path,
-                        alias: None,
+                        alias,
                         file_id,
                         is_glob: false,
                         is_type_only: false,
                     });
-                } else {
-                    // Fallback: tree-sitter-c-sharp doesn't consistently expose "name" field
-                    // for using_directive nodes. Iterate child nodes to find qualified_name
-                    // or identifier nodes directly.
-                    let mut cursor = node.walk();
-                    for child in node.children(&mut cursor) {
-                        if child.kind() == "qualified_name" || child.kind() == "identifier" {
-                            let import_path = code[child.byte_range()].to_string();
-                            imports.push(Import {
-                                path: import_path,
-                                alias: None,
-                                file_id,
-                                is_glob: false,
-                                is_type_only: false,
-                            });
-                            break;
-                        }
-                    }
                 }
             }
             _ => {
@@ -1325,6 +1368,9 @@ impl CSharpParser {
                     return Visibility::Module; // Closest approximation
                 } else if modifier_text.contains("internal") {
                     return Visibility::Module;
+                } else if modifier_text.contains("file") {
+                    // File-scoped types (C# 11) - only visible in current file
+                    return Visibility::Private; // Map to Private as closest match
                 }
             }
         }
@@ -2185,7 +2231,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "find_imports implementation needs to be completed - currently returns empty"]
     fn test_csharp_using_directive_extraction() {
         let mut parser = CSharpParser::new().unwrap();
         let code = r#"
@@ -2214,6 +2259,155 @@ mod tests {
                 .any(|i| i.path == "System.Collections.Generic")
         );
         assert!(imports.iter().any(|i| i.path == "MyApp.Services"));
+    }
+
+    #[test]
+    fn test_csharp_static_using() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            using static System.Math;
+            using static System.Console;
+
+            namespace TestNamespace {
+                public class Calculator {
+                    public double Calculate() {
+                        return Sqrt(16); // Using static Math.Sqrt
+                    }
+                }
+            }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let imports = parser.find_imports(code, file_id);
+
+        assert!(
+            imports.len() >= 2,
+            "Should find at least 2 static imports, found: {}",
+            imports.len()
+        );
+        assert!(
+            imports.iter().any(|i| i.path == "static System.Math"),
+            "Should find static System.Math import"
+        );
+        assert!(
+            imports.iter().any(|i| i.path == "static System.Console"),
+            "Should find static System.Console import"
+        );
+    }
+
+    #[test]
+    fn test_csharp_using_alias() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            using Json = System.Text.Json;
+            using Http = System.Net.Http;
+
+            namespace TestNamespace {
+                public class ApiClient {
+                    private Http.HttpClient client;
+                }
+            }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let imports = parser.find_imports(code, file_id);
+
+        assert!(
+            imports.len() >= 2,
+            "Should find at least 2 alias imports, found: {}",
+            imports.len()
+        );
+
+        let json_import = imports
+            .iter()
+            .find(|i| i.path == "System.Text.Json")
+            .expect("Should find System.Text.Json import");
+        assert_eq!(
+            json_import.alias.as_deref(),
+            Some("Json"),
+            "Should have Json alias"
+        );
+
+        let http_import = imports
+            .iter()
+            .find(|i| i.path == "System.Net.Http")
+            .expect("Should find System.Net.Http import");
+        assert_eq!(
+            http_import.alias.as_deref(),
+            Some("Http"),
+            "Should have Http alias"
+        );
+    }
+
+    #[test]
+    fn test_csharp_global_using() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            global using System;
+            global using System.Linq;
+
+            namespace TestNamespace {
+                public class TestClass { }
+            }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let imports = parser.find_imports(code, file_id);
+
+        // Global usings should be extracted just like regular usings
+        assert!(
+            imports.len() >= 2,
+            "Should find at least 2 global imports, found: {}",
+            imports.len()
+        );
+        assert!(
+            imports.iter().any(|i| i.path == "System"),
+            "Should find System import"
+        );
+        assert!(
+            imports.iter().any(|i| i.path == "System.Linq"),
+            "Should find System.Linq import"
+        );
+    }
+
+    #[test]
+    fn test_csharp_mixed_using_directives() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            using System;
+            using static System.Math;
+            using Json = System.Text.Json;
+            global using System.Linq;
+
+            namespace TestNamespace {
+                public class MixedUsings { }
+            }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let imports = parser.find_imports(code, file_id);
+
+        assert!(
+            imports.len() >= 4,
+            "Should find at least 4 imports, found: {}",
+            imports.len()
+        );
+
+        // Regular using
+        assert!(imports.iter().any(|i| i.path == "System"));
+
+        // Static using
+        assert!(imports.iter().any(|i| i.path == "static System.Math"));
+
+        // Alias using
+        assert!(
+            imports
+                .iter()
+                .any(|i| { i.path == "System.Text.Json" && i.alias.as_deref() == Some("Json") })
+        );
+
+        // Global using
+        assert!(imports.iter().any(|i| i.path == "System.Linq"));
     }
 
     // === Generic Constraints Tests ===
@@ -2371,6 +2565,184 @@ mod tests {
                 .as_ref()
                 .unwrap()
                 .contains("where T : IEntity")
+        );
+    }
+
+    // === File-scoped Types Tests (C# 11) ===
+
+    #[test]
+    fn test_file_scoped_class() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            file class InternalHelper
+            {
+                public void Process() { }
+            }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        let class_symbol = symbols
+            .iter()
+            .find(|s| s.name.as_ref() == "InternalHelper")
+            .expect("Should find InternalHelper class");
+
+        // File-scoped types should have Private visibility (file-level)
+        assert_eq!(
+            class_symbol.visibility,
+            Visibility::Private,
+            "File-scoped class should have Private visibility"
+        );
+
+        // Signature should include "file" modifier
+        assert!(
+            class_symbol
+                .signature
+                .as_ref()
+                .unwrap()
+                .contains("file class"),
+            "Signature should include 'file class'. Got: {}",
+            class_symbol.signature.as_ref().unwrap()
+        );
+    }
+
+    #[test]
+    fn test_file_scoped_interface() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            file interface IInternalService
+            {
+                void Execute();
+            }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        let interface_symbol = symbols
+            .iter()
+            .find(|s| s.name.as_ref() == "IInternalService")
+            .expect("Should find IInternalService interface");
+
+        assert_eq!(
+            interface_symbol.visibility,
+            Visibility::Private,
+            "File-scoped interface should have Private visibility"
+        );
+
+        assert!(
+            interface_symbol
+                .signature
+                .as_ref()
+                .unwrap()
+                .contains("file interface"),
+            "Signature should include 'file interface'"
+        );
+    }
+
+    #[test]
+    fn test_file_scoped_struct() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            file struct Point
+            {
+                public int X;
+                public int Y;
+            }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        let struct_symbol = symbols
+            .iter()
+            .find(|s| s.name.as_ref() == "Point" && s.kind == SymbolKind::Struct)
+            .expect("Should find Point struct");
+
+        assert_eq!(
+            struct_symbol.visibility,
+            Visibility::Private,
+            "File-scoped struct should have Private visibility"
+        );
+
+        assert!(
+            struct_symbol
+                .signature
+                .as_ref()
+                .unwrap()
+                .contains("file struct"),
+            "Signature should include 'file struct'"
+        );
+    }
+
+    #[test]
+    fn test_file_scoped_record() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            file record InternalData(string Name, int Value);
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        let record_symbol = symbols
+            .iter()
+            .find(|s| s.name.as_ref() == "InternalData")
+            .expect("Should find InternalData record");
+
+        assert_eq!(
+            record_symbol.visibility,
+            Visibility::Private,
+            "File-scoped record should have Private visibility"
+        );
+
+        assert!(
+            record_symbol
+                .signature
+                .as_ref()
+                .unwrap()
+                .contains("file record"),
+            "Signature should include 'file record'"
+        );
+    }
+
+    #[test]
+    fn test_mixed_file_and_public_types() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class PublicService { }
+            file class InternalHelper { }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        let public_class = symbols
+            .iter()
+            .find(|s| s.name.as_ref() == "PublicService")
+            .expect("Should find PublicService");
+
+        let file_class = symbols
+            .iter()
+            .find(|s| s.name.as_ref() == "InternalHelper")
+            .expect("Should find InternalHelper");
+
+        assert_eq!(
+            public_class.visibility,
+            Visibility::Public,
+            "PublicService should be Public"
+        );
+
+        assert_eq!(
+            file_class.visibility,
+            Visibility::Private,
+            "InternalHelper should be Private (file-scoped)"
         );
     }
 
