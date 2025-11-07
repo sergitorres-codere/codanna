@@ -33,7 +33,7 @@ use crate::parsing::{
 use crate::types::SymbolCounter;
 use crate::{FileId, Range, Symbol, SymbolKind, Visibility};
 use std::any::Any;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use tree_sitter::{Language, Node, Parser};
 
 /// C# language parser using tree-sitter
@@ -61,12 +61,6 @@ pub struct CSharpParser {
     parser: Parser,
     context: ParserContext,
     node_tracker: NodeTrackingState,
-    /// Track locally defined types (classes, interfaces, structs, enums, records)
-    /// to distinguish them from external types
-    local_types: HashSet<String>,
-    /// Track external type references we've seen
-    /// Maps type name -> namespace (if known)
-    external_type_refs: HashMap<String, Option<String>>,
 }
 
 impl CSharpParser {
@@ -111,8 +105,6 @@ impl CSharpParser {
     ) -> Vec<Symbol> {
         // Reset context for each file
         self.context = ParserContext::new();
-        self.local_types.clear();
-        self.external_type_refs.clear();
         let mut symbols = Vec::new();
 
         match self.parser.parse(code, None) {
@@ -148,8 +140,6 @@ impl CSharpParser {
             parser,
             context: ParserContext::new(),
             node_tracker: NodeTrackingState::new(),
-            local_types: HashSet::new(),
-            external_type_refs: HashMap::new(),
         })
     }
 
@@ -457,10 +447,6 @@ impl CSharpParser {
         module_path: &str,
     ) -> Option<Symbol> {
         let name = self.extract_type_name(node, code)?;
-
-        // Record as locally-defined type
-        self.record_local_type(&name);
-
         let signature = self.extract_class_signature(node, code);
         let doc_comment = self.extract_doc_comment(&node, code);
         let visibility = self.determine_visibility(node, code);
@@ -493,10 +479,6 @@ impl CSharpParser {
         module_path: &str,
     ) -> Option<Symbol> {
         let name = self.extract_type_name(node, code)?;
-
-        // Record as locally-defined type
-        self.record_local_type(&name);
-
         let signature = self.extract_interface_signature(node, code);
         let doc_comment = self.extract_doc_comment(&node, code);
         let visibility = self.determine_visibility(node, code);
@@ -529,10 +511,6 @@ impl CSharpParser {
         module_path: &str,
     ) -> Option<Symbol> {
         let name = self.extract_type_name(node, code)?;
-
-        // Record as locally-defined type
-        self.record_local_type(&name);
-
         let signature = self.extract_struct_signature(node, code);
         let doc_comment = self.extract_doc_comment(&node, code);
         let visibility = self.determine_visibility(node, code);
@@ -565,10 +543,6 @@ impl CSharpParser {
         module_path: &str,
     ) -> Option<Symbol> {
         let name = self.extract_type_name(node, code)?;
-
-        // Record as locally-defined type
-        self.record_local_type(&name);
-
         let signature = self.extract_enum_signature(node, code);
         let doc_comment = self.extract_doc_comment(&node, code);
         let visibility = self.determine_visibility(node, code);
@@ -601,10 +575,6 @@ impl CSharpParser {
         module_path: &str,
     ) -> Option<Symbol> {
         let name = self.extract_type_name(node, code)?;
-
-        // Record as locally-defined type
-        self.record_local_type(&name);
-
         let signature = self.extract_record_signature(node, code);
         let doc_comment = self.extract_doc_comment(&node, code);
         let visibility = self.determine_visibility(node, code);
@@ -758,11 +728,69 @@ impl CSharpParser {
             current_function
         };
 
+        // Handle await expressions - unwrap to find the actual invocation
+        // Pattern: await _httpClient.GetAsync()
+        // The await wraps the invocation, so we need to unwrap it transparently
+        if node.kind() == "await_expression" {
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                // Process children with inherited function context
+                Self::extract_calls_recursive(&child, code, function_context, calls);
+            }
+            return; // Don't fall through to default recursion
+        }
+
+        // Handle object creation (constructor calls)
+        // Pattern: new Service() or new List<T>()
+        if node.kind() == "object_creation_expression" {
+            let caller = function_context.unwrap_or("");
+
+            if let Some(type_node) = node.child_by_field_name("type") {
+                let type_name = match type_node.kind() {
+                    "identifier" => &code[type_node.byte_range()],
+                    "generic_name" => {
+                        // For Generic<T>, extract just "Generic"
+                        type_node
+                            .child_by_field_name("name")
+                            .map(|n| &code[n.byte_range()])
+                            .unwrap_or(&code[type_node.byte_range()])
+                    }
+                    "qualified_name" => {
+                        // For Namespace.Type, extract just "Type" (rightmost identifier)
+                        let mut last_ident = None;
+                        let mut cursor = type_node.walk();
+                        for child in type_node.children(&mut cursor) {
+                            if child.kind() == "identifier" {
+                                last_ident = Some(&code[child.byte_range()]);
+                            }
+                        }
+                        last_ident.unwrap_or(&code[type_node.byte_range()])
+                    }
+                    _ => &code[type_node.byte_range()],
+                };
+
+                let range = Range::new(
+                    node.start_position().row as u32,
+                    node.start_position().column as u16,
+                    node.end_position().row as u32,
+                    node.end_position().column as u16,
+                );
+                calls.push((caller, type_name, range));
+            }
+
+            // Still recurse to catch any method calls in constructor arguments
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                Self::extract_calls_recursive(&child, code, function_context, calls);
+            }
+            return;
+        }
+
         // Handle invocation expressions with proper caller context
         if node.kind() == "invocation_expression" {
             if let Some(expression_node) = node.child(0) {
                 let caller = function_context.unwrap_or("");
-                let callee = match expression_node.kind() {
+                let callee_raw = match expression_node.kind() {
                     "member_access_expression" => {
                         // obj.Method() - get method name
                         expression_node
@@ -775,6 +803,14 @@ impl CSharpParser {
                         &code[expression_node.byte_range()]
                     }
                     _ => &code[expression_node.byte_range()],
+                };
+
+                // Strip generic type parameters for better resolution
+                // e.g., "GetFromJsonAsync<List<T>>" -> "GetFromJsonAsync"
+                let callee = if let Some(idx) = callee_raw.find('<') {
+                    &callee_raw[..idx]
+                } else {
+                    callee_raw
                 };
 
                 let range = Range::new(
@@ -819,6 +855,49 @@ impl CSharpParser {
         method_calls: &mut Vec<MethodCall>,
     ) {
         match node.kind() {
+            // Handle await expressions - unwrap to find the actual invocation
+            "await_expression" => {
+                // Await wraps invocation, process children transparently
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    self.extract_method_calls_from_node(child, code, method_calls);
+                }
+                // Don't fall through to default case
+            }
+            // Handle object creation (constructor calls)
+            "object_creation_expression" => {
+                let caller = self
+                    .context
+                    .current_function()
+                    .or_else(|| self.context.current_class())
+                    .unwrap_or("unknown");
+
+                if let Some(type_node) = node.child_by_field_name("type") {
+                    let type_name = match type_node.kind() {
+                        "identifier" => code[type_node.byte_range()].to_string(),
+                        "generic_name" => type_node
+                            .child_by_field_name("name")
+                            .map(|n| code[n.byte_range()].to_string())
+                            .unwrap_or_else(|| code[type_node.byte_range()].to_string()),
+                        _ => code[type_node.byte_range()].to_string(),
+                    };
+
+                    let range = Range::new(
+                        node.start_position().row as u32,
+                        node.start_position().column as u16,
+                        node.end_position().row as u32,
+                        node.end_position().column as u16,
+                    );
+                    method_calls.push(MethodCall::new(caller, &type_name, range));
+                }
+
+                // Still recurse for nested calls in constructor arguments
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    self.extract_method_calls_from_node(child, code, method_calls);
+                }
+                // Don't fall through to default case
+            }
             // Track scope changes to maintain caller context
             "class_declaration"
             | "struct_declaration"
@@ -880,22 +959,46 @@ impl CSharpParser {
                                 {
                                     let receiver = code[object_node.byte_range()].to_string();
                                     let method = code[name_node.byte_range()].to_string();
+
+                                    // Strip generic type parameters for better resolution
+                                    // e.g., "GetFromJsonAsync<List<T>>" -> "GetFromJsonAsync"
+                                    let method_name = if let Some(idx) = method.find('<') {
+                                        &method[..idx]
+                                    } else {
+                                        &method
+                                    };
+
                                     let range = Range::new(
                                         node.start_position().row as u32,
                                         node.start_position().column as u16,
                                         node.end_position().row as u32,
                                         node.end_position().column as u16,
                                     );
-                                    method_calls.push(
-                                        MethodCall::new(caller, &method, range)
-                                            .with_receiver(&receiver),
-                                    );
+
+                                    // Detect static method calls: if receiver starts with uppercase,
+                                    // it's likely a class/type name (PascalCase convention in C#)
+                                    let mut call = MethodCall::new(caller, method_name, range)
+                                        .with_receiver(&receiver);
+
+                                    if receiver.chars().next().is_some_and(|c| c.is_uppercase()) {
+                                        call = call.static_method();
+                                    }
+
+                                    method_calls.push(call);
                                 }
                             }
                         }
                         "identifier" => {
                             // Simple method calls like Method()
                             let method = code[expression_node.byte_range()].to_string();
+
+                            // Strip generic type parameters for better resolution
+                            let method_name = if let Some(idx) = method.find('<') {
+                                &method[..idx]
+                            } else {
+                                &method
+                            };
+
                             let range = Range::new(
                                 node.start_position().row as u32,
                                 node.start_position().column as u16,
@@ -903,7 +1006,7 @@ impl CSharpParser {
                                 node.end_position().column as u16,
                             );
                             method_calls.push(
-                                MethodCall::new(caller, &method, range).with_receiver("this"),
+                                MethodCall::new(caller, method_name, range).with_receiver("this"),
                             );
                         }
                         _ => {}
@@ -1616,22 +1719,6 @@ impl CSharpParser {
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
             if child.kind() == "variable_declaration" {
-                // Check if the variable declaration has a type node
-                if let Some(type_node) = child.child_by_field_name("type") {
-                    // Extract and track external type if applicable
-                    if let Some(type_name) = self.extract_type_from_node(type_node, code) {
-                        self.track_external_type_reference(
-                            type_name,
-                            type_node,
-                            code,
-                            file_id,
-                            counter,
-                            symbols,
-                            module_path,
-                        );
-                    }
-                }
-
                 // Extract each variable declarator
                 let mut var_cursor = child.walk();
                 for var_child in child.children(&mut var_cursor) {
@@ -1810,6 +1897,714 @@ impl CSharpParser {
             self.register_node_recursively(child);
         }
     }
+
+    /// Extract type uses recursively from C# AST nodes
+    ///
+    /// This method traverses the AST and identifies where types are referenced/used, tracking:
+    /// - Method parameter types
+    /// - Return types
+    /// - Field/property types
+    /// - Base classes
+    /// - Interface implementations
+    /// - Generic type arguments
+    ///
+    /// Returns tuples of (context_name, type_name, range) where context_name is the
+    /// method/class/variable that uses the type.
+    fn extract_type_uses_recursive<'a>(
+        &self,
+        node: &Node,
+        code: &'a str,
+        uses: &mut Vec<(&'a str, &'a str, Range)>,
+    ) {
+        match node.kind() {
+            // Method declarations - track parameter and return types
+            "method_declaration" | "constructor_declaration" => {
+                let context_name = node
+                    .child_by_field_name("name")
+                    .map(|n| &code[n.byte_range()])
+                    .unwrap_or("anonymous");
+
+                // Extract parameter types
+                let params_opt = node.child_by_field_name("parameters");
+                if let Some(params) = params_opt {
+                    self.extract_parameter_types(&params, code, context_name, uses);
+                }
+
+                // Extract return type (methods only, not constructors)
+                if node.kind() == "method_declaration" {
+                    // Try multiple field names that tree-sitter might use
+                    let return_type = node
+                        .child_by_field_name("type")
+                        .or_else(|| node.child_by_field_name("return_type"))
+                        .or_else(|| {
+                            // Fallback: find first type node before parameters
+                            let params_pos = params_opt
+                                .map(|p| p.start_position())
+                                .unwrap_or(node.end_position());
+                            let mut cursor = node.walk();
+                            for child in node.children(&mut cursor) {
+                                if child.start_position() < params_pos
+                                    && matches!(
+                                        child.kind(),
+                                        "identifier"
+                                            | "generic_name"
+                                            | "qualified_name"
+                                            | "predefined_type"
+                                            | "array_type"
+                                            | "nullable_type"
+                                    ) {
+                                        return Some(child);
+                                    }
+                            }
+                            None
+                        });
+
+                    if let Some(return_type) = return_type {
+                        self.extract_type_from_node(&return_type, code, context_name, uses);
+                    }
+                }
+            }
+
+            // Class/struct/record declarations - track base classes and interfaces
+            "class_declaration" | "struct_declaration" | "record_declaration" => {
+                let class_name = node
+                    .child_by_field_name("name")
+                    .map(|n| &code[n.byte_range()])
+                    .unwrap_or("anonymous");
+
+                // Check for base_list which contains base classes and interfaces
+                if let Some(base_list) = node.child_by_field_name("bases") {
+                    self.extract_base_types(&base_list, code, class_name, uses);
+                } else {
+                    // Fallback: search for base_list as a child
+                    let mut cursor = node.walk();
+                    for child in node.children(&mut cursor) {
+                        if child.kind() == "base_list" {
+                            self.extract_base_types(&child, code, class_name, uses);
+                            break;
+                        }
+                    }
+                }
+
+                // Extract field and property types from class body
+                if let Some(body) = node.child_by_field_name("body") {
+                    self.extract_member_types(&body, code, class_name, uses);
+                }
+            }
+
+            // Interface declarations - track extends
+            "interface_declaration" => {
+                let interface_name = node
+                    .child_by_field_name("name")
+                    .map(|n| &code[n.byte_range()])
+                    .unwrap_or("anonymous");
+
+                // Check for base_list
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    if child.kind() == "base_list" {
+                        self.extract_base_types(&child, code, interface_name, uses);
+                        break;
+                    }
+                }
+            }
+
+            // Note: field_declaration and property_declaration are handled via
+            // extract_member_types() when inside a class/struct, so we don't
+            // process them here to avoid duplicates
+
+            // Delegate declarations - track parameter and return types
+            "delegate_declaration" => {
+                let delegate_name = node
+                    .child_by_field_name("name")
+                    .map(|n| &code[n.byte_range()])
+                    .unwrap_or("anonymous");
+
+                if let Some(params) = node.child_by_field_name("parameters") {
+                    self.extract_parameter_types(&params, code, delegate_name, uses);
+                }
+
+                if let Some(return_type) = node.child_by_field_name("type") {
+                    self.extract_type_from_node(&return_type, code, delegate_name, uses);
+                }
+            }
+
+            _ => {}
+        }
+
+        // Recurse to children
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            self.extract_type_uses_recursive(&child, code, uses);
+        }
+    }
+
+    /// Extract parameter types from a parameter list
+    fn extract_parameter_types<'a>(
+        &self,
+        params_node: &Node,
+        code: &'a str,
+        context: &'a str,
+        uses: &mut Vec<(&'a str, &'a str, Range)>,
+    ) {
+        let mut cursor = params_node.walk();
+        for child in params_node.children(&mut cursor) {
+            if child.kind() == "parameter" {
+                // Extract type from parameter
+                if let Some(type_node) = child.child_by_field_name("type") {
+                    self.extract_type_from_node(&type_node, code, context, uses);
+                }
+            }
+        }
+    }
+
+    /// Extract type from a type node, handling various C# type syntaxes
+    fn extract_type_from_node<'a>(
+        &self,
+        type_node: &Node,
+        code: &'a str,
+        context: &'a str,
+        uses: &mut Vec<(&'a str, &'a str, Range)>,
+    ) {
+        let type_name = self.extract_simple_type_name_for_uses(type_node, code);
+
+        // Filter out primitive types
+        if !Self::is_primitive_type(type_name) {
+            let range = Range::new(
+                type_node.start_position().row as u32,
+                type_node.start_position().column as u16,
+                type_node.end_position().row as u32,
+                type_node.end_position().column as u16,
+            );
+            uses.push((context, type_name, range));
+        }
+
+        // Also extract generic type arguments if present
+        if type_node.kind() == "generic_name" {
+            // Try to find type_argument_list as a child (field name might vary)
+            let mut cursor = type_node.walk();
+            for child in type_node.children(&mut cursor) {
+                if child.kind() == "type_argument_list" {
+                    self.extract_generic_type_arguments(&child, code, context, uses);
+                    break;
+                }
+            }
+        }
+    }
+
+    /// Extract simple type name from a type node for uses tracking
+    fn extract_simple_type_name_for_uses<'a>(&self, type_node: &Node, code: &'a str) -> &'a str {
+        match type_node.kind() {
+            "identifier" => &code[type_node.byte_range()],
+            "generic_name" => {
+                // For generic types, extract just the base name (e.g., "List" from "List<T>")
+                // Try to find the identifier child (first child is usually the base type name)
+                let mut cursor = type_node.walk();
+                for child in type_node.children(&mut cursor) {
+                    if child.kind() == "identifier" {
+                        return &code[child.byte_range()];
+                    }
+                }
+
+                // Fallback: parse string to extract part before '<'
+                let full_text = &code[type_node.byte_range()];
+                if let Some(bracket_pos) = full_text.find('<') {
+                    &full_text[..bracket_pos]
+                } else {
+                    full_text
+                }
+            }
+            "qualified_name" => {
+                // For qualified names, take the last identifier (e.g., "Helper" from "MyApp.Helper")
+                let mut last_ident = None;
+                let mut cursor = type_node.walk();
+                for child in type_node.children(&mut cursor) {
+                    if child.kind() == "identifier" {
+                        last_ident = Some(&code[child.byte_range()]);
+                    }
+                }
+                last_ident.unwrap_or(&code[type_node.byte_range()])
+            }
+            "predefined_type" => &code[type_node.byte_range()],
+            "array_type" => {
+                // For arrays, extract the element type
+                if let Some(element_type) = type_node.child_by_field_name("type") {
+                    self.extract_simple_type_name_for_uses(&element_type, code)
+                } else {
+                    &code[type_node.byte_range()]
+                }
+            }
+            "nullable_type" => {
+                // For nullable types, extract the underlying type
+                if let Some(underlying_type) = type_node.child_by_field_name("type") {
+                    self.extract_simple_type_name_for_uses(&underlying_type, code)
+                } else {
+                    &code[type_node.byte_range()]
+                }
+            }
+            _ => &code[type_node.byte_range()],
+        }
+    }
+
+    /// Check if a type name is a C# primitive type
+    fn is_primitive_type(type_name: &str) -> bool {
+        matches!(
+            type_name,
+            "void"
+                | "int"
+                | "string"
+                | "bool"
+                | "float"
+                | "double"
+                | "decimal"
+                | "byte"
+                | "sbyte"
+                | "short"
+                | "ushort"
+                | "uint"
+                | "long"
+                | "ulong"
+                | "char"
+                | "object"
+                | "dynamic"
+                | "var"
+        )
+    }
+
+    /// Extract types from base_list (base classes and interfaces)
+    fn extract_base_types<'a>(
+        &self,
+        base_list: &Node,
+        code: &'a str,
+        context: &'a str,
+        uses: &mut Vec<(&'a str, &'a str, Range)>,
+    ) {
+        let mut cursor = base_list.walk();
+        for child in base_list.children(&mut cursor) {
+            match child.kind() {
+                "identifier" | "generic_name" | "qualified_name" => {
+                    self.extract_type_from_node(&child, code, context, uses);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Extract types from generic type arguments
+    fn extract_generic_type_arguments<'a>(
+        &self,
+        type_args: &Node,
+        code: &'a str,
+        context: &'a str,
+        uses: &mut Vec<(&'a str, &'a str, Range)>,
+    ) {
+        let mut cursor = type_args.walk();
+        for child in type_args.children(&mut cursor) {
+            match child.kind() {
+                "identifier" | "generic_name" | "qualified_name" | "predefined_type" => {
+                    self.extract_type_from_node(&child, code, context, uses);
+                }
+                "type_argument_list" => {
+                    // Recurse into nested type argument lists
+                    self.extract_generic_type_arguments(&child, code, context, uses);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Extract types from class/struct members (fields, properties)
+    fn extract_member_types<'a>(
+        &self,
+        body: &Node,
+        code: &'a str,
+        _class_name: &'a str,
+        uses: &mut Vec<(&'a str, &'a str, Range)>,
+    ) {
+        let mut cursor = body.walk();
+        for child in body.children(&mut cursor) {
+            match child.kind() {
+                "field_declaration" => {
+                    self.extract_field_types(&child, code, uses);
+                }
+                "property_declaration" => {
+                    if let Some(name_node) = child.child_by_field_name("name") {
+                        let prop_name = &code[name_node.byte_range()];
+                        if let Some(type_node) = child.child_by_field_name("type") {
+                            self.extract_type_from_node(&type_node, code, prop_name, uses);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Extract types from field declarations
+    fn extract_field_types<'a>(
+        &self,
+        field_node: &Node,
+        code: &'a str,
+        uses: &mut Vec<(&'a str, &'a str, Range)>,
+    ) {
+        // Field declarations have a variable_declaration child
+        let mut cursor = field_node.walk();
+        for child in field_node.children(&mut cursor) {
+            if child.kind() == "variable_declaration" {
+                // Get the type from the variable declaration
+                if let Some(type_node) = child.child_by_field_name("type") {
+                    // Get field names from variable_declarator children
+                    let mut var_cursor = child.walk();
+                    for var_child in child.children(&mut var_cursor) {
+                        if var_child.kind() == "variable_declarator" {
+                            if let Some(name_node) = var_child.child_by_field_name("name") {
+                                let field_name = &code[name_node.byte_range()];
+                                self.extract_type_from_node(&type_node, code, field_name, uses);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Extract definition relationships recursively from C# AST nodes
+    ///
+    /// This method traverses the AST and identifies containment/definition relationships:
+    /// - Classes define methods, fields, properties, and nested types
+    /// - Methods define local variables and local functions
+    /// - Interfaces define method signatures
+    ///
+    /// Returns tuples of (definer_name, defined_symbol, range) where definer_name is the
+    /// class/method/interface that defines the symbol.
+    fn extract_defines_recursive<'a>(
+        &self,
+        node: &Node,
+        code: &'a str,
+        current_class: Option<&'a str>,
+        current_method: Option<&'a str>,
+        defines: &mut Vec<(&'a str, &'a str, Range)>,
+    ) {
+        match node.kind() {
+            // Class declarations - track nested types, methods, fields, properties
+            "class_declaration" | "struct_declaration" | "record_declaration" => {
+                let class_name = node
+                    .child_by_field_name("name")
+                    .map(|n| &code[n.byte_range()])
+                    .unwrap_or("anonymous");
+
+                // Process class body
+                if let Some(body) = node.child_by_field_name("body") {
+                    let mut cursor = body.walk();
+                    for child in body.children(&mut cursor) {
+                        match child.kind() {
+                            // Methods defined by class
+                            "method_declaration" | "constructor_declaration" => {
+                                if let Some(name_node) = child.child_by_field_name("name") {
+                                    let method_name = &code[name_node.byte_range()];
+                                    let range = Range::new(
+                                        child.start_position().row as u32,
+                                        child.start_position().column as u16,
+                                        child.end_position().row as u32,
+                                        child.end_position().column as u16,
+                                    );
+                                    defines.push((class_name, method_name, range));
+
+                                    // Recurse into method body to find local definitions
+                                    if let Some(method_body) = child.child_by_field_name("body") {
+                                        self.extract_defines_recursive(
+                                            &method_body,
+                                            code,
+                                            Some(class_name),
+                                            Some(method_name),
+                                            defines,
+                                        );
+                                    }
+                                }
+                            }
+
+                            // Fields defined by class
+                            "field_declaration" => {
+                                self.extract_field_definitions(&child, code, class_name, defines);
+                            }
+
+                            // Properties defined by class
+                            "property_declaration" => {
+                                if let Some(name_node) = child.child_by_field_name("name") {
+                                    let prop_name = &code[name_node.byte_range()];
+                                    let range = Range::new(
+                                        child.start_position().row as u32,
+                                        child.start_position().column as u16,
+                                        child.end_position().row as u32,
+                                        child.end_position().column as u16,
+                                    );
+                                    defines.push((class_name, prop_name, range));
+                                }
+                            }
+
+                            // Events defined by class
+                            "event_declaration" | "event_field_declaration" => {
+                                // Try to get name directly first
+                                if let Some(name_node) = child.child_by_field_name("name") {
+                                    let event_name = &code[name_node.byte_range()];
+                                    let range = Range::new(
+                                        child.start_position().row as u32,
+                                        child.start_position().column as u16,
+                                        child.end_position().row as u32,
+                                        child.end_position().column as u16,
+                                    );
+                                    defines.push((class_name, event_name, range));
+                                } else {
+                                    // Fallback: search for variable_declaration (similar to fields)
+                                    let mut ev_cursor = child.walk();
+                                    for ev_child in child.children(&mut ev_cursor) {
+                                        if ev_child.kind() == "variable_declaration" {
+                                            let mut var_cursor = ev_child.walk();
+                                            for var_child in ev_child.children(&mut var_cursor) {
+                                                if var_child.kind() == "variable_declarator" {
+                                                    if let Some(name_node) =
+                                                        var_child.child_by_field_name("name")
+                                                    {
+                                                        let event_name =
+                                                            &code[name_node.byte_range()];
+                                                        let range = Range::new(
+                                                            var_child.start_position().row as u32,
+                                                            var_child.start_position().column
+                                                                as u16,
+                                                            var_child.end_position().row as u32,
+                                                            var_child.end_position().column as u16,
+                                                        );
+                                                        defines
+                                                            .push((class_name, event_name, range));
+                                                    }
+                                                }
+                                            }
+                                        } else if ev_child.kind() == "identifier" {
+                                            // Sometimes the name is a direct identifier child
+                                            let event_name = &code[ev_child.byte_range()];
+                                            let range = Range::new(
+                                                child.start_position().row as u32,
+                                                child.start_position().column as u16,
+                                                child.end_position().row as u32,
+                                                child.end_position().column as u16,
+                                            );
+                                            defines.push((class_name, event_name, range));
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Nested types defined by class
+                            "class_declaration"
+                            | "struct_declaration"
+                            | "record_declaration"
+                            | "interface_declaration"
+                            | "enum_declaration" => {
+                                if let Some(name_node) = child.child_by_field_name("name") {
+                                    let nested_name = &code[name_node.byte_range()];
+                                    let range = Range::new(
+                                        child.start_position().row as u32,
+                                        child.start_position().column as u16,
+                                        child.end_position().row as u32,
+                                        child.end_position().column as u16,
+                                    );
+                                    defines.push((class_name, nested_name, range));
+
+                                    // Recurse into nested type
+                                    self.extract_defines_recursive(
+                                        &child,
+                                        code,
+                                        Some(nested_name),
+                                        None,
+                                        defines,
+                                    );
+                                }
+                            }
+
+                            _ => {}
+                        }
+                    }
+                }
+            }
+
+            // Interface declarations - track method signatures
+            "interface_declaration" => {
+                let interface_name = node
+                    .child_by_field_name("name")
+                    .map(|n| &code[n.byte_range()])
+                    .unwrap_or("anonymous");
+
+                if let Some(body) = node.child_by_field_name("body") {
+                    let mut cursor = body.walk();
+                    for child in body.children(&mut cursor) {
+                        match child.kind() {
+                            "method_declaration" => {
+                                if let Some(name_node) = child.child_by_field_name("name") {
+                                    let method_name = &code[name_node.byte_range()];
+                                    let range = Range::new(
+                                        child.start_position().row as u32,
+                                        child.start_position().column as u16,
+                                        child.end_position().row as u32,
+                                        child.end_position().column as u16,
+                                    );
+                                    defines.push((interface_name, method_name, range));
+                                }
+                            }
+                            "property_declaration" => {
+                                if let Some(name_node) = child.child_by_field_name("name") {
+                                    let prop_name = &code[name_node.byte_range()];
+                                    let range = Range::new(
+                                        child.start_position().row as u32,
+                                        child.start_position().column as u16,
+                                        child.end_position().row as u32,
+                                        child.end_position().column as u16,
+                                    );
+                                    defines.push((interface_name, prop_name, range));
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+
+            // Enum declarations - track enum members
+            "enum_declaration" => {
+                let enum_name = node
+                    .child_by_field_name("name")
+                    .map(|n| &code[n.byte_range()])
+                    .unwrap_or("anonymous");
+
+                if let Some(body) = node.child_by_field_name("body") {
+                    let mut cursor = body.walk();
+                    for child in body.children(&mut cursor) {
+                        if child.kind() == "enum_member_declaration" {
+                            if let Some(name_node) = child.child_by_field_name("name") {
+                                let member_name = &code[name_node.byte_range()];
+                                let range = Range::new(
+                                    child.start_position().row as u32,
+                                    child.start_position().column as u16,
+                                    child.end_position().row as u32,
+                                    child.end_position().column as u16,
+                                );
+                                defines.push((enum_name, member_name, range));
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Local variable declarations within methods
+            "local_declaration_statement" | "variable_declaration" => {
+                if let Some(method_name) = current_method {
+                    self.extract_variable_definitions(node, code, method_name, defines);
+                }
+            }
+
+            // Local function statements within methods
+            "local_function_statement" => {
+                if let Some(method_name) = current_method {
+                    if let Some(name_node) = node.child_by_field_name("name") {
+                        let local_func_name = &code[name_node.byte_range()];
+                        let range = Range::new(
+                            node.start_position().row as u32,
+                            node.start_position().column as u16,
+                            node.end_position().row as u32,
+                            node.end_position().column as u16,
+                        );
+                        defines.push((method_name, local_func_name, range));
+                    }
+                }
+            }
+
+            _ => {}
+        }
+
+        // Recurse to children (unless we're already in a method or we handled it above)
+        if !matches!(
+            node.kind(),
+            "method_declaration"
+                | "constructor_declaration"
+                | "class_declaration"
+                | "struct_declaration"
+                | "record_declaration"
+                | "interface_declaration"
+                | "enum_declaration"
+        ) {
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                self.extract_defines_recursive(
+                    &child,
+                    code,
+                    current_class,
+                    current_method,
+                    defines,
+                );
+            }
+        }
+    }
+
+    /// Extract field definitions from a field_declaration node
+    fn extract_field_definitions<'a>(
+        &self,
+        field_node: &Node,
+        code: &'a str,
+        class_name: &'a str,
+        defines: &mut Vec<(&'a str, &'a str, Range)>,
+    ) {
+        // Field declarations have a variable_declaration child
+        let mut cursor = field_node.walk();
+        for child in field_node.children(&mut cursor) {
+            if child.kind() == "variable_declaration" {
+                // Get field names from variable_declarator children
+                let mut var_cursor = child.walk();
+                for var_child in child.children(&mut var_cursor) {
+                    if var_child.kind() == "variable_declarator" {
+                        if let Some(name_node) = var_child.child_by_field_name("name") {
+                            let field_name = &code[name_node.byte_range()];
+                            let range = Range::new(
+                                var_child.start_position().row as u32,
+                                var_child.start_position().column as u16,
+                                var_child.end_position().row as u32,
+                                var_child.end_position().column as u16,
+                            );
+                            defines.push((class_name, field_name, range));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Extract variable definitions from a variable declaration node
+    fn extract_variable_definitions<'a>(
+        &self,
+        var_decl: &Node,
+        code: &'a str,
+        method_name: &'a str,
+        defines: &mut Vec<(&'a str, &'a str, Range)>,
+    ) {
+        // Look for variable_declarator nodes
+        let mut cursor = var_decl.walk();
+        for child in var_decl.children(&mut cursor) {
+            if child.kind() == "variable_declarator" {
+                if let Some(name_node) = child.child_by_field_name("name") {
+                    let var_name = &code[name_node.byte_range()];
+                    let range = Range::new(
+                        child.start_position().row as u32,
+                        child.start_position().column as u16,
+                        child.end_position().row as u32,
+                        child.end_position().column as u16,
+                    );
+                    defines.push((method_name, var_name, range));
+                }
+            } else if child.kind() == "variable_declaration" {
+                // Nested variable_declaration (for local_declaration_statement)
+                self.extract_variable_definitions(&child, code, method_name, defines);
+            }
+        }
+    }
 }
 
 impl NodeTracker for CSharpParser {
@@ -1880,42 +2675,38 @@ impl LanguageParser for CSharpParser {
         implementations
     }
 
-    fn find_uses<'a>(&mut self, _code: &'a str) -> Vec<(&'a str, &'a str, Range)> {
-        // TODO: Implement proper type usage tracking for C#
-        //
-        // This should track where types are referenced/used, for example:
-        // - Method parameter types: `void DoWork(Helper helper)`
-        // - Return types: `Helper GetHelper()`
-        // - Field/property types: `private Helper _helper;`
-        // - Base classes/interfaces: `class Foo : IBar`
-        //
-        // Previously disabled because it was creating invalid relationships with "use" as context
-        // instead of proper semantic relationships.
-        //
-        // Implementation approach:
-        // 1. Traverse AST looking for type references
-        // 2. Extract (user_symbol, used_type, range) tuples
-        // 3. Filter out primitive types (int, string, etc.)
-        // 4. Ensure proper context (method names, not node kinds)
-        Vec::new()
+    fn find_uses<'a>(&mut self, code: &'a str) -> Vec<(&'a str, &'a str, Range)> {
+        let tree = match self.parser.parse(code, None) {
+            Some(tree) => tree,
+            None => {
+                eprintln!("Failed to parse C# file for type uses");
+                return Vec::new();
+            }
+        };
+
+        let root_node = tree.root_node();
+        let mut uses = Vec::new();
+
+        self.extract_type_uses_recursive(&root_node, code, &mut uses);
+
+        uses
     }
 
-    fn find_defines<'a>(&mut self, _code: &'a str) -> Vec<(&'a str, &'a str, Range)> {
-        // TODO: Implement proper defines tracking for C#
-        //
-        // This should track definition relationships, for example:
-        // - Variable definitions: `var x = 5;` → (containing_method, "x", range)
-        // - Field definitions: `private int _count;` → (containing_class, "_count", range)
-        // - Property definitions: `public string Name { get; set; }` → (containing_class, "Name", range)
-        //
-        // Previously disabled because it was using node.kind() instead of actual definer names,
-        // creating relationships like "variable_declaration defines x" instead of "Method defines x".
-        //
-        // Implementation approach:
-        // 1. Track current scope context (class, method, etc.)
-        // 2. For each definition, extract (definer_name, defined_symbol, range)
-        // 3. Ensure definer_name is the actual symbol name, not AST node type
-        Vec::new()
+    fn find_defines<'a>(&mut self, code: &'a str) -> Vec<(&'a str, &'a str, Range)> {
+        let tree = match self.parser.parse(code, None) {
+            Some(tree) => tree,
+            None => {
+                eprintln!("Failed to parse C# file for definitions");
+                return Vec::new();
+            }
+        };
+
+        let root_node = tree.root_node();
+        let mut defines = Vec::new();
+
+        self.extract_defines_recursive(&root_node, code, None, None, &mut defines);
+
+        defines
     }
 
     /// Extract variable type bindings from C# code
@@ -1990,127 +2781,6 @@ impl LanguageParser for CSharpParser {
 
     fn as_any(&self) -> &dyn Any {
         self
-    }
-}
-
-impl CSharpParser {
-    /// Record a locally-defined type (class, interface, struct, enum, record)
-    fn record_local_type(&mut self, type_name: &str) {
-        self.local_types.insert(type_name.to_string());
-    }
-
-    /// Check if a type is a C# primitive or well-known framework type
-    fn is_known_type(type_name: &str) -> bool {
-        matches!(
-            type_name,
-            "bool"
-                | "byte"
-                | "sbyte"
-                | "char"
-                | "decimal"
-                | "double"
-                | "float"
-                | "int"
-                | "uint"
-                | "long"
-                | "ulong"
-                | "short"
-                | "ushort"
-                | "object"
-                | "string"
-                | "void"
-                | "var"
-                | "dynamic"
-                | "String"
-                | "Object"
-                | "Int32"
-                | "Int64"
-                | "Boolean"
-        )
-    }
-
-    /// Extract type name from a type node (handles identifiers, generic names, qualified names)
-    fn extract_type_from_node<'a>(&self, type_node: Node, code: &'a str) -> Option<&'a str> {
-        match type_node.kind() {
-            "identifier" => Some(&code[type_node.byte_range()]),
-            "generic_name" => {
-                // For generic types like List<T>, find the first identifier child
-                let mut cursor = type_node.walk();
-                for child in type_node.children(&mut cursor) {
-                    if child.kind() == "identifier" {
-                        return Some(&code[child.byte_range()]);
-                    }
-                }
-                None
-            }
-            "qualified_name" => {
-                // For qualified names like System.String, extract the last part
-                let mut cursor = type_node.walk();
-                let mut last_ident = None;
-                for child in type_node.children(&mut cursor) {
-                    if child.kind() == "identifier" {
-                        last_ident = Some(&code[child.byte_range()]);
-                    }
-                }
-                last_ident
-            }
-            "predefined_type" => {
-                // Return the predefined type name (e.g., "int", "string")
-                // These will be filtered out by is_known_type anyway
-                Some(&code[type_node.byte_range()])
-            }
-            _ => None,
-        }
-    }
-
-    /// Track and potentially create an external type symbol
-    fn track_external_type_reference(
-        &mut self,
-        type_name: &str,
-        type_node: Node,
-        _code: &str,
-        file_id: FileId,
-        counter: &mut SymbolCounter,
-        symbols: &mut Vec<Symbol>,
-        module_path: &str,
-    ) {
-        // Skip if it's a primitive or well-known type
-        if Self::is_known_type(type_name) {
-            return;
-        }
-
-        // Skip if it's a locally-defined type
-        if self.local_types.contains(type_name) {
-            return;
-        }
-
-        // Skip if we've already tracked this external type
-        if self.external_type_refs.contains_key(type_name) {
-            return;
-        }
-
-        // Mark as tracked
-        self.external_type_refs.insert(type_name.to_string(), None);
-
-        // Create an ExternalType symbol
-        let symbol = self.create_symbol(
-            counter.next_id(),
-            type_name.to_string(),
-            SymbolKind::ExternalType,
-            file_id,
-            Range::new(
-                type_node.start_position().row as u32 + 1,
-                type_node.start_position().column as u16,
-                type_node.end_position().row as u32 + 1,
-                type_node.end_position().column as u16,
-            ),
-            Some(format!("external type: {type_name}")),
-            None,
-            module_path,
-            Visibility::Public, // External types are assumed public
-        );
-
-        symbols.push(symbol);
     }
 }
 
@@ -2264,7 +2934,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "find_imports implementation needs to be completed - currently returns empty"]
     fn test_csharp_using_directive_extraction() {
         let mut parser = CSharpParser::new().unwrap();
         let code = r#"
@@ -2296,69 +2965,454 @@ mod tests {
     }
 
     #[test]
-    fn test_csharp_external_type_tracking() {
+    fn test_csharp_find_uses_type_tracking() {
         let mut parser = CSharpParser::new().unwrap();
         let code = r#"
-            using System.Collections.Generic;
-
-            // Local type definition (defined first)
-            public class MyHelper {
-                public void Help() { }
+            public interface IRepository {
+                void Save();
             }
 
-            public class MyService {
-                // External type from .NET framework
-                private List<string> items;
+            public class UserService : IRepository {
+                private Helper _helper;
+                private ILogger _logger;
 
-                // Local type should NOT be tracked as external
-                private MyHelper helper;
+                public UserService(Helper helper, ILogger logger) {
+                    _helper = helper;
+                    _logger = logger;
+                }
 
-                // Primitive should NOT be tracked
-                private int count;
+                public Helper GetHelper() {
+                    return _helper;
+                }
 
-                // Another external type
-                private Dictionary<string, object> cache;
+                public void Save() {
+                    _helper.DoWork();
+                }
+            }
+
+            public class Helper {
+                public void DoWork() { }
             }
         "#;
 
-        let file_id = FileId::new(1).unwrap();
-        let mut counter = SymbolCounter::new();
-        let symbols = parser.parse(code, file_id, &mut counter);
+        let uses = parser.find_uses(code);
 
-        // Count external type symbols
-        let external_types: Vec<_> = symbols
-            .iter()
-            .filter(|s| s.kind == SymbolKind::ExternalType)
-            .collect();
+        // Debug output
+        println!("\nFound {} type uses:", uses.len());
+        for (context, type_name, _) in &uses {
+            println!("  {} uses {}", context, type_name);
+        }
 
-        // Should find List and Dictionary as external types
+        // Test base class/interface implementation
         assert!(
-            external_types.iter().any(|s| &*s.name == "List"),
-            "Should track List as external type"
-        );
-        assert!(
-            external_types.iter().any(|s| &*s.name == "Dictionary"),
-            "Should track Dictionary as external type"
+            uses.iter()
+                .any(|(ctx, typ, _)| *ctx == "UserService" && *typ == "IRepository"),
+            "Should detect UserService uses IRepository (implements). Found: {:?}",
+            uses
         );
 
-        // Should NOT track primitives like int
+        // Test field types
         assert!(
-            !external_types.iter().any(|s| &*s.name == "int"),
-            "Should NOT track primitive int as external type"
+            uses.iter()
+                .any(|(ctx, typ, _)| *ctx == "_helper" && *typ == "Helper"),
+            "Should detect _helper uses Helper (field type). Found: {:?}",
+            uses
         );
 
-        // Should NOT track locally-defined MyHelper
         assert!(
-            !external_types.iter().any(|s| &*s.name == "MyHelper"),
-            "Should NOT track local MyHelper as external type"
+            uses.iter()
+                .any(|(ctx, typ, _)| *ctx == "_logger" && *typ == "ILogger"),
+            "Should detect _logger uses ILogger (field type). Found: {:?}",
+            uses
         );
 
-        // Should find the local MyHelper class as a Class symbol
+        // Test parameter types
         assert!(
-            symbols
+            uses.iter()
+                .any(|(ctx, typ, _)| *ctx == "UserService" && *typ == "Helper"),
+            "Should detect UserService uses Helper (constructor parameter). Found: {:?}",
+            uses
+        );
+
+        assert!(
+            uses.iter()
+                .any(|(ctx, typ, _)| *ctx == "UserService" && *typ == "ILogger"),
+            "Should detect UserService uses ILogger (constructor parameter). Found: {:?}",
+            uses
+        );
+
+        // Test return types
+        assert!(
+            uses.iter()
+                .any(|(ctx, typ, _)| *ctx == "GetHelper" && *typ == "Helper"),
+            "Should detect GetHelper uses Helper (return type). Found: {:?}",
+            uses
+        );
+
+        // Verify no primitive types are tracked
+        assert!(
+            !uses.iter().any(|(_, typ, _)| *typ == "void"),
+            "Should not track primitive type 'void'. Found: {:?}",
+            uses
+        );
+    }
+
+    #[test]
+    fn test_csharp_find_uses_generic_types() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class DataService {
+                private List<User> _users;
+                private Dictionary<int, Product> _products;
+
+                public List<User> GetUsers() {
+                    return _users;
+                }
+
+                public void ProcessData(List<Order> orders) {
+                    // Implementation
+                }
+            }
+        "#;
+
+        let uses = parser.find_uses(code);
+
+        println!("\nFound {} type uses in generic test:", uses.len());
+        for (context, type_name, _) in &uses {
+            println!("  {} uses {}", context, type_name);
+        }
+
+        // Test generic types - should track both the container and type arguments
+        assert!(
+            uses.iter()
+                .any(|(ctx, typ, _)| *ctx == "_users" && *typ == "List"),
+            "Should detect _users uses List. Found: {:?}",
+            uses
+        );
+
+        assert!(
+            uses.iter()
+                .any(|(ctx, typ, _)| *ctx == "_users" && *typ == "User"),
+            "Should detect _users uses User (generic type argument). Found: {:?}",
+            uses
+        );
+
+        assert!(
+            uses.iter()
+                .any(|(ctx, typ, _)| *ctx == "_products" && *typ == "Dictionary"),
+            "Should detect _products uses Dictionary. Found: {:?}",
+            uses
+        );
+
+        assert!(
+            uses.iter()
+                .any(|(ctx, typ, _)| *ctx == "_products" && *typ == "Product"),
+            "Should detect _products uses Product (generic type argument). Found: {:?}",
+            uses
+        );
+
+        // Test generic parameter types
+        assert!(
+            uses.iter()
+                .any(|(ctx, typ, _)| *ctx == "ProcessData" && *typ == "List"),
+            "Should detect ProcessData uses List. Found: {:?}",
+            uses
+        );
+
+        assert!(
+            uses.iter()
+                .any(|(ctx, typ, _)| *ctx == "ProcessData" && *typ == "Order"),
+            "Should detect ProcessData uses Order. Found: {:?}",
+            uses
+        );
+    }
+
+    #[test]
+    fn test_csharp_find_defines_class_members() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class UserService {
+                private ILogger _logger;
+                private Helper _helper;
+
+                public string Name { get; set; }
+                public event EventHandler OnUpdate;
+
+                public UserService(ILogger logger) {
+                    _logger = logger;
+                }
+
+                public void Process() {
+                    var result = 5;
+                    int count = 10;
+                }
+
+                private void Helper() {
+                    // Local function
+                    void LocalFunc() { }
+                }
+            }
+        "#;
+
+        let defines = parser.find_defines(code);
+
+        // Debug output
+        println!("\nFound {} definitions:", defines.len());
+        for (definer, defined, _) in &defines {
+            println!("  {} defines {}", definer, defined);
+        }
+
+        // Test class defines methods
+        assert!(
+            defines
                 .iter()
-                .any(|s| &*s.name == "MyHelper" && s.kind == SymbolKind::Class),
-            "Should find MyHelper as a Class symbol"
+                .any(|(definer, defined, _)| *definer == "UserService" && *defined == "UserService"),
+            "Should detect UserService defines UserService (constructor). Found: {:?}",
+            defines
+        );
+
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "UserService" && *defined == "Process"),
+            "Should detect UserService defines Process. Found: {:?}",
+            defines
+        );
+
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "UserService" && *defined == "Helper"),
+            "Should detect UserService defines Helper. Found: {:?}",
+            defines
+        );
+
+        // Test class defines fields
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "UserService" && *defined == "_logger"),
+            "Should detect UserService defines _logger. Found: {:?}",
+            defines
+        );
+
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "UserService" && *defined == "_helper"),
+            "Should detect UserService defines _helper. Found: {:?}",
+            defines
+        );
+
+        // Test class defines properties
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "UserService" && *defined == "Name"),
+            "Should detect UserService defines Name (property). Found: {:?}",
+            defines
+        );
+
+        // Test class defines events
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "UserService" && *defined == "OnUpdate"),
+            "Should detect UserService defines OnUpdate (event). Found: {:?}",
+            defines
+        );
+
+        // Test method defines local variables
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "Process" && *defined == "result"),
+            "Should detect Process defines result (local variable). Found: {:?}",
+            defines
+        );
+
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "Process" && *defined == "count"),
+            "Should detect Process defines count (local variable). Found: {:?}",
+            defines
+        );
+
+        // Test method defines local functions
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "Helper" && *defined == "LocalFunc"),
+            "Should detect Helper defines LocalFunc (local function). Found: {:?}",
+            defines
+        );
+
+        // Test constructor defines local variables
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "UserService" && *defined == "_logger"),
+            "Should detect UserService (constructor) has access to _logger assignment. Found: {:?}",
+            defines
+        );
+    }
+
+    #[test]
+    fn test_csharp_find_defines_nested_types() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class OuterClass {
+                public class InnerClass {
+                    private int _value;
+
+                    public void InnerMethod() { }
+                }
+
+                public struct InnerStruct {
+                    public int X;
+                }
+
+                public enum Status {
+                    Active,
+                    Inactive
+                }
+            }
+        "#;
+
+        let defines = parser.find_defines(code);
+
+        println!(
+            "\nFound {} definitions in nested types test:",
+            defines.len()
+        );
+        for (definer, defined, _) in &defines {
+            println!("  {} defines {}", definer, defined);
+        }
+
+        // Test outer class defines nested types
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "OuterClass" && *defined == "InnerClass"),
+            "Should detect OuterClass defines InnerClass. Found: {:?}",
+            defines
+        );
+
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "OuterClass" && *defined == "InnerStruct"),
+            "Should detect OuterClass defines InnerStruct. Found: {:?}",
+            defines
+        );
+
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "OuterClass" && *defined == "Status"),
+            "Should detect OuterClass defines Status (enum). Found: {:?}",
+            defines
+        );
+
+        // Test inner class defines its own members
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "InnerClass" && *defined == "_value"),
+            "Should detect InnerClass defines _value. Found: {:?}",
+            defines
+        );
+
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "InnerClass" && *defined == "InnerMethod"),
+            "Should detect InnerClass defines InnerMethod. Found: {:?}",
+            defines
+        );
+
+        // Test struct defines fields
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "InnerStruct" && *defined == "X"),
+            "Should detect InnerStruct defines X. Found: {:?}",
+            defines
+        );
+
+        // Test enum defines members
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "Status" && *defined == "Active"),
+            "Should detect Status defines Active. Found: {:?}",
+            defines
+        );
+
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "Status" && *defined == "Inactive"),
+            "Should detect Status defines Inactive. Found: {:?}",
+            defines
+        );
+    }
+
+    #[test]
+    fn test_csharp_find_defines_interfaces() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public interface IRepository {
+                void Save();
+                void Delete();
+                string Name { get; set; }
+            }
+
+            public interface ILogger {
+                void Log(string message);
+            }
+        "#;
+
+        let defines = parser.find_defines(code);
+
+        println!("\nFound {} definitions in interfaces test:", defines.len());
+        for (definer, defined, _) in &defines {
+            println!("  {} defines {}", definer, defined);
+        }
+
+        // Test interface defines methods
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "IRepository" && *defined == "Save"),
+            "Should detect IRepository defines Save. Found: {:?}",
+            defines
+        );
+
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "IRepository" && *defined == "Delete"),
+            "Should detect IRepository defines Delete. Found: {:?}",
+            defines
+        );
+
+        // Test interface defines properties
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "IRepository" && *defined == "Name"),
+            "Should detect IRepository defines Name (property). Found: {:?}",
+            defines
+        );
+
+        assert!(
+            defines
+                .iter()
+                .any(|(definer, defined, _)| *definer == "ILogger" && *defined == "Log"),
+            "Should detect ILogger defines Log. Found: {:?}",
+            defines
         );
     }
 }
