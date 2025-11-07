@@ -726,6 +726,53 @@ impl CSharpParser {
     /// Extract variable signature
     fn extract_variable_signature(&self, node: Node, code: &str) -> String {
         // Variables are declared like "int x = 5;" or "var name = value;"
+        // Try to infer the type from the declaration
+
+        // Check if this is a variable_declarator (the actual variable, not the declaration)
+        let var_node = if node.kind() == "variable_declarator" {
+            node
+        } else {
+            // If it's a variable_declaration, find the first variable_declarator
+            let mut cursor = node.walk();
+            if let Some(declarator) = node
+                .children(&mut cursor)
+                .find(|n| n.kind() == "variable_declarator")
+            {
+                declarator
+            } else {
+                return code[node.byte_range()].trim().to_string();
+            }
+        };
+
+        // Try to extract type from initializer expression
+        let mut sub_cursor = var_node.walk();
+        for vchild in var_node.children(&mut sub_cursor) {
+            match vchild.kind() {
+                "object_creation_expression"
+                | "invocation_expression"
+                | "element_access_expression"
+                | "conditional_expression" => {
+                    if let Some(type_name) = self.extract_type_from_initializer(&vchild, code) {
+                        return type_name.to_string();
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // Fallback: try to get explicit type from parent variable_declaration
+        if let Some(parent) = var_node.parent() {
+            if parent.kind() == "variable_declaration" {
+                if let Some(type_node) = parent.child_by_field_name("type") {
+                    let type_str = &code[type_node.byte_range()];
+                    if type_str != "var" {
+                        return type_str.to_string();
+                    }
+                }
+            }
+        }
+
+        // Final fallback: return the whole declaration
         code[node.byte_range()].trim().to_string()
     }
 
@@ -758,11 +805,69 @@ impl CSharpParser {
             current_function
         };
 
+        // Handle await expressions - unwrap to find the actual invocation
+        // Pattern: await _httpClient.GetAsync()
+        // The await wraps the invocation, so we need to unwrap it transparently
+        if node.kind() == "await_expression" {
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                // Process children with inherited function context
+                Self::extract_calls_recursive(&child, code, function_context, calls);
+            }
+            return; // Don't fall through to default recursion
+        }
+
+        // Handle object creation (constructor calls)
+        // Pattern: new Service() or new List<T>()
+        if node.kind() == "object_creation_expression" {
+            let caller = function_context.unwrap_or("");
+
+            if let Some(type_node) = node.child_by_field_name("type") {
+                let type_name = match type_node.kind() {
+                    "identifier" => &code[type_node.byte_range()],
+                    "generic_name" => {
+                        // For Generic<T>, extract just "Generic"
+                        type_node
+                            .child_by_field_name("name")
+                            .map(|n| &code[n.byte_range()])
+                            .unwrap_or(&code[type_node.byte_range()])
+                    }
+                    "qualified_name" => {
+                        // For Namespace.Type, extract just "Type" (rightmost identifier)
+                        let mut last_ident = None;
+                        let mut cursor = type_node.walk();
+                        for child in type_node.children(&mut cursor) {
+                            if child.kind() == "identifier" {
+                                last_ident = Some(&code[child.byte_range()]);
+                            }
+                        }
+                        last_ident.unwrap_or(&code[type_node.byte_range()])
+                    }
+                    _ => &code[type_node.byte_range()],
+                };
+
+                let range = Range::new(
+                    node.start_position().row as u32,
+                    node.start_position().column as u16,
+                    node.end_position().row as u32,
+                    node.end_position().column as u16,
+                );
+                calls.push((caller, type_name, range));
+            }
+
+            // Still recurse to catch any method calls in constructor arguments
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                Self::extract_calls_recursive(&child, code, function_context, calls);
+            }
+            return;
+        }
+
         // Handle invocation expressions with proper caller context
         if node.kind() == "invocation_expression" {
             if let Some(expression_node) = node.child(0) {
                 let caller = function_context.unwrap_or("");
-                let callee = match expression_node.kind() {
+                let callee_raw = match expression_node.kind() {
                     "member_access_expression" => {
                         // obj.Method() - get method name
                         expression_node
@@ -775,6 +880,14 @@ impl CSharpParser {
                         &code[expression_node.byte_range()]
                     }
                     _ => &code[expression_node.byte_range()],
+                };
+
+                // Strip generic type parameters for better resolution
+                // e.g., "GetFromJsonAsync<List<T>>" -> "GetFromJsonAsync"
+                let callee = if let Some(idx) = callee_raw.find('<') {
+                    &callee_raw[..idx]
+                } else {
+                    callee_raw
                 };
 
                 let range = Range::new(
@@ -819,6 +932,49 @@ impl CSharpParser {
         method_calls: &mut Vec<MethodCall>,
     ) {
         match node.kind() {
+            // Handle await expressions - unwrap to find the actual invocation
+            "await_expression" => {
+                // Await wraps invocation, process children transparently
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    self.extract_method_calls_from_node(child, code, method_calls);
+                }
+                // Don't fall through to default case
+            }
+            // Handle object creation (constructor calls)
+            "object_creation_expression" => {
+                let caller = self
+                    .context
+                    .current_function()
+                    .or_else(|| self.context.current_class())
+                    .unwrap_or("unknown");
+
+                if let Some(type_node) = node.child_by_field_name("type") {
+                    let type_name = match type_node.kind() {
+                        "identifier" => code[type_node.byte_range()].to_string(),
+                        "generic_name" => type_node
+                            .child_by_field_name("name")
+                            .map(|n| code[n.byte_range()].to_string())
+                            .unwrap_or_else(|| code[type_node.byte_range()].to_string()),
+                        _ => code[type_node.byte_range()].to_string(),
+                    };
+
+                    let range = Range::new(
+                        node.start_position().row as u32,
+                        node.start_position().column as u16,
+                        node.end_position().row as u32,
+                        node.end_position().column as u16,
+                    );
+                    method_calls.push(MethodCall::new(caller, &type_name, range));
+                }
+
+                // Still recurse for nested calls in constructor arguments
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    self.extract_method_calls_from_node(child, code, method_calls);
+                }
+                // Don't fall through to default case
+            }
             // Track scope changes to maintain caller context
             "class_declaration"
             | "struct_declaration"
@@ -880,22 +1036,46 @@ impl CSharpParser {
                                 {
                                     let receiver = code[object_node.byte_range()].to_string();
                                     let method = code[name_node.byte_range()].to_string();
+
+                                    // Strip generic type parameters for better resolution
+                                    // e.g., "GetFromJsonAsync<List<T>>" -> "GetFromJsonAsync"
+                                    let method_name = if let Some(idx) = method.find('<') {
+                                        &method[..idx]
+                                    } else {
+                                        &method
+                                    };
+
                                     let range = Range::new(
                                         node.start_position().row as u32,
                                         node.start_position().column as u16,
                                         node.end_position().row as u32,
                                         node.end_position().column as u16,
                                     );
-                                    method_calls.push(
-                                        MethodCall::new(caller, &method, range)
-                                            .with_receiver(&receiver),
-                                    );
+
+                                    // Detect static method calls: if receiver starts with uppercase,
+                                    // it's likely a class/type name (PascalCase convention in C#)
+                                    let mut call = MethodCall::new(caller, method_name, range)
+                                        .with_receiver(&receiver);
+
+                                    if receiver.chars().next().is_some_and(|c| c.is_uppercase()) {
+                                        call = call.static_method();
+                                    }
+
+                                    method_calls.push(call);
                                 }
                             }
                         }
                         "identifier" => {
                             // Simple method calls like Method()
                             let method = code[expression_node.byte_range()].to_string();
+
+                            // Strip generic type parameters for better resolution
+                            let method_name = if let Some(idx) = method.find('<') {
+                                &method[..idx]
+                            } else {
+                                &method
+                            };
+
                             let range = Range::new(
                                 node.start_position().row as u32,
                                 node.start_position().column as u16,
@@ -903,7 +1083,7 @@ impl CSharpParser {
                                 node.end_position().column as u16,
                             );
                             method_calls.push(
-                                MethodCall::new(caller, &method, range).with_receiver("this"),
+                                MethodCall::new(caller, method_name, range).with_receiver("this"),
                             );
                         }
                         _ => {}
@@ -1152,19 +1332,30 @@ impl CSharpParser {
                     let var_name = &code[name_node.byte_range()];
 
                     // Strategy 1: Try to extract type from initializer (handles "var" keyword)
-                    // In tree-sitter C#, object_creation_expression is a direct child of variable_declarator
-                    // Example structure: variable_declarator -> [identifier, "=", object_creation_expression]
+                    // In tree-sitter C#, various expression types can appear as children of variable_declarator
+                    // Example structure: variable_declarator -> [identifier, "=", <expression>]
+                    // Supported expressions:
+                    // - object_creation_expression: var x = new Type()
+                    // - invocation_expression: var x = GetHelper()
+                    // - element_access_expression: var x = collection[0]
+                    // - conditional_expression: var x = condition ? a : b
                     let mut init_expr = None;
                     let mut sub_cursor = child.walk();
                     for vchild in child.children(&mut sub_cursor) {
-                        if vchild.kind() == "object_creation_expression" {
-                            init_expr = Some(vchild);
-                            break;
+                        match vchild.kind() {
+                            "object_creation_expression"
+                            | "invocation_expression"
+                            | "element_access_expression"
+                            | "conditional_expression" => {
+                                init_expr = Some(vchild);
+                                break;
+                            }
+                            _ => {}
                         }
                     }
 
                     if let Some(init_node) = init_expr {
-                        // Found a "new Type()" expression - extract the type
+                        // Try to extract type from the initializer expression
                         if let Some(type_name) =
                             self.extract_type_from_initializer(&init_node, code)
                         {
@@ -1206,17 +1397,42 @@ impl CSharpParser {
     /// - `new Type()` → Some("Type")
     /// - `new Generic<T>()` → Some("Generic")
     /// - `new Namespace.Type()` → Some("Type")
+    /// - `GetHelper()` → Some("Helper") (method return type inference)
+    /// - `CreateUser()` → Some("User") (method return type inference)
+    /// - `collection[0]` → tries to infer element type from collection
+    /// - `condition ? a : b` → tries to infer from either branch
     fn extract_type_from_initializer<'a>(
         &self,
         init_node: &Node,
         code: &'a str,
     ) -> Option<&'a str> {
-        // Look for object_creation_expression
-        if init_node.kind() == "object_creation_expression" {
-            // object_creation_expression has a 'type' field
-            if let Some(type_node) = init_node.child_by_field_name("type") {
-                return Some(self.extract_simple_type_name(&type_node, code));
+        match init_node.kind() {
+            "object_creation_expression" => {
+                // object_creation_expression has a 'type' field
+                if let Some(type_node) = init_node.child_by_field_name("type") {
+                    return Some(self.extract_simple_type_name(&type_node, code));
+                }
             }
+            "invocation_expression" => {
+                // Try to infer type from method name
+                // Common patterns:
+                // - GetHelper() → Helper
+                // - CreateUser() → User
+                // - BuildConnection() → Connection
+                // - ToList() → List
+                return self.infer_type_from_method_call(init_node, code);
+            }
+            "element_access_expression" => {
+                // Try to infer element type from collection
+                // e.g., items[0] where items is List<Item> → Item
+                return self.infer_type_from_element_access(init_node, code);
+            }
+            "conditional_expression" => {
+                // Try to infer from either branch of ternary expression
+                // condition ? trueExpr : falseExpr
+                return self.infer_type_from_conditional(init_node, code);
+            }
+            _ => {}
         }
         None
     }
@@ -1251,6 +1467,168 @@ impl CSharpParser {
             }
             _ => &code[type_node.byte_range()],
         }
+    }
+
+    /// Infer type from method call based on naming conventions
+    ///
+    /// Handles common C# method naming patterns:
+    /// - `GetHelper()` → "Helper"
+    /// - `CreateUser()` → "User"
+    /// - `BuildConnection()` → "Connection"
+    /// - `ToList()` → "List"
+    /// - `AsEnumerable()` → "Enumerable"
+    ///
+    /// Returns None if the method name doesn't follow a recognizable pattern.
+    fn infer_type_from_method_call<'a>(
+        &self,
+        invocation_node: &Node,
+        code: &'a str,
+    ) -> Option<&'a str> {
+        // Get the method name from the invocation expression
+        let method_name = if let Some(expr_node) = invocation_node.child(0) {
+            match expr_node.kind() {
+                "member_access_expression" => {
+                    // obj.Method() - get the method name
+                    expr_node
+                        .child_by_field_name("name")
+                        .map(|n| &code[n.byte_range()])
+                }
+                "identifier" => {
+                    // Simple method call like DoSomething()
+                    Some(&code[expr_node.byte_range()])
+                }
+                "generic_name" => {
+                    // Generic method like GetValue<T>()
+                    expr_node
+                        .child_by_field_name("name")
+                        .map(|n| &code[n.byte_range()])
+                }
+                _ => None,
+            }
+        } else {
+            None
+        }?;
+
+        // Try to extract type from method name using common prefixes
+        // Get* → *
+        if let Some(type_name) = method_name.strip_prefix("Get") {
+            if !type_name.is_empty() && type_name.chars().next().unwrap().is_uppercase() {
+                return Some(type_name);
+            }
+        }
+        // Create* → *
+        if let Some(type_name) = method_name.strip_prefix("Create") {
+            if !type_name.is_empty() && type_name.chars().next().unwrap().is_uppercase() {
+                return Some(type_name);
+            }
+        }
+        // Build* → *
+        if let Some(type_name) = method_name.strip_prefix("Build") {
+            if !type_name.is_empty() && type_name.chars().next().unwrap().is_uppercase() {
+                return Some(type_name);
+            }
+        }
+        // To* → *
+        if let Some(type_name) = method_name.strip_prefix("To") {
+            if !type_name.is_empty() && type_name.chars().next().unwrap().is_uppercase() {
+                return Some(type_name);
+            }
+        }
+        // As* → *
+        if let Some(type_name) = method_name.strip_prefix("As") {
+            if !type_name.is_empty() && type_name.chars().next().unwrap().is_uppercase() {
+                return Some(type_name);
+            }
+        }
+
+        None
+    }
+
+    /// Infer element type from element access expression
+    ///
+    /// This is a best-effort heuristic. For collection[index], we try to infer
+    /// the element type by looking at the collection's type if it's a known identifier.
+    ///
+    /// Note: This is limited without full type tracking. We can only infer if the
+    /// collection variable name follows conventions like "users" → "User".
+    fn infer_type_from_element_access<'a>(
+        &self,
+        element_access_node: &Node,
+        code: &'a str,
+    ) -> Option<&'a str> {
+        // Get the expression being accessed (the collection)
+        if let Some(expr_node) = element_access_node.child_by_field_name("expression") {
+            if expr_node.kind() == "identifier" {
+                let collection_name = &code[expr_node.byte_range()];
+
+                // Try to singularize common plural forms
+                // users → User, items → Item, connections → Connection
+                if let Some(singular) = self.try_singularize(collection_name) {
+                    return Some(singular);
+                }
+            }
+        }
+
+        None
+    }
+
+    /// Infer type from conditional (ternary) expression
+    ///
+    /// For `condition ? trueExpr : falseExpr`, we try to infer the type from
+    /// the true expression branch (could be either, but we pick the first one).
+    fn infer_type_from_conditional<'a>(
+        &self,
+        conditional_node: &Node,
+        code: &'a str,
+    ) -> Option<&'a str> {
+        // Try to extract type from the consequence (true branch)
+        if let Some(consequence) = conditional_node.child_by_field_name("consequence") {
+            // Recursively try to infer type from the consequence expression
+            return self.extract_type_from_initializer(&consequence, code);
+        }
+
+        None
+    }
+
+    /// Try to singularize a plural noun (simple heuristic)
+    ///
+    /// This is a very basic implementation that handles common English plural forms:
+    /// - items → item
+    /// - users → user
+    /// - classes → class
+    /// - indices → index
+    ///
+    /// Returns the singularized form with the first letter capitalized to match
+    /// C# type naming conventions.
+    fn try_singularize<'a>(&self, word: &'a str) -> Option<&'a str> {
+        if word.is_empty() {
+            return None;
+        }
+
+        // Handle common plural patterns
+        if word.ends_with("ies") && word.len() > 3 {
+            // entries → entry, but keep as-is since we can't modify the string
+            // For now, just skip these
+            return None;
+        }
+
+        if word.ends_with("ses") && word.len() > 3 {
+            // classes → class, but we can't return a substring
+            // For now, just skip these
+            return None;
+        }
+
+        if word.ends_with('s') && word.len() > 1 {
+            // items → item, users → user
+            // Return substring without the 's'
+            let singular = &word[..word.len() - 1];
+            // Check if it's at least 2 chars and looks like a valid identifier
+            if singular.len() >= 2 {
+                return Some(singular);
+            }
+        }
+
+        None
     }
 
     /// Determine visibility from modifiers
@@ -1333,7 +1711,22 @@ impl CSharpParser {
                         if let Some(symbol) =
                             self.process_method(child, code, file_id, counter, module_path)
                         {
+                            let method_name = symbol.name.to_string();
                             symbols.push(symbol);
+
+                            // Process method body for local variables
+                            self.context
+                                .enter_scope(ScopeType::Function { hoisting: false });
+                            self.context.set_current_function(Some(method_name));
+                            self.extract_method_body(
+                                child,
+                                code,
+                                file_id,
+                                counter,
+                                symbols,
+                                module_path,
+                            );
+                            self.context.exit_scope();
                         }
                     }
                     "property_declaration" => {
@@ -1357,7 +1750,22 @@ impl CSharpParser {
                         if let Some(symbol) =
                             self.process_constructor(child, code, file_id, counter, module_path)
                         {
+                            let constructor_name = symbol.name.to_string();
                             symbols.push(symbol);
+
+                            // Process constructor body for local variables
+                            self.context
+                                .enter_scope(ScopeType::Function { hoisting: false });
+                            self.context.set_current_function(Some(constructor_name));
+                            self.extract_method_body(
+                                child,
+                                code,
+                                file_id,
+                                counter,
+                                symbols,
+                                module_path,
+                            );
+                            self.context.exit_scope();
                         }
                     }
                     "event_declaration" | "event_field_declaration" => {
@@ -1768,13 +2176,23 @@ impl CSharpParser {
         symbols: &mut Vec<Symbol>,
         module_path: &str,
     ) {
+        // If we have a local_declaration_statement, find the variable_declaration child first
+        let var_decl_node = if node.kind() == "local_declaration_statement" {
+            let mut cursor = node.walk();
+            node.children(&mut cursor)
+                .find(|child| child.kind() == "variable_declaration")
+                .unwrap_or(node)
+        } else {
+            node
+        };
+
         // Look for variable_declarator nodes within the declaration
-        let mut cursor = node.walk();
-        for child in node.children(&mut cursor) {
+        let mut cursor = var_decl_node.walk();
+        for child in var_decl_node.children(&mut cursor) {
             if child.kind() == "variable_declarator" {
                 if let Some(name_node) = child.child_by_field_name("name") {
                     let name = code[name_node.byte_range()].to_string();
-                    let signature = self.extract_variable_signature(node, code);
+                    let signature = self.extract_variable_signature(child, code);
                     let doc_comment = self.extract_doc_comment(&node, code);
 
                     let symbol = self.create_symbol(
@@ -1809,6 +2227,125 @@ impl CSharpParser {
         for child in node.children(&mut cursor) {
             self.register_node_recursively(child);
         }
+    }
+
+    /// Record a locally-defined type (class, interface, struct, enum, record)
+    fn record_local_type(&mut self, type_name: &str) {
+        self.local_types.insert(type_name.to_string());
+    }
+
+    /// Check if a type is a C# primitive or well-known framework type
+    fn is_known_type(type_name: &str) -> bool {
+        matches!(
+            type_name,
+            "bool"
+                | "byte"
+                | "sbyte"
+                | "char"
+                | "decimal"
+                | "double"
+                | "float"
+                | "int"
+                | "uint"
+                | "long"
+                | "ulong"
+                | "short"
+                | "ushort"
+                | "object"
+                | "string"
+                | "void"
+                | "var"
+                | "dynamic"
+                | "String"
+                | "Object"
+                | "Int32"
+                | "Int64"
+                | "Boolean"
+        )
+    }
+
+    /// Extract type name from a type node (handles identifiers, generic names, qualified names)
+    fn extract_type_from_node<'a>(&self, type_node: Node, code: &'a str) -> Option<&'a str> {
+        match type_node.kind() {
+            "identifier" => Some(&code[type_node.byte_range()]),
+            "generic_name" => {
+                // For generic types like List<T>, find the first identifier child
+                let mut cursor = type_node.walk();
+                for child in type_node.children(&mut cursor) {
+                    if child.kind() == "identifier" {
+                        return Some(&code[child.byte_range()]);
+                    }
+                }
+                None
+            }
+            "qualified_name" => {
+                // For qualified names like System.String, extract the last part
+                let mut cursor = type_node.walk();
+                let mut last_ident = None;
+                for child in type_node.children(&mut cursor) {
+                    if child.kind() == "identifier" {
+                        last_ident = Some(&code[child.byte_range()]);
+                    }
+                }
+                last_ident
+            }
+            "predefined_type" => {
+                // Return the predefined type name (e.g., "int", "string")
+                // These will be filtered out by is_known_type anyway
+                Some(&code[type_node.byte_range()])
+            }
+            _ => None,
+        }
+    }
+
+    /// Track and potentially create an external type symbol
+    fn track_external_type_reference(
+        &mut self,
+        type_name: &str,
+        type_node: Node,
+        _code: &str,
+        file_id: FileId,
+        counter: &mut SymbolCounter,
+        symbols: &mut Vec<Symbol>,
+        module_path: &str,
+    ) {
+        // Skip if it's a primitive or well-known type
+        if Self::is_known_type(type_name) {
+            return;
+        }
+
+        // Skip if it's a locally-defined type
+        if self.local_types.contains(type_name) {
+            return;
+        }
+
+        // Skip if we've already tracked this external type
+        if self.external_type_refs.contains_key(type_name) {
+            return;
+        }
+
+        // Mark as tracked
+        self.external_type_refs.insert(type_name.to_string(), None);
+
+        // Create an ExternalType symbol
+        let symbol = self.create_symbol(
+            counter.next_id(),
+            type_name.to_string(),
+            SymbolKind::ExternalType,
+            file_id,
+            Range::new(
+                type_node.start_position().row as u32 + 1,
+                type_node.start_position().column as u16,
+                type_node.end_position().row as u32 + 1,
+                type_node.end_position().column as u16,
+            ),
+            Some(format!("external type: {type_name}")),
+            None,
+            module_path,
+            Visibility::Public, // External types are assumed public
+        );
+
+        symbols.push(symbol);
     }
 }
 
@@ -1993,127 +2530,6 @@ impl LanguageParser for CSharpParser {
     }
 }
 
-impl CSharpParser {
-    /// Record a locally-defined type (class, interface, struct, enum, record)
-    fn record_local_type(&mut self, type_name: &str) {
-        self.local_types.insert(type_name.to_string());
-    }
-
-    /// Check if a type is a C# primitive or well-known framework type
-    fn is_known_type(type_name: &str) -> bool {
-        matches!(
-            type_name,
-            "bool"
-                | "byte"
-                | "sbyte"
-                | "char"
-                | "decimal"
-                | "double"
-                | "float"
-                | "int"
-                | "uint"
-                | "long"
-                | "ulong"
-                | "short"
-                | "ushort"
-                | "object"
-                | "string"
-                | "void"
-                | "var"
-                | "dynamic"
-                | "String"
-                | "Object"
-                | "Int32"
-                | "Int64"
-                | "Boolean"
-        )
-    }
-
-    /// Extract type name from a type node (handles identifiers, generic names, qualified names)
-    fn extract_type_from_node<'a>(&self, type_node: Node, code: &'a str) -> Option<&'a str> {
-        match type_node.kind() {
-            "identifier" => Some(&code[type_node.byte_range()]),
-            "generic_name" => {
-                // For generic types like List<T>, find the first identifier child
-                let mut cursor = type_node.walk();
-                for child in type_node.children(&mut cursor) {
-                    if child.kind() == "identifier" {
-                        return Some(&code[child.byte_range()]);
-                    }
-                }
-                None
-            }
-            "qualified_name" => {
-                // For qualified names like System.String, extract the last part
-                let mut cursor = type_node.walk();
-                let mut last_ident = None;
-                for child in type_node.children(&mut cursor) {
-                    if child.kind() == "identifier" {
-                        last_ident = Some(&code[child.byte_range()]);
-                    }
-                }
-                last_ident
-            }
-            "predefined_type" => {
-                // Return the predefined type name (e.g., "int", "string")
-                // These will be filtered out by is_known_type anyway
-                Some(&code[type_node.byte_range()])
-            }
-            _ => None,
-        }
-    }
-
-    /// Track and potentially create an external type symbol
-    fn track_external_type_reference(
-        &mut self,
-        type_name: &str,
-        type_node: Node,
-        _code: &str,
-        file_id: FileId,
-        counter: &mut SymbolCounter,
-        symbols: &mut Vec<Symbol>,
-        module_path: &str,
-    ) {
-        // Skip if it's a primitive or well-known type
-        if Self::is_known_type(type_name) {
-            return;
-        }
-
-        // Skip if it's a locally-defined type
-        if self.local_types.contains(type_name) {
-            return;
-        }
-
-        // Skip if we've already tracked this external type
-        if self.external_type_refs.contains_key(type_name) {
-            return;
-        }
-
-        // Mark as tracked
-        self.external_type_refs.insert(type_name.to_string(), None);
-
-        // Create an ExternalType symbol
-        let symbol = self.create_symbol(
-            counter.next_id(),
-            type_name.to_string(),
-            SymbolKind::ExternalType,
-            file_id,
-            Range::new(
-                type_node.start_position().row as u32 + 1,
-                type_node.start_position().column as u16,
-                type_node.end_position().row as u32 + 1,
-                type_node.end_position().column as u16,
-            ),
-            Some(format!("external type: {type_name}")),
-            None,
-            module_path,
-            Visibility::Public, // External types are assumed public
-        );
-
-        symbols.push(symbol);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2264,7 +2680,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "find_imports implementation needs to be completed - currently returns empty"]
     fn test_csharp_using_directive_extraction() {
         let mut parser = CSharpParser::new().unwrap();
         let code = r#"
@@ -2293,6 +2708,222 @@ mod tests {
                 .any(|i| i.path == "System.Collections.Generic")
         );
         assert!(imports.iter().any(|i| i.path == "MyApp.Services"));
+    }
+
+    #[test]
+    fn test_csharp_var_type_inference_from_method_call() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class Service {
+                private Helper GetHelper() {
+                    return new Helper();
+                }
+
+                public void Process() {
+                    var helper = GetHelper();
+                    helper.DoSomething();
+                }
+            }
+
+            public class Helper {
+                public void DoSomething() { }
+            }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        // Should infer that 'helper' variable has type 'Helper' from GetHelper() method name
+        let bindings: Vec<_> = symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Variable)
+            .map(|s| (s.name.as_ref(), s.signature.as_deref()))
+            .collect();
+
+        assert!(
+            bindings
+                .iter()
+                .any(|(name, typ)| *name == "helper" && *typ == Some("Helper")),
+            "Should infer helper variable as type Helper from GetHelper() method. Found bindings: {bindings:?}"
+        );
+    }
+
+    #[test]
+    fn test_csharp_var_type_inference_from_create_method() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class Factory {
+                public User CreateUser() {
+                    return new User();
+                }
+
+                public void Initialize() {
+                    var user = CreateUser();
+                    user.Save();
+                }
+            }
+
+            public class User {
+                public void Save() { }
+            }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        // Should infer that 'user' variable has type 'User' from CreateUser() method name
+        let bindings: Vec<_> = symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Variable)
+            .map(|s| (s.name.as_ref(), s.signature.as_deref()))
+            .collect();
+
+        assert!(
+            bindings
+                .iter()
+                .any(|(name, typ)| *name == "user" && *typ == Some("User")),
+            "Should infer user variable as type User from CreateUser() method. Found bindings: {bindings:?}"
+        );
+    }
+
+    #[test]
+    fn test_csharp_var_type_inference_from_indexer() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class Repository {
+                public void Process() {
+                    var users = new List<User>();
+                    var firstUser = users[0];
+                    firstUser.Save();
+                }
+            }
+
+            public class User {
+                public void Save() { }
+            }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        // Should infer that 'firstUser' has type 'user' (singularized from 'users')
+        let bindings: Vec<_> = symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Variable)
+            .map(|s| (s.name.as_ref(), s.signature.as_deref()))
+            .collect();
+
+        assert!(
+            bindings
+                .iter()
+                .any(|(name, typ)| *name == "firstUser" && *typ == Some("user")),
+            "Should infer firstUser variable from collection indexer. Found bindings: {bindings:?}"
+        );
+    }
+
+    #[test]
+    fn test_csharp_var_type_inference_from_ternary() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class Manager {
+                public void Handle(bool condition) {
+                    var handler = condition ? new Helper() : new Helper();
+                    handler.Process();
+                }
+            }
+
+            public class Helper {
+                public void Process() { }
+            }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        // Should infer that 'handler' has type 'Helper' from ternary expression
+        let bindings: Vec<_> = symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Variable)
+            .map(|s| (s.name.as_ref(), s.signature.as_deref()))
+            .collect();
+
+        assert!(
+            bindings
+                .iter()
+                .any(|(name, typ)| *name == "handler" && *typ == Some("Helper")),
+            "Should infer handler variable from ternary expression. Found bindings: {bindings:?}"
+        );
+    }
+
+    #[test]
+    fn test_csharp_var_type_inference_multiple_patterns() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class MultiTest {
+                private Service GetService() { return new Service(); }
+                private Connection BuildConnection() { return new Connection(); }
+
+                public void Execute() {
+                    var obj1 = new Helper();
+                    var obj2 = GetService();
+                    var obj3 = BuildConnection();
+                    var items = new List<Item>();
+                    var firstItem = items[0];
+                    var selected = true ? new Helper() : new Helper();
+                }
+            }
+
+            public class Helper { }
+            public class Service { }
+            public class Connection { }
+            public class Item { }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        let bindings: Vec<_> = symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::Variable)
+            .map(|s| (s.name.as_ref(), s.signature.as_deref()))
+            .collect();
+
+        // Test all inference patterns
+        assert!(
+            bindings
+                .iter()
+                .any(|(name, typ)| *name == "obj1" && *typ == Some("Helper")),
+            "Should infer obj1 from object creation"
+        );
+        assert!(
+            bindings
+                .iter()
+                .any(|(name, typ)| *name == "obj2" && *typ == Some("Service")),
+            "Should infer obj2 from GetService() method"
+        );
+        assert!(
+            bindings
+                .iter()
+                .any(|(name, typ)| *name == "obj3" && *typ == Some("Connection")),
+            "Should infer obj3 from BuildConnection() method"
+        );
+        assert!(
+            bindings
+                .iter()
+                .any(|(name, typ)| *name == "firstItem" && *typ == Some("item")),
+            "Should infer firstItem from indexer"
+        );
+        assert!(
+            bindings
+                .iter()
+                .any(|(name, typ)| *name == "selected" && *typ == Some("Helper")),
+            "Should infer selected from ternary expression"
+        );
     }
 
     #[test]
