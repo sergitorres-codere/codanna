@@ -190,6 +190,20 @@ impl CSharpParser {
                 {
                     symbols.push(symbol);
 
+                    // Check for primary constructor (C# 12+)
+                    if let Some(name) = &class_name {
+                        if let Some(ctor_symbol) = self.process_primary_constructor(
+                            node,
+                            code,
+                            file_id,
+                            counter,
+                            module_path,
+                            name,
+                        ) {
+                            symbols.push(ctor_symbol);
+                        }
+                    }
+
                     // Enter class scope for processing members
                     self.context.enter_scope(ScopeType::Class);
                     let saved_class = self.context.current_class().map(|s| s.to_string());
@@ -241,9 +255,25 @@ impl CSharpParser {
                 // Register ALL child nodes for audit tracking
                 self.register_node_recursively(node);
 
+                let struct_name = self.extract_type_name(node, code);
+
                 if let Some(symbol) = self.process_struct(node, code, file_id, counter, module_path)
                 {
                     symbols.push(symbol);
+
+                    // Check for primary constructor (C# 12+)
+                    if let Some(name) = &struct_name {
+                        if let Some(ctor_symbol) = self.process_primary_constructor(
+                            node,
+                            code,
+                            file_id,
+                            counter,
+                            module_path,
+                            name,
+                        ) {
+                            symbols.push(ctor_symbol);
+                        }
+                    }
 
                     // Process struct members
                     self.context.enter_scope(ScopeType::Class);
@@ -278,9 +308,25 @@ impl CSharpParser {
                 // Register ALL child nodes for audit tracking
                 self.register_node_recursively(node);
 
+                let record_name = self.extract_type_name(node, code);
+
                 if let Some(symbol) = self.process_record(node, code, file_id, counter, module_path)
                 {
                     symbols.push(symbol);
+
+                    // Check for primary constructor (C# 12+)
+                    if let Some(name) = &record_name {
+                        if let Some(ctor_symbol) = self.process_primary_constructor(
+                            node,
+                            code,
+                            file_id,
+                            counter,
+                            module_path,
+                            name,
+                        ) {
+                            symbols.push(ctor_symbol);
+                        }
+                    }
 
                     // Process record members
                     self.context.enter_scope(ScopeType::Class);
@@ -466,6 +512,55 @@ impl CSharpParser {
             doc_comment,
             module_path,
             visibility,
+        ))
+    }
+
+    /// Process primary constructor for a class/struct/record (C# 12+)
+    ///
+    /// Creates a constructor symbol when a type declaration has parameters
+    fn process_primary_constructor(
+        &mut self,
+        node: Node,
+        code: &str,
+        file_id: FileId,
+        counter: &mut SymbolCounter,
+        module_path: &str,
+        type_name: &str,
+    ) -> Option<Symbol> {
+        let (has_primary_ctor, param_sig, _param_names) =
+            self.extract_primary_constructor_info(node, code);
+
+        if !has_primary_ctor {
+            return None;
+        }
+
+        // Build constructor signature
+        let visibility_mods = self.determine_visibility(node, code);
+        let visibility_str = match visibility_mods {
+            Visibility::Public => "public ",
+            Visibility::Private => "private ",
+            Visibility::Module => "internal ",
+            Visibility::Crate => "internal ",
+        };
+
+        let signature = format!("{visibility_str}{type_name}{param_sig}");
+        let doc_comment = self.extract_doc_comment(&node, code);
+
+        Some(self.create_symbol(
+            counter.next_id(),
+            type_name.to_string(),
+            SymbolKind::Method, // Constructors are methods
+            file_id,
+            Range::new(
+                node.start_position().row as u32,
+                node.start_position().column as u16,
+                node.end_position().row as u32,
+                node.end_position().column as u16,
+            ),
+            Some(signature),
+            doc_comment,
+            module_path,
+            visibility_mods,
         ))
     }
 
@@ -1221,6 +1316,76 @@ impl CSharpParser {
             }
             _ => &code[type_node.byte_range()],
         }
+    }
+
+    /// Check if a class/struct/record has a primary constructor and extract parameter info
+    ///
+    /// Returns (has_primary_constructor, parameter_signature, parameter_names)
+    fn extract_primary_constructor_info(
+        &self,
+        node: Node,
+        code: &str,
+    ) -> (bool, String, Vec<String>) {
+        // Look for parameter_list child in the type declaration
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if child.kind() == "parameter_list" {
+                // Extract all parameters
+                let mut params = Vec::new();
+                let mut param_names = Vec::new();
+
+                let mut param_cursor = child.walk();
+                for param in child.children(&mut param_cursor) {
+                    if param.kind() == "parameter" {
+                        // Extract parameter type and name
+                        // Strategy: iterate through children and collect type nodes first, then identifier
+                        let mut type_str = String::new();
+                        let mut name_str = String::new();
+                        let mut identifiers = Vec::new();
+
+                        let mut inner_cursor = param.walk();
+                        for inner_child in param.children(&mut inner_cursor) {
+                            match inner_child.kind() {
+                                "predefined_type" | "generic_name" | "qualified_name"
+                                | "nullable_type" | "array_type" => {
+                                    // These are definitely types
+                                    type_str = code[inner_child.byte_range()].to_string();
+                                }
+                                "identifier" => {
+                                    // Could be type or parameter name - collect all identifiers
+                                    identifiers.push(code[inner_child.byte_range()].to_string());
+                                }
+                                _ => {}
+                            }
+                        }
+
+                        // If we have no explicit type node but have identifiers, first one is type
+                        if type_str.is_empty() && !identifiers.is_empty() {
+                            type_str = identifiers[0].clone();
+                            if identifiers.len() > 1 {
+                                name_str = identifiers[1].clone();
+                            }
+                        } else if !identifiers.is_empty() {
+                            // We have explicit type, so first identifier is the parameter name
+                            name_str = identifiers[0].clone();
+                        }
+
+                        // If we found both type and name, add the parameter
+                        if !type_str.is_empty() && !name_str.is_empty() {
+                            params.push(format!("{type_str} {name_str}"));
+                            param_names.push(name_str);
+                        }
+                    }
+                }
+
+                if !params.is_empty() {
+                    let param_sig = format!("({})", params.join(", "));
+                    return (true, param_sig, param_names);
+                }
+            }
+        }
+
+        (false, String::new(), Vec::new())
     }
 
     /// Determine visibility from modifiers
@@ -2126,5 +2291,284 @@ mod tests {
                 .any(|i| i.path == "System.Collections.Generic")
         );
         assert!(imports.iter().any(|i| i.path == "MyApp.Services"));
+    }
+
+    #[test]
+    fn test_csharp_primary_constructor_simple_class() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class Person(string firstName, string lastName, int age)
+            {
+                public string FullName => $"{firstName} {lastName}";
+                public bool IsAdult => age >= 18;
+            }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        // Should extract Person class
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name.as_ref() == "Person" && s.kind == SymbolKind::Class),
+            "Should extract Person class"
+        );
+
+        // Should extract primary constructor
+        let ctor = symbols
+            .iter()
+            .find(|s| s.name.as_ref() == "Person" && s.kind == SymbolKind::Method);
+        assert!(ctor.is_some(), "Should extract primary constructor");
+
+        // Verify constructor signature includes parameters
+        let ctor_sig = ctor.unwrap().signature.as_ref().unwrap();
+        assert!(
+            ctor_sig.contains("string firstName"),
+            "Constructor should have firstName parameter"
+        );
+        assert!(
+            ctor_sig.contains("string lastName"),
+            "Constructor should have lastName parameter"
+        );
+        assert!(
+            ctor_sig.contains("int age"),
+            "Constructor should have age parameter"
+        );
+    }
+
+    #[test]
+    fn test_csharp_primary_constructor_struct() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public struct Point(int x, int y)
+            {
+                public int X => x;
+                public int Y => y;
+            }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        // Should extract Point struct
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name.as_ref() == "Point" && s.kind == SymbolKind::Struct),
+            "Should extract Point struct"
+        );
+
+        // Should extract primary constructor
+        let ctor = symbols
+            .iter()
+            .find(|s| s.name.as_ref() == "Point" && s.kind == SymbolKind::Method);
+        assert!(
+            ctor.is_some(),
+            "Should extract primary constructor for struct"
+        );
+
+        // Verify constructor signature
+        let ctor_sig = ctor.unwrap().signature.as_ref().unwrap();
+        assert!(
+            ctor_sig.contains("int x"),
+            "Constructor should have x parameter"
+        );
+        assert!(
+            ctor_sig.contains("int y"),
+            "Constructor should have y parameter"
+        );
+    }
+
+    #[test]
+    fn test_csharp_primary_constructor_with_inheritance() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class Person(string name, int age) { }
+            public class Employee(string name, int id) : Person(name, 0)
+            {
+                public int EmployeeId => id;
+            }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        // Should extract both classes
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name.as_ref() == "Person" && s.kind == SymbolKind::Class),
+            "Should extract Person class"
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name.as_ref() == "Employee" && s.kind == SymbolKind::Class),
+            "Should extract Employee class"
+        );
+
+        // Should extract both primary constructors
+        let person_ctor = symbols
+            .iter()
+            .find(|s| s.name.as_ref() == "Person" && s.kind == SymbolKind::Method);
+        assert!(
+            person_ctor.is_some(),
+            "Should extract Person primary constructor"
+        );
+
+        let employee_ctor = symbols
+            .iter()
+            .find(|s| s.name.as_ref() == "Employee" && s.kind == SymbolKind::Method);
+        assert!(
+            employee_ctor.is_some(),
+            "Should extract Employee primary constructor"
+        );
+
+        // Verify constructor signatures
+        let person_sig = person_ctor.unwrap().signature.as_ref().unwrap();
+        assert!(
+            person_sig.contains("string name"),
+            "Person constructor should have name parameter"
+        );
+        assert!(
+            person_sig.contains("int age"),
+            "Person constructor should have age parameter"
+        );
+
+        let employee_sig = employee_ctor.unwrap().signature.as_ref().unwrap();
+        assert!(
+            employee_sig.contains("string name"),
+            "Employee constructor should have name parameter"
+        );
+        assert!(
+            employee_sig.contains("int id"),
+            "Employee constructor should have id parameter"
+        );
+    }
+
+    #[test]
+    fn test_csharp_primary_constructor_record() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public record Customer(string Name, int Id);
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        // Should extract Customer record
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name.as_ref() == "Customer" && s.kind == SymbolKind::Class),
+            "Should extract Customer record"
+        );
+
+        // Should extract primary constructor
+        let ctor = symbols
+            .iter()
+            .find(|s| s.name.as_ref() == "Customer" && s.kind == SymbolKind::Method);
+        assert!(
+            ctor.is_some(),
+            "Should extract primary constructor for record"
+        );
+
+        // Verify constructor signature
+        let ctor_sig = ctor.unwrap().signature.as_ref().unwrap();
+        assert!(
+            ctor_sig.contains("string Name"),
+            "Constructor should have Name parameter"
+        );
+        assert!(
+            ctor_sig.contains("int Id"),
+            "Constructor should have Id parameter"
+        );
+    }
+
+    #[test]
+    fn test_csharp_primary_constructor_with_modifiers() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public sealed class Logger(string category, bool enabled)
+            {
+                public void Log(string message)
+                {
+                    if (enabled)
+                        System.Console.WriteLine($"[{category}] {message}");
+                }
+            }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        // Should extract Logger class
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name.as_ref() == "Logger" && s.kind == SymbolKind::Class),
+            "Should extract Logger class"
+        );
+
+        // Should extract primary constructor
+        let ctor = symbols
+            .iter()
+            .find(|s| s.name.as_ref() == "Logger" && s.kind == SymbolKind::Method);
+        assert!(ctor.is_some(), "Should extract primary constructor");
+
+        // Verify constructor signature
+        let ctor_sig = ctor.unwrap().signature.as_ref().unwrap();
+        assert!(
+            ctor_sig.contains("string category"),
+            "Constructor should have category parameter"
+        );
+        assert!(
+            ctor_sig.contains("bool enabled"),
+            "Constructor should have enabled parameter"
+        );
+        assert!(ctor_sig.contains("public"), "Constructor should be public");
+    }
+
+    #[test]
+    fn test_csharp_class_without_primary_constructor() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class Traditional
+            {
+                private string _name;
+
+                public Traditional(string name)
+                {
+                    _name = name;
+                }
+            }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        // Should extract Traditional class
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name.as_ref() == "Traditional" && s.kind == SymbolKind::Class),
+            "Should extract Traditional class"
+        );
+
+        // Should extract the traditional constructor (not primary)
+        let ctors: Vec<_> = symbols
+            .iter()
+            .filter(|s| s.name.as_ref() == "Traditional" && s.kind == SymbolKind::Method)
+            .collect();
+
+        // Should have exactly one constructor (the traditional one)
+        assert_eq!(ctors.len(), 1, "Should have exactly one constructor");
     }
 }
