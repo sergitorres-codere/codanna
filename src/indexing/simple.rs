@@ -976,10 +976,15 @@ impl SimpleIndexer {
         module_path: &Option<String>,
         behavior: &dyn crate::parsing::LanguageBehavior,
     ) {
-        // Delegate full configuration to the language behavior.
-        // This allows languages to preserve parser-derived visibility and
-        // apply custom module path rules.
-        behavior.configure_symbol(symbol, module_path.as_deref());
+        // Only configure if module_path is not already set by the parser
+        // This allows parsers to set the correct namespace directly
+        // (e.g., C# parser extracts namespace declarations and sets them on symbols)
+        if symbol.module_path.is_none() {
+            // Delegate full configuration to the language behavior.
+            // This allows languages to preserve parser-derived visibility and
+            // apply custom module path rules.
+            behavior.configure_symbol(symbol, module_path.as_deref());
+        }
 
         debug_print!(
             self,
