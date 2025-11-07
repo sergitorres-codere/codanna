@@ -33,7 +33,7 @@ use crate::parsing::{
 use crate::types::SymbolCounter;
 use crate::{FileId, Range, Symbol, SymbolKind, Visibility};
 use std::any::Any;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use tree_sitter::{Language, Node, Parser};
 
 /// C# language parser using tree-sitter
@@ -61,6 +61,12 @@ pub struct CSharpParser {
     parser: Parser,
     context: ParserContext,
     node_tracker: NodeTrackingState,
+    /// Track locally defined types (classes, interfaces, structs, enums, records)
+    /// to distinguish them from external types
+    local_types: HashSet<String>,
+    /// Track external type references we've seen
+    /// Maps type name -> namespace (if known)
+    external_type_refs: HashMap<String, Option<String>>,
 }
 
 impl CSharpParser {
@@ -105,11 +111,18 @@ impl CSharpParser {
     ) -> Vec<Symbol> {
         // Reset context for each file
         self.context = ParserContext::new();
+        self.local_types.clear();
+        self.external_type_refs.clear();
         let mut symbols = Vec::new();
 
         match self.parser.parse(code, None) {
             Some(tree) => {
                 let root_node = tree.root_node();
+
+                // First pass: collect all locally-defined type names
+                self.collect_local_types(root_node, code);
+
+                // Second pass: extract symbols (now with complete local type info)
                 self.extract_symbols_from_node(
                     root_node,
                     code,
@@ -140,6 +153,8 @@ impl CSharpParser {
             parser,
             context: ParserContext::new(),
             node_tracker: NodeTrackingState::new(),
+            local_types: HashSet::new(),
+            external_type_refs: HashMap::new(),
         })
     }
 
@@ -447,6 +462,10 @@ impl CSharpParser {
         module_path: &str,
     ) -> Option<Symbol> {
         let name = self.extract_type_name(node, code)?;
+
+        // Record as locally-defined type
+        self.record_local_type(&name);
+
         let signature = self.extract_class_signature(node, code);
         let doc_comment = self.extract_doc_comment(&node, code);
         let visibility = self.determine_visibility(node, code);
@@ -479,6 +498,10 @@ impl CSharpParser {
         module_path: &str,
     ) -> Option<Symbol> {
         let name = self.extract_type_name(node, code)?;
+
+        // Record as locally-defined type
+        self.record_local_type(&name);
+
         let signature = self.extract_interface_signature(node, code);
         let doc_comment = self.extract_doc_comment(&node, code);
         let visibility = self.determine_visibility(node, code);
@@ -511,6 +534,10 @@ impl CSharpParser {
         module_path: &str,
     ) -> Option<Symbol> {
         let name = self.extract_type_name(node, code)?;
+
+        // Record as locally-defined type
+        self.record_local_type(&name);
+
         let signature = self.extract_struct_signature(node, code);
         let doc_comment = self.extract_doc_comment(&node, code);
         let visibility = self.determine_visibility(node, code);
@@ -543,6 +570,10 @@ impl CSharpParser {
         module_path: &str,
     ) -> Option<Symbol> {
         let name = self.extract_type_name(node, code)?;
+
+        // Record as locally-defined type
+        self.record_local_type(&name);
+
         let signature = self.extract_enum_signature(node, code);
         let doc_comment = self.extract_doc_comment(&node, code);
         let visibility = self.determine_visibility(node, code);
@@ -575,6 +606,10 @@ impl CSharpParser {
         module_path: &str,
     ) -> Option<Symbol> {
         let name = self.extract_type_name(node, code)?;
+
+        // Record as locally-defined type
+        self.record_local_type(&name);
+
         let signature = self.extract_record_signature(node, code);
         let doc_comment = self.extract_doc_comment(&node, code);
         let visibility = self.determine_visibility(node, code);
@@ -1586,6 +1621,22 @@ impl CSharpParser {
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
             if child.kind() == "variable_declaration" {
+                // Check if the variable declaration has a type node
+                if let Some(type_node) = child.child_by_field_name("type") {
+                    // Extract and track external type if applicable
+                    if let Some(type_name) = self.extract_type_from_node(type_node, code) {
+                        self.track_external_type_reference(
+                            type_name,
+                            type_node,
+                            code,
+                            file_id,
+                            counter,
+                            symbols,
+                            module_path,
+                        );
+                    }
+                }
+
                 // Extract each variable declarator
                 let mut var_cursor = child.walk();
                 for var_child in child.children(&mut var_cursor) {
@@ -1947,6 +1998,142 @@ impl LanguageParser for CSharpParser {
     }
 }
 
+impl CSharpParser {
+    /// Collect all locally-defined type names in a first pass
+    fn collect_local_types(&mut self, node: Node, code: &str) {
+        match node.kind() {
+            "class_declaration"
+            | "interface_declaration"
+            | "struct_declaration"
+            | "enum_declaration"
+            | "record_declaration" => {
+                if let Some(name) = self.extract_type_name(node, code) {
+                    self.local_types.insert(name);
+                }
+            }
+            _ => {}
+        }
+
+        // Recursively process all children
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            self.collect_local_types(child, code);
+        }
+    }
+
+    /// Record a locally-defined type (class, interface, struct, enum, record)
+    fn record_local_type(&mut self, type_name: &str) {
+        self.local_types.insert(type_name.to_string());
+    }
+
+    /// Check if a type is a C# primitive or well-known framework type
+    fn is_known_type(type_name: &str) -> bool {
+        matches!(
+            type_name,
+            "bool"
+                | "byte"
+                | "sbyte"
+                | "char"
+                | "decimal"
+                | "double"
+                | "float"
+                | "int"
+                | "uint"
+                | "long"
+                | "ulong"
+                | "short"
+                | "ushort"
+                | "object"
+                | "string"
+                | "void"
+                | "var"
+                | "dynamic"
+                | "String"
+                | "Object"
+                | "Int32"
+                | "Int64"
+                | "Boolean"
+        )
+    }
+
+    /// Extract type name from a type node (handles identifiers, generic names, qualified names)
+    fn extract_type_from_node<'a>(&self, type_node: Node, code: &'a str) -> Option<&'a str> {
+        match type_node.kind() {
+            "identifier" => Some(&code[type_node.byte_range()]),
+            "generic_name" => {
+                // For generic types like List<T>, extract just "List"
+                if let Some(ident) = type_node.child_by_field_name("name") {
+                    Some(&code[ident.byte_range()])
+                } else {
+                    None
+                }
+            }
+            "qualified_name" => {
+                // For qualified names like System.String, extract the last part
+                let mut cursor = type_node.walk();
+                let mut last_ident = None;
+                for child in type_node.children(&mut cursor) {
+                    if child.kind() == "identifier" {
+                        last_ident = Some(&code[child.byte_range()]);
+                    }
+                }
+                last_ident
+            }
+            _ => None,
+        }
+    }
+
+    /// Track and potentially create an external type symbol
+    fn track_external_type_reference(
+        &mut self,
+        type_name: &str,
+        type_node: Node,
+        _code: &str,
+        file_id: FileId,
+        counter: &mut SymbolCounter,
+        symbols: &mut Vec<Symbol>,
+        module_path: &str,
+    ) {
+        // Skip if it's a primitive or well-known type
+        if Self::is_known_type(type_name) {
+            return;
+        }
+
+        // Skip if it's a locally-defined type
+        if self.local_types.contains(type_name) {
+            return;
+        }
+
+        // Skip if we've already tracked this external type
+        if self.external_type_refs.contains_key(type_name) {
+            return;
+        }
+
+        // Mark as tracked
+        self.external_type_refs.insert(type_name.to_string(), None);
+
+        // Create an ExternalType symbol
+        let symbol = self.create_symbol(
+            counter.next_id(),
+            type_name.to_string(),
+            SymbolKind::ExternalType,
+            file_id,
+            Range::new(
+                type_node.start_position().row as u32 + 1,
+                type_node.start_position().column as u16,
+                type_node.end_position().row as u32 + 1,
+                type_node.end_position().column as u16,
+            ),
+            Some(format!("external type: {type_name}")),
+            None,
+            module_path,
+            Visibility::Public, // External types are assumed public
+        );
+
+        symbols.push(symbol);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2126,5 +2313,232 @@ mod tests {
                 .any(|i| i.path == "System.Collections.Generic")
         );
         assert!(imports.iter().any(|i| i.path == "MyApp.Services"));
+    }
+
+    #[test]
+    fn test_csharp_external_type_tracking() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            using System;
+            using System.Collections.Generic;
+
+            public class MyClass {
+                private StringBuilder builder;
+                private HttpClient client;
+                private int count;
+            }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        // Debug: print all symbols
+        let external_types: Vec<_> = symbols
+            .iter()
+            .filter(|s| s.kind == SymbolKind::ExternalType)
+            .map(|s| s.name.as_ref())
+            .collect();
+        eprintln!("External types found: {:?}", external_types);
+
+        // Should find MyClass as a local type
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name.as_ref() == "MyClass" && s.kind == SymbolKind::Class)
+        );
+
+        // Should find StringBuilder as an external type (not a primitive)
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name.as_ref() == "StringBuilder" && s.kind == SymbolKind::ExternalType),
+            "Should track StringBuilder as external type. Found: {:?}",
+            external_types
+        );
+
+        // Should find HttpClient as an external type
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name.as_ref() == "HttpClient" && s.kind == SymbolKind::ExternalType),
+            "Should track HttpClient as external type. Found: {:?}",
+            external_types
+        );
+
+        // Should NOT find int as external type (it's a primitive)
+        assert!(
+            !symbols
+                .iter()
+                .any(|s| s.name.as_ref() == "int" && s.kind == SymbolKind::ExternalType),
+            "Should not track int as external type"
+        );
+    }
+
+    #[test]
+    fn test_csharp_local_vs_external_types() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class Person {
+                private string name;
+            }
+
+            public class Employee {
+                private Person person;
+                private Company company;
+            }
+
+            public interface Company {
+            }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        // Person, Employee, Company should be local types
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name.as_ref() == "Person" && s.kind == SymbolKind::Class)
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name.as_ref() == "Employee" && s.kind == SymbolKind::Class)
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name.as_ref() == "Company" && s.kind == SymbolKind::Interface)
+        );
+
+        // Person should NOT be an external type (it's defined locally)
+        assert!(
+            !symbols
+                .iter()
+                .any(|s| s.name.as_ref() == "Person" && s.kind == SymbolKind::ExternalType),
+            "Person should not be tracked as external type"
+        );
+
+        // Company should NOT be an external type (it's defined locally)
+        assert!(
+            !symbols
+                .iter()
+                .any(|s| s.name.as_ref() == "Company" && s.kind == SymbolKind::ExternalType),
+            "Company should not be tracked as external type"
+        );
+    }
+
+    #[test]
+    fn test_csharp_external_type_no_duplicates() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class MyClass {
+                private HttpClient client1;
+                private HttpClient client2;
+                private HttpClient client3;
+            }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        // Should only track HttpClient once as external type
+        let external_http_clients: Vec<_> = symbols
+            .iter()
+            .filter(|s| s.name.as_ref() == "HttpClient" && s.kind == SymbolKind::ExternalType)
+            .collect();
+
+        assert_eq!(
+            external_http_clients.len(),
+            1,
+            "Should only track HttpClient once as external type, found: {}",
+            external_http_clients.len()
+        );
+    }
+
+    #[test]
+    fn test_csharp_external_type_primitives() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public class MyClass {
+                private int intValue;
+                private string stringValue;
+                private bool boolValue;
+                private double doubleValue;
+                private decimal decimalValue;
+                private object objValue;
+                private void VoidMethod() { }
+            }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        // None of the primitives should be tracked as external types
+        let primitive_names = [
+            "int", "string", "bool", "double", "decimal", "object", "void",
+        ];
+        for prim in &primitive_names {
+            assert!(
+                !symbols
+                    .iter()
+                    .any(|s| s.name.as_ref() == *prim && s.kind == SymbolKind::ExternalType),
+                "{} should not be tracked as external type",
+                prim
+            );
+        }
+    }
+
+    #[test]
+    fn test_csharp_external_type_struct_and_enum() {
+        let mut parser = CSharpParser::new().unwrap();
+        let code = r#"
+            public struct MyStruct {
+                private DateTime created;
+            }
+
+            public enum MyEnum {
+                Value1,
+                Value2
+            }
+
+            public record MyRecord {
+                private Guid Id;
+            }
+        "#;
+
+        let file_id = FileId::new(1).unwrap();
+        let mut counter = SymbolCounter::new();
+        let symbols = parser.parse(code, file_id, &mut counter);
+
+        // MyStruct, MyEnum, MyRecord should be local types
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name.as_ref() == "MyStruct" && s.kind == SymbolKind::Struct)
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name.as_ref() == "MyEnum" && s.kind == SymbolKind::Enum)
+        );
+
+        // DateTime and Guid should be external types
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name.as_ref() == "DateTime" && s.kind == SymbolKind::ExternalType),
+            "Should track DateTime as external type"
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name.as_ref() == "Guid" && s.kind == SymbolKind::ExternalType),
+            "Should track Guid as external type"
+        );
     }
 }
