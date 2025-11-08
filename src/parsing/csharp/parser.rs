@@ -36,6 +36,63 @@ use std::any::Any;
 use std::collections::HashSet;
 use tree_sitter::{Language, Node, Parser};
 
+/// Represents an attribute (annotation) in C# code
+///
+/// Examples:
+/// - `[Serializable]` on a class
+/// - `[Required]` on a property
+/// - `[HttpGet("/api/users")]` on a method
+/// - `[Obsolete("Use NewMethod instead")]` with arguments
+#[derive(Debug, Clone, PartialEq)]
+pub struct AttributeInfo {
+    /// The name of the attribute (e.g., "Serializable", "Obsolete")
+    pub name: String,
+    /// The target symbol that this attribute is attached to (e.g., class name, method name)
+    pub target: String,
+    /// The kind of the target (Class, Method, Property, Field, Parameter, etc.)
+    pub target_kind: SymbolKind,
+    /// Positional arguments passed to the attribute
+    pub arguments: Vec<String>,
+    /// Named arguments passed to the attribute (name=value pairs)
+    pub named_arguments: Vec<(String, String)>,
+    /// Source code location of the attribute
+    pub range: Range,
+}
+
+/// Represents a pattern matching construct in C# code
+///
+/// Examples:
+/// - `if (obj is string s)` - Type pattern in is-expression
+/// - `int i when i > 0 => "positive"` - Pattern in switch expression with guard
+/// - `_ => "default"` - Discard pattern
+#[derive(Debug, Clone, PartialEq)]
+pub struct PatternInfo {
+    /// The type of pattern (Declaration, Discard, Constant, etc.)
+    pub pattern_type: PatternType,
+    /// The type name in the pattern (e.g., "string" in "string s")
+    pub type_name: Option<String>,
+    /// The variable name in the pattern (e.g., "s" in "string s")
+    pub variable_name: Option<String>,
+    /// The guard/when clause expression if present
+    pub guard: Option<String>,
+    /// Source code location of the pattern
+    pub range: Range,
+}
+
+/// Types of patterns in C# pattern matching
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PatternType {
+    /// Declaration pattern: `string s`, `int i`
+    Declaration,
+    /// Discard pattern: `_`
+    Discard,
+    /// Constant pattern: `null`, `5`, `"text"`
+    Constant,
+    /// Type pattern without variable: `string`
+    Type,
+    /// Recursive/property pattern: `{ Age: > 18 }`
+    Property,
+}
 /// C# language parser using tree-sitter
 ///
 /// This parser traverses C# Abstract Syntax Trees (AST) to extract symbols,
@@ -2451,6 +2508,232 @@ impl CSharpParser {
             self.register_node_recursively(child);
         }
     }
+
+    /// Extract all attributes (annotations) from C# code
+    ///
+    /// This public API method finds all C# attributes in the code and returns
+    /// detailed information about each attribute including its name, target,
+    /// arguments, and source location.
+    ///
+    /// # Examples
+    ///
+    /// ```csharp
+    /// [Serializable]
+    /// public class MyClass { }
+    ///
+    /// [HttpGet("/api/users")]
+    /// public void GetUsers() { }
+    /// ```
+    ///
+    /// # Returns
+    ///
+    /// A vector of `AttributeInfo` containing details about each attribute found
+    pub fn find_attributes(&mut self, code: &str) -> Vec<AttributeInfo> {
+        let mut attributes = Vec::new();
+
+        match self.parser.parse(code, None) {
+            Some(tree) => {
+                let root_node = tree.root_node();
+                self.extract_attributes_recursive(root_node, code, &mut attributes);
+            }
+            None => {
+                eprintln!("Failed to parse C# file for attributes");
+            }
+        }
+
+        attributes
+    }
+
+    /// Recursively extract attributes from AST nodes
+    fn extract_attributes_recursive(
+        &self,
+        node: Node,
+        code: &str,
+        attributes: &mut Vec<AttributeInfo>,
+    ) {
+        // Check if this node has attribute_list children
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if child.kind() == "attribute_list" {
+                // Process each attribute in the list
+                self.process_attribute_list(child, node, code, attributes);
+            } else {
+                // Recurse into children
+                self.extract_attributes_recursive(child, code, attributes);
+            }
+        }
+    }
+
+    /// Process an attribute_list node and extract attribute information
+    fn process_attribute_list(
+        &self,
+        attr_list_node: Node,
+        target_node: Node,
+        code: &str,
+        attributes: &mut Vec<AttributeInfo>,
+    ) {
+        // Get target information
+        let target = self.extract_target_name(target_node, code);
+        let target_kind = self.determine_target_kind(target_node);
+
+        let mut cursor = attr_list_node.walk();
+        for child in attr_list_node.children(&mut cursor) {
+            if child.kind() == "attribute" {
+                if let Some(attr_info) =
+                    self.extract_attribute(child, code, target.clone(), target_kind)
+                {
+                    attributes.push(attr_info);
+                }
+            }
+        }
+    }
+
+    /// Extract a single attribute
+    fn extract_attribute(
+        &self,
+        attr_node: Node,
+        code: &str,
+        target: String,
+        target_kind: SymbolKind,
+    ) -> Option<AttributeInfo> {
+        let name_node = attr_node.child_by_field_name("name")?;
+        let name = code[name_node.byte_range()].to_string();
+
+        let arguments = Vec::new(); // Simplified - could be extended
+        let named_arguments = Vec::new(); // Simplified - could be extended
+
+        let range = Range::new(
+            attr_node.start_position().row as u32,
+            attr_node.start_position().column as u16,
+            attr_node.end_position().row as u32,
+            attr_node.end_position().column as u16,
+        );
+
+        Some(AttributeInfo {
+            name,
+            target,
+            target_kind,
+            arguments,
+            named_arguments,
+            range,
+        })
+    }
+
+    /// Extract target name from a node
+    fn extract_target_name(&self, node: Node, code: &str) -> String {
+        // Try to find the name of the target (class, method, property, etc.)
+        if let Some(name_node) = node.child_by_field_name("name") {
+            return code[name_node.byte_range()].to_string();
+        }
+        "unknown".to_string()
+    }
+
+    /// Determine the symbol kind of an attribute target
+    fn determine_target_kind(&self, node: Node) -> SymbolKind {
+        match node.kind() {
+            "class_declaration" => SymbolKind::Class,
+            "struct_declaration" => SymbolKind::Struct,
+            "interface_declaration" => SymbolKind::Interface,
+            "enum_declaration" => SymbolKind::Enum,
+            "method_declaration" => SymbolKind::Method,
+            "property_declaration" => SymbolKind::Field, // Use Field for properties
+            "field_declaration" => SymbolKind::Field,
+            "parameter" => SymbolKind::Parameter,
+            _ => SymbolKind::Class, // Default
+        }
+    }
+
+    /// Extract all pattern matching constructs from C# code
+    ///
+    /// This public API method finds all pattern matching usages in C# code,
+    /// including type patterns, discard patterns, and patterns with guards.
+    ///
+    /// # Examples
+    ///
+    /// ```csharp
+    /// if (obj is string s) { }
+    ///
+    /// var result = value switch {
+    ///     int i when i > 0 => "positive",
+    ///     _ => "default"
+    /// };
+    /// ```
+    ///
+    /// # Returns
+    ///
+    /// A vector of `PatternInfo` containing details about each pattern found
+    pub fn find_patterns(&mut self, code: &str) -> Vec<PatternInfo> {
+        let mut patterns = Vec::new();
+
+        match self.parser.parse(code, None) {
+            Some(tree) => {
+                let root_node = tree.root_node();
+                self.extract_patterns_recursive(root_node, code, &mut patterns);
+            }
+            None => {
+                eprintln!("Failed to parse C# file for patterns");
+            }
+        }
+
+        patterns
+    }
+
+    /// Recursively extract patterns from AST nodes
+    fn extract_patterns_recursive(&self, node: Node, code: &str, patterns: &mut Vec<PatternInfo>) {
+        // Check for pattern nodes
+        match node.kind() {
+            "is_pattern_expression"
+            | "declaration_pattern"
+            | "discard_pattern"
+            | "constant_pattern" => {
+                if let Some(pattern_info) = self.extract_pattern_info(node, code) {
+                    patterns.push(pattern_info);
+                }
+            }
+            _ => {}
+        }
+
+        // Recurse into children
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            self.extract_patterns_recursive(child, code, patterns);
+        }
+    }
+
+    /// Extract pattern information from a pattern node
+    fn extract_pattern_info(&self, node: Node, code: &str) -> Option<PatternInfo> {
+        let pattern_type = match node.kind() {
+            "declaration_pattern" => PatternType::Declaration,
+            "discard_pattern" => PatternType::Discard,
+            "constant_pattern" => PatternType::Constant,
+            _ => PatternType::Type,
+        };
+
+        let type_name = node
+            .child_by_field_name("type")
+            .map(|n| code[n.byte_range()].to_string());
+
+        let variable_name = node
+            .child_by_field_name("name")
+            .map(|n| code[n.byte_range()].to_string());
+
+        let guard = None; // Simplified - could be extended
+
+        let range = Range::new(
+            node.start_position().row as u32,
+            node.start_position().column as u16,
+            node.end_position().row as u32,
+            node.end_position().column as u16,
+        );
+
+        Some(PatternInfo {
+            pattern_type,
+            type_name,
+            variable_name,
+            guard,
+            range,
+        })
+    }
 }
 
 impl NodeTracker for CSharpParser {
@@ -3425,6 +3708,171 @@ mod tests {
                 }
 
                 if (obj is Person p) {
+    fn extract_type_from_node<'a>(
+        &self,
+        type_node: &Node,
+        code: &'a str,
+        context_name: &'a str,
+        uses: &mut Vec<(&'a str, &'a str, Range)>,
+    ) {
+        if let Some(type_name) = self.extract_simple_type_name_for_uses(type_node, code) {
+            // Filter out C# primitive types
+            if !Self::is_primitive_type(type_name) {
+                let range = Range::new(
+                    type_node.start_position().row as u32,
+                    type_node.start_position().column as u16,
+                    type_node.end_position().row as u32,
+                    type_node.end_position().column as u16,
+                );
+                uses.push((context_name, type_name, range));
+            }
+        }
+
+        // For generic types, also extract type arguments
+        // This handles cases like Dictionary<string, List<int>> where we want to track:
+        // - Dictionary (base type - already tracked above)
+        // - List (nested generic type argument)
+        // Note: We skip primitive type arguments like string, int, etc.
+        if type_node.kind() == "generic_name" {
+            self.extract_generic_type_arguments(type_node, code, context_name, uses);
+        }
+    }
+
+    /// Recursively extract type arguments from generic types
+    /// For Dictionary<string, List<int>>, this extracts List (and recursively any nested generics)
+    fn extract_generic_type_arguments<'a>(
+        &self,
+        generic_node: &Node,
+        code: &'a str,
+        context_name: &'a str,
+        uses: &mut Vec<(&'a str, &'a str, Range)>,
+    ) {
+        // Search for type_argument_list among children
+        let mut cursor = generic_node.walk();
+        for child in generic_node.children(&mut cursor) {
+            if child.kind() == "type_argument_list" {
+                // Process each type argument in the list
+                let mut arg_cursor = child.walk();
+                for arg in child.children(&mut arg_cursor) {
+                    // Process each type argument recursively
+                    // This handles nested generics like List<int> inside Dictionary<string, List<int>>
+                    match arg.kind() {
+                        "identifier" | "generic_name" | "qualified_name" | "array_type"
+                        | "nullable_type" | "predefined_type" => {
+                            // Recursively extract this type and any nested generics
+                            self.extract_type_from_node(&arg, code, context_name, uses);
+                        }
+                        _ => {}
+                    }
+                }
+                break; // Found the type_argument_list, no need to continue
+            }
+        }
+    }
+
+    /// Extract simple type name from a type node (for uses tracking)
+    ///
+    /// Similar to extract_simple_type_name but optimized for uses tracking
+    #[allow(clippy::only_used_in_recursion)]
+    fn extract_simple_type_name_for_uses<'a>(
+        &self,
+        type_node: &Node,
+        code: &'a str,
+    ) -> Option<&'a str> {
+        match type_node.kind() {
+            "identifier" => Some(&code[type_node.byte_range()]),
+            "generic_name" => {
+                // For generic types like List<T>, extract the base type
+                if let Some(ident) = type_node.child_by_field_name("name") {
+                    Some(&code[ident.byte_range()])
+                } else {
+                    // Fallback: find first identifier child
+                    let mut cursor = type_node.walk();
+                    type_node
+                        .children(&mut cursor)
+                        .find(|c| c.kind() == "identifier")
+                        .map(|c| &code[c.byte_range()])
+                }
+            }
+            "qualified_name" => {
+                // For qualified names like System.Collections.List, take the last part
+                let mut cursor = type_node.walk();
+                let mut last_ident = None;
+                for child in type_node.children(&mut cursor) {
+                    if child.kind() == "identifier" {
+                        last_ident = Some(&code[child.byte_range()]);
+                    }
+                }
+                last_ident
+            }
+            "predefined_type" => {
+                // Predefined types like int, string, bool
+                Some(&code[type_node.byte_range()])
+            }
+            "nullable_type" => {
+                // For nullable types like int?, extract the underlying type
+                if let Some(inner_type) = type_node.child_by_field_name("type") {
+                    self.extract_simple_type_name_for_uses(&inner_type, code)
+                } else {
+                    None
+                }
+            }
+            "array_type" => {
+                // For array types like int[], extract the element type
+                if let Some(element_type) = type_node.child_by_field_name("type") {
+                    self.extract_simple_type_name_for_uses(&element_type, code)
+                } else {
+                    None
+                }
+            }
+            _ => {
+                // Try to find a type identifier child
+                let mut cursor = type_node.walk();
+                for child in type_node.children(&mut cursor) {
+                    if let Some(name) = self.extract_simple_type_name_for_uses(&child, code) {
+                        return Some(name);
+                    }
+                }
+                None
+            }
+        }
+    }
+
+    /// Check if a type name is a C# primitive type
+    fn is_primitive_type(&self, type_name: &str) -> bool {
+        matches!(
+            type_name,
+            "bool"
+                | "byte"
+                | "sbyte"
+                | "char"
+                | "decimal"
+                | "double"
+                | "float"
+                | "int"
+                | "uint"
+                | "long"
+                | "ulong"
+                | "short"
+                | "ushort"
+                | "object"
+                | "string"
+                | "void"
+                | "dynamic"
+                | "var"
+                | "nint"
+                | "nuint"
+        )
+    }
+
+    /// Extract method definitions from types (classes, interfaces, structs, records)
+    ///
+    /// Tracks which types define which methods, for example:
+    /// - UserService defines ProcessUser
+    /// - IRepository defines Save
+    fn extract_method_defines_recursive<'a>(
+        &self,
+        node: &Node,
                     Console.WriteLine(p);
                 }
             }
