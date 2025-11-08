@@ -8,21 +8,36 @@
 //! - Visibility modifier handling (public, private, internal, protected)
 //! - Signature extraction for methods and types
 //! - Namespace/module path tracking
+//! - Variable type inference for local variables
+//! - XML documentation comment extraction
 //!
 //! **Tree-sitter ABI Version**: ABI-14 (tree-sitter-c-sharp 0.23.1)
 //! **Total supported node types**: 503
 //!
 //! # Architecture
 //!
-//! The parser maintains scope context while traversing the AST to correctly
-//! identify which method/class is making each call. This is critical for
-//! relationship resolution.
+//! The parser maintains a scope stack while traversing the AST to correctly
+//! track which class/method is making each call. This scope context is essential
+//! for accurate relationship resolution and is automatically attached to all
+//! extracted symbols.
+//!
+//! Key design decisions:
+//! - **Scope tracking** - Maintains class/method context during traversal
+//! - **Raw XML docs** - Preserves XML structure for future structured parsing
+//! - **Type inference** - Extracts types from `new Type()` and explicit annotations
+//! - **Heuristic-based** - Uses naming conventions (e.g., 'I' prefix for interfaces)
+//!
+//! # Documentation
+//!
+//! All public and complex private functions have comprehensive doc comments.
+//! See individual function documentation for implementation details and examples.
 //!
 //! # Limitations
 //!
 //! - Type usage tracking (find_uses) is not yet implemented
 //! - Define relationships (containment) are not yet implemented
 //! - External framework references (e.g., System.Console) require special handling
+//! - Interface detection relies on 'I' prefix naming convention
 
 use crate::parsing::Import;
 use crate::parsing::parser::check_recursion_depth;
@@ -64,7 +79,26 @@ pub struct CSharpParser {
 }
 
 impl CSharpParser {
-    /// Helper to create a symbol with all optional fields
+    /// Create a symbol with all optional fields and scope context
+    ///
+    /// This is a convenience method that creates a Symbol with all metadata fields
+    /// and automatically sets the scope context from the parser's current state.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - Unique symbol identifier
+    /// * `name` - Symbol name (class, method, property, etc.)
+    /// * `kind` - Symbol kind (Class, Method, Property, etc.)
+    /// * `file_id` - File where this symbol is defined
+    /// * `range` - Source location range
+    /// * `signature` - Optional signature (e.g., "public class Foo<T>")
+    /// * `doc_comment` - Optional XML documentation comment
+    /// * `module_path` - Namespace path (e.g., "MyApp.Services")
+    /// * `visibility` - Public, Private, Internal, etc.
+    ///
+    /// # Returns
+    ///
+    /// A fully initialized Symbol with scope context set from current parser state
     fn create_symbol(
         &self,
         id: crate::types::SymbolId,
@@ -143,7 +177,29 @@ impl CSharpParser {
         })
     }
 
-    /// Extract symbols from a C# node
+    /// Extract symbols from a C# AST node (recursive)
+    ///
+    /// This is the main recursive traversal function that walks the tree-sitter AST
+    /// and extracts all symbols (classes, methods, properties, etc.) while maintaining
+    /// proper scope context.
+    ///
+    /// # Scope Management
+    ///
+    /// The parser maintains a scope stack to track the current context (class/method)
+    /// which is essential for:
+    /// - Setting correct scope_context on symbols
+    /// - Identifying callers for method invocations
+    /// - Tracking nested types and local functions
+    ///
+    /// # Arguments
+    ///
+    /// * `node` - Current AST node to process
+    /// * `code` - Source code string
+    /// * `file_id` - File identifier
+    /// * `counter` - Symbol ID counter for unique IDs
+    /// * `symbols` - Accumulated symbol list
+    /// * `module_path` - Current namespace path (e.g., "MyApp.Services")
+    /// * `depth` - Recursion depth (for stack overflow protection)
     fn extract_symbols_from_node(
         &mut self,
         node: Node,
@@ -890,7 +946,30 @@ impl CSharpParser {
         }
     }
 
-    /// Extract interface implementations from a node tree
+    /// Extract interface implementations from AST recursively
+    ///
+    /// Identifies which classes implement which interfaces by examining base_list nodes.
+    ///
+    /// # C# Inheritance Syntax
+    ///
+    /// ```csharp
+    /// public class MyClass : BaseClass, IFoo, IBar { }
+    /// ```
+    ///
+    /// The base_list can contain:
+    /// - Base class (optional, must be first if present)
+    /// - Interface implementations (any number)
+    ///
+    /// # Heuristic for Interface Detection
+    ///
+    /// This implementation uses the C# naming convention: interfaces typically
+    /// start with 'I' followed by an uppercase letter (e.g., ILogger, IDisposable).
+    /// This heuristic filters out base classes from the base_list.
+    ///
+    /// # Known Limitation
+    ///
+    /// Non-conventional interface names (not starting with 'I') won't be detected.
+    /// A more robust approach would require full type resolution.
     fn extract_implementations_from_node<'a>(
         node: Node,
         code: &'a str,
@@ -945,7 +1024,25 @@ impl CSharpParser {
         }
     }
 
-    /// Extract imports from a node tree
+    /// Extract using directives (imports) from AST recursively
+    ///
+    /// Processes `using_directive` nodes to extract namespace imports.
+    ///
+    /// # C# Using Directives
+    ///
+    /// C# supports several forms of using directives:
+    /// - `using System;` - Namespace import
+    /// - `using System.Collections.Generic;` - Qualified namespace
+    /// - `using static System.Math;` - Static import (not currently tracked)
+    /// - `using MyAlias = System.Collections.Generic.List;` - Aliases (not fully tracked)
+    ///
+    /// Currently, this implementation extracts the basic namespace path.
+    ///
+    /// # Tree-sitter Quirks
+    ///
+    /// The tree-sitter C# grammar doesn't consistently expose a "name" field
+    /// for using_directive nodes, so we fall back to searching for qualified_name
+    /// or identifier children.
     fn extract_imports_from_node(
         node: Node,
         code: &str,
@@ -994,7 +1091,28 @@ impl CSharpParser {
         }
     }
 
-    /// Helper to extract signature excluding the body
+    /// Extract signature text excluding the implementation body
+    ///
+    /// This helper extracts the declaration portion of a node without its body.
+    /// For example, for a method:
+    ///
+    /// ```csharp
+    /// public async Task<int> Calculate(int x) { return x * 2; }
+    /// ```
+    ///
+    /// Returns: `"public async Task<int> Calculate(int x)"`
+    ///
+    /// # Arguments
+    ///
+    /// * `node` - The declaration node (class, method, property, etc.)
+    /// * `code` - Source code string
+    /// * `body_kind` - The AST node kind for the body (e.g., "method_body", "class_body")
+    ///
+    /// # Implementation
+    ///
+    /// Searches for the first child node matching `body_kind` and extracts all
+    /// text before it. This captures modifiers, return type, name, parameters,
+    /// constraints, etc.
     fn extract_signature_excluding_body(&self, node: Node, code: &str, body_kind: &str) -> String {
         let start = node.start_byte();
         let mut end = node.end_byte();
@@ -1223,7 +1341,26 @@ impl CSharpParser {
         }
     }
 
-    /// Determine visibility from modifiers
+    /// Determine visibility from C# access modifiers
+    ///
+    /// Analyzes the modifier nodes in the AST and applies C# default visibility rules.
+    ///
+    /// # C# Visibility Rules
+    ///
+    /// **Explicit modifiers** (in order of precedence):
+    /// - `public` → Visibility::Public
+    /// - `private` → Visibility::Private
+    /// - `protected` → Visibility::Module (closest approximation)
+    /// - `internal` → Visibility::Module
+    ///
+    /// **Default visibility** (when no modifier present):
+    /// - Class members (methods, fields, properties) → Private
+    /// - Top-level types (classes, interfaces, structs) → Internal (Module)
+    ///
+    /// # Note
+    ///
+    /// C#'s `protected` and `internal` are both mapped to `Visibility::Module` as
+    /// the closest approximation in Codanna's visibility model.
     fn determine_visibility(&self, node: Node, code: &str) -> Visibility {
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
@@ -1248,7 +1385,34 @@ impl CSharpParser {
         }
     }
 
-    /// Extract documentation comment
+    /// Extract C# XML documentation comments
+    ///
+    /// Collects consecutive `///` comments immediately before a symbol and returns
+    /// them as a single documentation string. The raw XML is preserved for future
+    /// structured parsing.
+    ///
+    /// # C# Documentation Format
+    ///
+    /// C# uses XML documentation comments that start with `///`:
+    /// ```csharp
+    /// /// <summary>
+    /// /// Performs a calculation
+    /// /// </summary>
+    /// /// <param name="x">First value</param>
+    /// public int Calculate(int x) { ... }
+    /// ```
+    ///
+    /// # Extraction Algorithm
+    ///
+    /// 1. Walk backwards through AST siblings starting from the symbol
+    /// 2. Collect all consecutive `///` comments
+    /// 3. Stop at first non-`///` comment or non-comment node
+    /// 4. Reverse and join to restore original order
+    ///
+    /// # Returns
+    ///
+    /// - `Some(String)` - The full documentation text with all `///` lines joined
+    /// - `None` - No documentation found
     fn extract_doc_comment(&self, node: &Node, code: &str) -> Option<String> {
         // Collect all consecutive /// comments immediately before this node
         let mut doc_lines = Vec::new();
@@ -1281,9 +1445,28 @@ impl CSharpParser {
         }
     }
 
-    // Placeholder implementations for member extraction methods
-    // These would be implemented similarly to the main symbol extraction
-
+    /// Extract all members from a class body
+    ///
+    /// Processes the class_body node and extracts all member symbols including:
+    /// - Methods
+    /// - Properties
+    /// - Fields
+    /// - Constructors
+    /// - Events
+    /// - Nested types (classes, interfaces, structs, enums)
+    ///
+    /// This method is called after extracting the class symbol itself,
+    /// with the parser's scope context already set to the class.
+    ///
+    /// # Arguments
+    ///
+    /// * `class_node` - The class_declaration AST node
+    /// * `code` - Source code string
+    /// * `file_id` - File identifier
+    /// * `counter` - Symbol ID counter
+    /// * `symbols` - Accumulated symbol list
+    /// * `module_path` - Current namespace path
+    /// * `depth` - Recursion depth
     fn extract_class_members(
         &mut self,
         class_node: Node,
@@ -1369,6 +1552,15 @@ impl CSharpParser {
         }
     }
 
+    /// Extract all members from an interface body
+    ///
+    /// Processes interface members including:
+    /// - Method declarations (no implementation in interfaces)
+    /// - Property declarations
+    /// - Event declarations
+    ///
+    /// Note: C# 8.0+ allows default interface implementations, which are
+    /// handled as regular method declarations.
     fn extract_interface_members(
         &mut self,
         interface_node: Node,
@@ -1422,6 +1614,20 @@ impl CSharpParser {
         }
     }
 
+    /// Extract enum members (constant values)
+    ///
+    /// Processes enum_member_declaration nodes and creates Constant symbols.
+    /// Each enum member can optionally have an explicit value:
+    ///
+    /// ```csharp
+    /// enum Color {
+    ///     Red,      // Implicitly 0
+    ///     Green = 5, // Explicitly 5
+    ///     Blue       // Implicitly 6
+    /// }
+    /// ```
+    ///
+    /// The signature includes the value if explicitly specified.
     fn extract_enum_members(
         &mut self,
         enum_node: Node,
