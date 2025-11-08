@@ -133,3 +133,185 @@ Found 12 outliers among 100 measurements (12.00%)
   7 (7.00%) high severe
 Benchmarking csharp_language_constructs/construct_parsing/methods
 Benchmarking csharp_language_constructs/construct_parsing/methods: Warming up for 3.0000 s
+
+Warning: Unable to complete 100 samples in 5.0s. You may wish to increase target time to 8.5s, enable flat sampling, or reduce sample count to 50.
+Benchmarking csharp_language_constructs/construct_parsing/methods: Collecting 100 samples in estimated 8.4563 s (5050 iterations)
+Benchmarking csharp_language_constructs/construct_parsing/methods: Analyzing
+csharp_language_constructs/construct_parsing/methods
+                        time:   [1.6445 ms 1.6574 ms 1.6721 ms]
+                        thrpt:  [60.403 Kelem/s 60.939 Kelem/s 61.415 Kelem/s]
+Found 2 outliers among 100 measurements (2.00%)
+  1 (1.00%) high mild
+  1 (1.00%) high severe
+Benchmarking csharp_language_constructs/construct_parsing/properties
+Benchmarking csharp_language_constructs/construct_parsing/properties: Warming up for 3.0000 s
+
+Warning: Unable to complete 100 samples in 5.0s. You may wish to increase target time to 7.6s, enable flat sampling, or reduce sample count to 50.
+Benchmarking csharp_language_constructs/construct_parsing/properties: Collecting 100 samples in estimated 7.6195 s (5050 iterations)
+Benchmarking csharp_language_constructs/construct_parsing/properties: Analyzing
+csharp_language_constructs/construct_parsing/properties
+                        time:   [1.4266 ms 1.4490 ms 1.4755 ms]
+                        thrpt:  [204.00 Kelem/s 207.73 Kelem/s 210.98 Kelem/s]
+Found 4 outliers among 100 measurements (4.00%)
+  2 (2.00%) high mild
+  2 (2.00%) high severe
+Benchmarking csharp_language_constructs/construct_parsing/enums
+Benchmarking csharp_language_constructs/construct_parsing/enums: Warming up for 3.0000 s
+Benchmarking csharp_language_constructs/construct_parsing/enums: Collecting 100 samples in estimated 6.6360 s (20k iterations)
+Benchmarking csharp_language_constructs/construct_parsing/enums: Analyzing
+csharp_language_constructs/construct_parsing/enums
+                        time:   [324.04 µs 324.92 µs 326.00 µs]
+                        thrpt:  [61.349 Kelem/s 61.553 Kelem/s 61.721 Kelem/s]
+Found 10 outliers among 100 measurements (10.00%)
+  7 (7.00%) high mild
+  3 (3.00%) high severe
+Benchmarking csharp_language_constructs/construct_parsing/structs
+Benchmarking csharp_language_constructs/construct_parsing/structs: Warming up for 3.0000 s
+Benchmarking csharp_language_constructs/construct_parsing/structs: Collecting 100 samples in estimated 8.2909 s (10k iterations)
+Benchmarking csharp_language_constructs/construct_parsing/structs: Analyzing
+csharp_language_constructs/construct_parsing/structs
+                        time:   [820.38 µs 829.96 µs 844.40 µs]
+                        thrpt:  [248.70 Kelem/s 253.03 Kelem/s 255.98 Kelem/s]
+Found 6 outliers among 100 measurements (6.00%)
+  4 (4.00%) high mild
+  2 (2.00%) high severe
+Benchmarking csharp_language_constructs/construct_parsing/records
+Benchmarking csharp_language_constructs/construct_parsing/records: Warming up for 3.0000 s
+Benchmarking csharp_language_constructs/construct_parsing/records: Collecting 100 samples in estimated 6.3107 s (15k iterations)
+Benchmarking csharp_language_constructs/construct_parsing/records: Analyzing
+csharp_language_constructs/construct_parsing/records
+                        time:   [414.44 µs 417.61 µs 422.18 µs]
+                        thrpt:  [71.059 Kelem/s 71.837 Kelem/s 72.387 Kelem/s]
+Found 10 outliers among 100 measurements (10.00%)
+  6 (6.00%) high mild
+  4 (4.00%) high severe
+Benchmarking csharp_language_constructs/construct_parsing/events
+Benchmarking csharp_language_constructs/construct_parsing/events: Warming up for 3.0000 s
+Benchmarking csharp_language_constructs/construct_parsing/events: Collecting 100 samples in estimated 5.1165 s (20k iterations)
+Benchmarking csharp_language_constructs/construct_parsing/events: Analyzing
+csharp_language_constructs/construct_parsing/events
+                        time:   [250.82 µs 253.18 µs 256.21 µs]
+                        thrpt:  [121.00 Kelem/s 122.44 Kelem/s 123.60 Kelem/s]
+Found 8 outliers among 100 measurements (8.00%)
+  1 (1.00%) high mild
+  7 (7.00%) high severe
+
+Benchmarking xml_documentation_parsing/xml_doc_parsing
+Benchmarking xml_documentation_parsing/xml_doc_parsing: Warming up for 3.0000 s
+Benchmarking xml_documentation_parsing/xml_doc_parsing: Collecting 100 samples in estimated 5.2754 s (1800 iterations)
+Benchmarking xml_documentation_parsing/xml_doc_parsing: Analyzing
+xml_documentation_parsing/xml_doc_parsing
+                        time:   [2.9461 ms 2.9664 ms 2.9881 ms]
+                        thrpt:  [33.801 Kelem/s 34.048 Kelem/s 34.283 Kelem/s]
+Found 5 outliers among 100 measurements (5.00%)
+  5 (5.00%) high mild
+
+Benchmarking generic_type_extraction/generic_info_parsing
+Benchmarking generic_type_extraction/generic_info_parsing: Warming up for 3.0000 s
+
+Warning: Unable to complete 100 samples in 5.0s. You may wish to increase target time to 9.2s, enable flat sampling, or reduce sample count to 50.
+Benchmarking generic_type_extraction/generic_info_parsing: Collecting 100 samples in estimated 9.1709 s (5050 iterations)
+Benchmarking generic_type_extraction/generic_info_parsing: Analyzing
+generic_type_extraction/generic_info_parsing
+                        time:   [1.8181 ms 1.8309 ms 1.8471 ms]
+                        thrpt:  [81.210 Kelem/s 81.929 Kelem/s 82.505 Kelem/s]
+Found 7 outliers among 100 measurements (7.00%)
+  4 (4.00%) high mild
+  3 (3.00%) high severe
+
+Benchmarking attribute_extraction/find_attributes
+Benchmarking attribute_extraction/find_attributes: Warming up for 3.0000 s
+
+Warning: Unable to complete 100 samples in 5.0s. You may wish to increase target time to 9.3s, enable flat sampling, or reduce sample count to 50.
+Benchmarking attribute_extraction/find_attributes: Collecting 100 samples in estimated 9.3440 s (5050 iterations)
+Benchmarking attribute_extraction/find_attributes: Analyzing
+attribute_extraction/find_attributes
+                        time:   [1.8484 ms 1.8624 ms 1.8785 ms]
+Found 7 outliers among 100 measurements (7.00%)
+  4 (4.00%) high mild
+  3 (3.00%) high severe
+
+Benchmarking method_call_extraction/find_calls
+Benchmarking method_call_extraction/find_calls: Warming up for 3.0000 s
+Benchmarking method_call_extraction/find_calls: Collecting 100 samples in estimated 6.6489 s (10k iterations)
+Benchmarking method_call_extraction/find_calls: Analyzing
+method_call_extraction/find_calls
+                        time:   [655.95 µs 660.80 µs 666.86 µs]
+Found 3 outliers among 100 measurements (3.00%)
+  2 (2.00%) high mild
+  1 (1.00%) high severe
+
+Benchmarking implementation_extraction/find_implementations
+Benchmarking implementation_extraction/find_implementations: Warming up for 3.0000 s
+Benchmarking implementation_extraction/find_implementations: Collecting 100 samples in estimated 7.3637 s (10k iterations)
+Benchmarking implementation_extraction/find_implementations: Analyzing
+implementation_extraction/find_implementations
+                        time:   [728.69 µs 733.39 µs 738.20 µs]
+Found 3 outliers among 100 measurements (3.00%)
+  2 (2.00%) high mild
+  1 (1.00%) high severe
+
+Benchmarking scalable_test_data/generated_data/100
+Benchmarking scalable_test_data/generated_data/100: Warming up for 3.0000 s
+
+Warning: Unable to complete 100 samples in 5.0s. You may wish to increase target time to 6.2s, enable flat sampling, or reduce sample count to 60.
+Benchmarking scalable_test_data/generated_data/100: Collecting 100 samples in estimated 6.1564 s (5050 iterations)
+Benchmarking scalable_test_data/generated_data/100: Analyzing
+scalable_test_data/generated_data/100
+                        time:   [1.1990 ms 1.2053 ms 1.2125 ms]
+                        thrpt:  [146.81 Kelem/s 147.68 Kelem/s 148.46 Kelem/s]
+Found 3 outliers among 100 measurements (3.00%)
+  2 (2.00%) high mild
+  1 (1.00%) high severe
+Benchmarking scalable_test_data/generated_data/500
+Benchmarking scalable_test_data/generated_data/500: Warming up for 3.0000 s
+Benchmarking scalable_test_data/generated_data/500: Collecting 100 samples in estimated 5.0110 s (800 iterations)
+Benchmarking scalable_test_data/generated_data/500: Analyzing
+scalable_test_data/generated_data/500
+                        time:   [6.1823 ms 6.2198 ms 6.2590 ms]
+                        thrpt:  [144.27 Kelem/s 145.18 Kelem/s 146.06 Kelem/s]
+Found 2 outliers among 100 measurements (2.00%)
+  2 (2.00%) high mild
+Benchmarking scalable_test_data/generated_data/1000
+Benchmarking scalable_test_data/generated_data/1000: Warming up for 3.0000 s
+Benchmarking scalable_test_data/generated_data/1000: Collecting 100 samples in estimated 5.1931 s (400 iterations)
+Benchmarking scalable_test_data/generated_data/1000: Analyzing
+scalable_test_data/generated_data/1000
+                        time:   [12.500 ms 12.776 ms 13.123 ms]
+                        thrpt:  [138.30 Kelem/s 142.06 Kelem/s 145.19 Kelem/s]
+Found 13 outliers among 100 measurements (13.00%)
+  6 (6.00%) high mild
+  7 (7.00%) high severe
+Benchmarking scalable_test_data/generated_data/2000
+Benchmarking scalable_test_data/generated_data/2000: Warming up for 3.0000 s
+Benchmarking scalable_test_data/generated_data/2000: Collecting 100 samples in estimated 5.1329 s (200 iterations)
+Benchmarking scalable_test_data/generated_data/2000: Analyzing
+scalable_test_data/generated_data/2000
+                        time:   [24.918 ms 25.348 ms 25.886 ms]
+                        thrpt:  [140.15 Kelem/s 143.13 Kelem/s 145.60 Kelem/s]
+Found 8 outliers among 100 measurements (8.00%)
+  3 (3.00%) high mild
+  5 (5.00%) high severe
+Benchmarking scalable_test_data/generated_data/5000
+Benchmarking scalable_test_data/generated_data/5000: Warming up for 3.0000 s
+
+Warning: Unable to complete 100 samples in 5.0s. You may wish to increase target time to 6.5s, or reduce sample count to 70.
+Benchmarking scalable_test_data/generated_data/5000: Collecting 100 samples in estimated 6.5129 s (100 iterations)
+Benchmarking scalable_test_data/generated_data/5000: Analyzing
+scalable_test_data/generated_data/5000
+                        time:   [64.871 ms 65.429 ms 66.032 ms]
+                        thrpt:  [137.28 Kelem/s 138.55 Kelem/s 139.74 Kelem/s]
+Found 3 outliers among 100 measurements (3.00%)
+  3 (3.00%) high mild
+Benchmarking scalable_test_data/generated_data/10000
+Benchmarking scalable_test_data/generated_data/10000: Warming up for 3.0000 s
+
+Warning: Unable to complete 100 samples in 5.0s. You may wish to increase target time to 14.5s, or reduce sample count to 30.
+Benchmarking scalable_test_data/generated_data/10000: Collecting 100 samples in estimated 14.484 s (100 iterations)
+Benchmarking scalable_test_data/generated_data/10000: Analyzing
+scalable_test_data/generated_data/10000
+                        time:   [138.33 ms 139.18 ms 140.07 ms]
+                        thrpt:  [129.42 Kelem/s 130.25 Kelem/s 131.05 Kelem/s]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+
