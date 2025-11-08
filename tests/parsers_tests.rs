@@ -34,6 +34,9 @@ mod test_csharp_parser;
 #[path = "parsers/csharp/test_error_handling.rs"]
 mod test_csharp_error_handling;
 
+#[path = "parsers/csharp/test_xml_documentation.rs"]
+mod test_csharp_xml_documentation;
+
 #[path = "parsers/gdscript/test_parser.rs"]
 mod test_gdscript_parser;
 

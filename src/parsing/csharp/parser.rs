@@ -177,6 +177,32 @@ impl CSharpParser {
         })
     }
 
+    /// Parse XML documentation comment into structured form
+    ///
+    /// Takes a raw C# documentation comment (with `///` markers) and parses it
+    /// into a structured `XmlDocumentation` object with separate fields for
+    /// summary, params, returns, etc.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use codanna::parsing::csharp::CSharpParser;
+    ///
+    /// let parser = CSharpParser::new().unwrap();
+    /// let raw_doc = r#"
+    /// /// <summary>Calculates sum</summary>
+    /// /// <param name="a">First number</param>
+    /// /// <returns>Sum result</returns>
+    /// "#;
+    ///
+    /// let xml_doc = parser.parse_xml_doc(raw_doc);
+    /// assert_eq!(xml_doc.summary.as_deref(), Some("Calculates sum"));
+    /// assert_eq!(xml_doc.params.len(), 1);
+    /// ```
+    pub fn parse_xml_doc(&self, raw_comment: &str) -> crate::parsing::csharp::xml_doc::XmlDocumentation {
+        crate::parsing::csharp::xml_doc::XmlDocumentation::parse(raw_comment)
+    }
+
     /// Extract symbols from a C# AST node (recursive)
     ///
     /// This is the main recursive traversal function that walks the tree-sitter AST

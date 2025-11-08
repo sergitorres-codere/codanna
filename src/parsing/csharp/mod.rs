@@ -45,10 +45,12 @@ pub mod behavior;
 pub mod definition;
 pub mod parser;
 pub mod resolution;
+pub mod xml_doc;
 
 pub use behavior::CSharpBehavior;
 pub use definition::CSharpLanguage;
 pub use parser::CSharpParser;
+pub use xml_doc::{XmlDocumentation, XmlException, XmlParam, XmlTypeParam};
 
 // Re-export for registry registration
 pub(crate) use definition::register;
