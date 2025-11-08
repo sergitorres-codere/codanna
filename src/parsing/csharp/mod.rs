@@ -40,6 +40,7 @@
 //! // Use parser to extract symbols...
 //! ```
 
+pub mod attributes;
 pub mod audit;
 pub mod behavior;
 pub mod definition;
@@ -48,6 +49,7 @@ pub mod parser;
 pub mod resolution;
 pub mod xml_doc;
 
+pub use attributes::{AttributeCollection, AttributeInfo};
 pub use behavior::CSharpBehavior;
 pub use definition::CSharpLanguage;
 pub use generic_types::{GenericConstraint, GenericInfo, GenericTypeParam, Variance};

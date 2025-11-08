@@ -2022,6 +2022,197 @@ impl CSharpParser {
         }
     }
 
+    /// Extract all attributes (annotations) from C# code
+    ///
+    /// Traverses the AST to find all attribute applications and returns them as
+    /// a collection with metadata about targets, arguments, and locations.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use codanna::parsing::csharp::CSharpParser;
+    ///
+    /// let mut parser = CSharpParser::new().unwrap();
+    /// let code = r#"
+    ///     [Serializable]
+    ///     [Obsolete("Use NewClass", false)]
+    ///     public class OldClass {
+    ///         [Required]
+    ///         public string Name { get; set; }
+    ///     }
+    /// "#;
+    ///
+    /// let attributes = parser.find_attributes(code);
+    ///
+    /// // Query by name
+    /// let obsolete_attrs = attributes.by_name("Obsolete");
+    ///
+    /// // Query by target
+    /// let name_attrs = attributes.by_target("Name");
+    /// ```
+    ///
+    /// # Supported Attribute Forms
+    ///
+    /// - Simple: `[Serializable]`
+    /// - With positional args: `[Obsolete("message", false)]`
+    /// - With named args: `[Authorize(Roles = "Admin")]`
+    /// - Multiple on same target: `[Required] [MaxLength(100)]`
+    pub fn find_attributes(&mut self, code: &str) -> crate::parsing::csharp::attributes::AttributeCollection {
+        let mut attributes = Vec::new();
+
+        match self.parser.parse(code, None) {
+            Some(tree) => {
+                let root_node = tree.root_node();
+                self.extract_attributes_from_node(root_node, code, &mut attributes);
+            }
+            None => {
+                eprintln!("Failed to parse C# file for attributes");
+            }
+        }
+
+        crate::parsing::csharp::attributes::AttributeCollection::from_vec(attributes)
+    }
+
+    /// Recursively extract attributes from AST nodes
+    fn extract_attributes_from_node(
+        &self,
+        node: Node,
+        code: &str,
+        attributes: &mut Vec<crate::parsing::csharp::attributes::AttributeInfo>,
+    ) {
+        // Check if this node has an attribute_list
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if child.kind() == "attribute_list" {
+                // Find the next sibling to get the target
+                if let Some(target_node) = node.child_by_field_name("name")
+                    .or_else(|| {
+                        // Find next non-attribute sibling
+                        let mut c = node.walk();
+                        node.children(&mut c)
+                            .find(|n| !matches!(n.kind(), "attribute_list" | "modifier" | "comment"))
+                    })
+                {
+                    let target_name = code[target_node.byte_range()].to_string();
+                    let target_kind = self.determine_target_kind(&node);
+
+                    // Extract each attribute from the list
+                    self.extract_attributes_from_list(child, code, &target_name, target_kind, attributes);
+                }
+            }
+        }
+
+        // Recurse into children
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            self.extract_attributes_from_node(child, code, attributes);
+        }
+    }
+
+    /// Extract attributes from an attribute_list node
+    fn extract_attributes_from_list(
+        &self,
+        attr_list_node: Node,
+        code: &str,
+        target_name: &str,
+        target_kind: SymbolKind,
+        attributes: &mut Vec<crate::parsing::csharp::attributes::AttributeInfo>,
+    ) {
+        let mut cursor = attr_list_node.walk();
+        for child in attr_list_node.children(&mut cursor) {
+            if child.kind() == "attribute" {
+                if let Some(attr_info) = self.extract_single_attribute(
+                    child,
+                    code,
+                    target_name,
+                    target_kind,
+                ) {
+                    attributes.push(attr_info);
+                }
+            }
+        }
+    }
+
+    /// Extract a single attribute with its arguments
+    fn extract_single_attribute(
+        &self,
+        attr_node: Node,
+        code: &str,
+        target_name: &str,
+        target_kind: SymbolKind,
+    ) -> Option<crate::parsing::csharp::attributes::AttributeInfo> {
+        // Get attribute name
+        let name_node = attr_node.child_by_field_name("name")?;
+        let name = code[name_node.byte_range()].to_string();
+
+        let range = Range::new(
+            attr_node.start_position().row as u32,
+            attr_node.start_position().column as u16,
+            attr_node.end_position().row as u32,
+            attr_node.end_position().column as u16,
+        );
+
+        let mut attr_info = crate::parsing::csharp::attributes::AttributeInfo::new(
+            name,
+            target_name.to_string(),
+            target_kind,
+            range,
+        );
+
+        // Extract arguments if present
+        if let Some(args_node) = attr_node.child_by_field_name("arguments") {
+            self.extract_attribute_arguments(args_node, code, &mut attr_info);
+        }
+
+        Some(attr_info)
+    }
+
+    /// Extract arguments from attribute_argument_list
+    fn extract_attribute_arguments(
+        &self,
+        args_node: Node,
+        code: &str,
+        attr_info: &mut crate::parsing::csharp::attributes::AttributeInfo,
+    ) {
+        let mut cursor = args_node.walk();
+        for child in args_node.children(&mut cursor) {
+            if child.kind() == "attribute_argument" {
+                // Check if it's a named argument (has name_equals)
+                if let Some(name_node) = child.child_by_field_name("name") {
+                    // Named argument: name = value
+                    if let Some(value_node) = child.child_by_field_name("expression") {
+                        let name = code[name_node.byte_range()].trim().to_string();
+                        let value = code[value_node.byte_range()].trim().to_string();
+                        *attr_info = std::mem::replace(attr_info, crate::parsing::csharp::attributes::AttributeInfo::new(String::new(), String::new(), SymbolKind::Class, Range::new(0,0,0,0)))
+                            .with_named_argument(name, value);
+                    }
+                } else {
+                    // Positional argument
+                    let arg_text = code[child.byte_range()].trim().to_string();
+                    *attr_info = std::mem::replace(attr_info, crate::parsing::csharp::attributes::AttributeInfo::new(String::new(), String::new(), SymbolKind::Class, Range::new(0,0,0,0)))
+                        .with_argument(arg_text);
+                }
+            }
+        }
+    }
+
+    /// Determine the symbol kind of an attribute target
+    fn determine_target_kind(&self, node: &Node) -> SymbolKind {
+        match node.kind() {
+            "class_declaration" => SymbolKind::Class,
+            "interface_declaration" => SymbolKind::Interface,
+            "struct_declaration" => SymbolKind::Struct,
+            "enum_declaration" => SymbolKind::Enum,
+            "method_declaration" => SymbolKind::Method,
+            "property_declaration" | "indexer_declaration" => SymbolKind::Field,
+            "field_declaration" => SymbolKind::Field,
+            "event_declaration" | "event_field_declaration" => SymbolKind::Field,
+            "parameter" => SymbolKind::Parameter,
+            "constructor_declaration" => SymbolKind::Method,
+            _ => SymbolKind::Variable,
+        }
+    }
+
     /// Recursively register all nodes in the tree for audit tracking
     ///
     /// This ensures the audit system can see which AST nodes we're actually handling,

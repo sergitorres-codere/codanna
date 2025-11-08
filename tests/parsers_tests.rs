@@ -40,6 +40,9 @@ mod test_csharp_xml_documentation;
 #[path = "parsers/csharp/test_generic_types.rs"]
 mod test_csharp_generic_types;
 
+#[path = "parsers/csharp/test_attributes.rs"]
+mod test_csharp_attributes;
+
 #[path = "parsers/gdscript/test_parser.rs"]
 mod test_gdscript_parser;
 
