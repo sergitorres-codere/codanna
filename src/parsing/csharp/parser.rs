@@ -203,6 +203,43 @@ impl CSharpParser {
         crate::parsing::csharp::xml_doc::XmlDocumentation::parse(raw_comment)
     }
 
+    /// Extract generic type information from a signature
+    ///
+    /// Analyzes a C# signature string (from a Symbol's signature field) and extracts
+    /// detailed information about generic type parameters, constraints, and variance.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use codanna::parsing::csharp::CSharpParser;
+    ///
+    /// let parser = CSharpParser::new().unwrap();
+    /// let signature = "public class Container<T, U> where T : class where U : struct";
+    ///
+    /// let generic_info = parser.get_generic_info(signature);
+    ///
+    /// assert!(generic_info.is_generic);
+    /// assert_eq!(generic_info.param_count(), 2);
+    /// assert_eq!(generic_info.type_parameters[0].name, "T");
+    /// assert_eq!(generic_info.type_parameters[1].name, "U");
+    /// ```
+    ///
+    /// # Supported Features
+    ///
+    /// - Type parameter extraction: `<T, U, V>`
+    /// - Variance modifiers: `<in T>`, `<out T>`
+    /// - Constraint types:
+    ///   - `where T : class` - Reference type constraint
+    ///   - `where T : struct` - Value type constraint
+    ///   - `where T : new()` - Constructor constraint
+    ///   - `where T : IInterface` - Interface constraint
+    ///   - `where T : BaseClass` - Base class constraint
+    ///   - `where T : unmanaged` - Unmanaged constraint
+    ///   - `where T : notnull` - Not null constraint
+    pub fn get_generic_info(&self, signature: &str) -> crate::parsing::csharp::generic_types::GenericInfo {
+        crate::parsing::csharp::generic_types::GenericInfo::from_signature(signature)
+    }
+
     /// Extract symbols from a C# AST node (recursive)
     ///
     /// This is the main recursive traversal function that walks the tree-sitter AST
