@@ -328,6 +328,18 @@ impl CSharpParser {
                 }
             }
 
+            // Operator overloading declarations
+            "operator_declaration" => {
+                // Register ALL child nodes for audit tracking
+                self.register_node_recursively(node);
+
+                if let Some(symbol) =
+                    self.process_operator(node, code, file_id, counter, module_path)
+                {
+                    symbols.push(symbol);
+                }
+            }
+
             // Local function statements
             "local_function_statement" => {
                 self.register_handled_node(node.kind(), node.kind_id());
@@ -663,6 +675,10 @@ impl CSharpParser {
     /// Extract method signature (including return type, parameters, generics)
     fn extract_method_signature(&self, node: Node, code: &str) -> String {
         self.extract_signature_excluding_body(node, code, "method_body")
+    }
+
+    fn extract_operator_signature(&self, node: Node, code: &str) -> String {
+        self.extract_signature_excluding_body(node, code, "block")
     }
 
     /// Extract property signature (including type and accessors)
@@ -1794,6 +1810,123 @@ impl CSharpParser {
         }
     }
 
+    fn extract_operator_symbol(&self, node: Node, _code: &str) -> Option<String> {
+        let mut cursor = node.walk();
+        let mut found_operator_keyword = false;
+
+        for child in node.children(&mut cursor) {
+            if child.kind() == "operator" {
+                found_operator_keyword = true;
+                continue;
+            }
+
+            if found_operator_keyword
+                && !child.kind().is_empty()
+                && child.kind() != "parameter_list"
+                && child.kind() != "block"
+            {
+                return Some(child.kind().to_string());
+            }
+        }
+
+        None
+    }
+
+    fn extract_extension_type(&self, node: Node, code: &str) -> Option<String> {
+        let mut is_static = false;
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            if child.kind() == "modifier" && &code[child.byte_range()] == "static" {
+                is_static = true;
+                break;
+            }
+        }
+
+        if !is_static {
+            return None;
+        }
+
+        let param_list = node.child_by_field_name("parameters")?;
+
+        let mut param_cursor = param_list.walk();
+        for child in param_list.children(&mut param_cursor) {
+            if child.kind() == "parameter" {
+                let mut found_this = false;
+                let mut found_type = false;
+                let mut type_text = String::new();
+
+                let mut child_cursor = child.walk();
+                for param_child in child.children(&mut child_cursor) {
+                    let kind = param_child.kind();
+                    let text = &code[param_child.byte_range()];
+
+                    if kind == "modifier" && text == "this" {
+                        found_this = true;
+                        continue;
+                    }
+
+                    if found_this
+                        && !found_type
+                        && (kind == "predefined_type"
+                            || kind == "identifier"
+                            || kind == "generic_name"
+                            || kind == "array_type"
+                            || kind == "nullable_type"
+                            || kind == "qualified_name")
+                    {
+                        type_text = code[param_child.byte_range()].trim().to_string();
+                        found_type = true;
+                        break;
+                    }
+                }
+
+                if found_this && found_type && !type_text.is_empty() {
+                    return Some(type_text);
+                }
+
+                break;
+            }
+        }
+
+        None
+    }
+
+    fn process_operator(
+        &mut self,
+        node: Node,
+        code: &str,
+        file_id: FileId,
+        counter: &mut SymbolCounter,
+        module_path: &str,
+    ) -> Option<Symbol> {
+        let operator_symbol = self.extract_operator_symbol(node, code)?;
+        let name = if operator_symbol.chars().all(|c| c.is_alphabetic()) {
+            format!("operator {operator_symbol}")
+        } else {
+            format!("operator{operator_symbol}")
+        };
+        let signature = self.extract_operator_signature(node, code);
+        let doc_comment = self.extract_doc_comment(&node, code);
+        let visibility = self.determine_visibility(node, code);
+
+        Some(self.create_symbol(
+            counter.next_id(),
+            name,
+            SymbolKind::Method,
+            file_id,
+            Range::new(
+                node.start_position().row as u32,
+                node.start_position().column as u16,
+                node.end_position().row as u32,
+                node.end_position().column as u16,
+            ),
+            Some(signature),
+            doc_comment,
+            module_path,
+            visibility,
+        ))
+    }
+
     /// Extract documentation comment
     fn extract_doc_comment(&self, node: &Node, code: &str) -> Option<String> {
         // Collect all consecutive /// comments immediately before this node
@@ -2065,7 +2198,15 @@ impl CSharpParser {
         counter: &mut SymbolCounter,
         module_path: &str,
     ) -> Option<Symbol> {
-        let name = self.extract_type_name(node, code)?;
+        let base_name = self.extract_type_name(node, code)?;
+
+        // Check if this is an extension method and format name accordingly
+        let name = if let Some(extended_type) = self.extract_extension_type(node, code) {
+            format!("{base_name} [ext:{extended_type}]")
+        } else {
+            base_name
+        };
+
         let signature = self.extract_method_signature(node, code);
         let doc_comment = self.extract_doc_comment(&node, code);
         let visibility = self.determine_visibility(node, code);
