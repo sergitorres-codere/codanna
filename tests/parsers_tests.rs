@@ -49,6 +49,9 @@ mod test_csharp_cross_file_resolution;
 #[path = "parsers/csharp/test_lambda_expressions.rs"]
 mod test_csharp_lambda_expressions;
 
+#[path = "parsers/csharp/test_lambda_extraction.rs"]
+mod test_csharp_lambda_extraction;
+
 #[path = "parsers/csharp/test_advanced_patterns.rs"]
 mod test_csharp_advanced_patterns;
 

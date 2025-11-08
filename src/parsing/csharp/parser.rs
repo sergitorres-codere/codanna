@@ -2073,6 +2073,227 @@ impl CSharpParser {
         crate::parsing::csharp::attributes::AttributeCollection::from_vec(attributes)
     }
 
+    /// Extract all lambda expressions and anonymous methods from the code
+    ///
+    /// Finds both modern lambda syntax (`x => x * 2`) and delegate syntax
+    /// (`delegate(int x) { ... }`), including async variants.
+    ///
+    /// # Arguments
+    ///
+    /// * `code` - C# source code to analyze
+    ///
+    /// # Returns
+    ///
+    /// A `LambdaCollection` containing all found lambda expressions and anonymous methods
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let mut parser = CSharpParser::new().unwrap();
+    /// let code = r#"
+    ///     var doubled = numbers.Select(x => x * 2);
+    /// "#;
+    /// let lambdas = parser.find_lambdas(code);
+    /// ```
+    pub fn find_lambdas(&mut self, code: &str) -> crate::parsing::csharp::lambdas::LambdaCollection {
+        let mut lambdas = Vec::new();
+
+        match self.parser.parse(code, None) {
+            Some(tree) => {
+                let root_node = tree.root_node();
+                Self::extract_lambdas_from_node(root_node, code, &mut lambdas);
+            }
+            None => {
+                eprintln!("Failed to parse C# file for lambda expressions");
+            }
+        }
+
+        crate::parsing::csharp::lambdas::LambdaCollection::from_vec(lambdas)
+    }
+
+    /// Recursively extract lambda expressions from AST nodes
+    fn extract_lambdas_from_node(
+        node: Node,
+        code: &str,
+        lambdas: &mut Vec<crate::parsing::csharp::lambdas::LambdaInfo>,
+    ) {
+        match node.kind() {
+            "lambda_expression" => {
+                if let Some(lambda_info) = Self::extract_lambda_expression(node, code) {
+                    lambdas.push(lambda_info);
+                }
+            }
+            "anonymous_method_expression" => {
+                if let Some(lambda_info) = Self::extract_anonymous_method(node, code) {
+                    lambdas.push(lambda_info);
+                }
+            }
+            _ => {}
+        }
+
+        // Recursively process children
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            Self::extract_lambdas_from_node(child, code, lambdas);
+        }
+    }
+
+    /// Extract information from a lambda_expression node
+    ///
+    /// Handles modern lambda syntax: `x => expression` or `(x, y) => expression`
+    fn extract_lambda_expression(
+        node: Node,
+        code: &str,
+    ) -> Option<crate::parsing::csharp::lambdas::LambdaInfo> {
+        // Check for async modifier
+        let is_async = {
+            let mut cursor = node.walk();
+            node.children(&mut cursor)
+                .any(|child| child.kind() == "async" || &code[child.byte_range()] == "async")
+        };
+
+        // Extract parameters
+        let parameters = Self::extract_lambda_parameters(node, code);
+
+        // Determine if it's a statement body (block) or expression body
+        let is_statement_body = {
+            let mut cursor = node.walk();
+            node.children(&mut cursor)
+                .any(|child| child.kind() == "block")
+        };
+
+        let range = Range::new(
+            node.start_position().row as u32,
+            node.start_position().column as u16,
+            node.end_position().row as u32,
+            node.end_position().column as u16,
+        );
+
+        Some(crate::parsing::csharp::lambdas::LambdaInfo::new(
+            parameters,
+            range,
+            is_async,
+            is_statement_body,
+            crate::parsing::csharp::lambdas::LambdaType::Lambda,
+        ))
+    }
+
+    /// Extract information from an anonymous_method_expression node
+    ///
+    /// Handles delegate syntax: `delegate(int x, int y) { return x + y; }`
+    fn extract_anonymous_method(
+        node: Node,
+        code: &str,
+    ) -> Option<crate::parsing::csharp::lambdas::LambdaInfo> {
+        // Anonymous methods are always statement-body
+        let is_statement_body = true;
+
+        // Anonymous methods can't be async (that's lambda syntax)
+        let is_async = false;
+
+        // Extract parameters from the parameter list
+        let parameters = Self::extract_anonymous_method_parameters(node, code);
+
+        let range = Range::new(
+            node.start_position().row as u32,
+            node.start_position().column as u16,
+            node.end_position().row as u32,
+            node.end_position().column as u16,
+        );
+
+        Some(crate::parsing::csharp::lambdas::LambdaInfo::new(
+            parameters,
+            range,
+            is_async,
+            is_statement_body,
+            crate::parsing::csharp::lambdas::LambdaType::AnonymousMethod,
+        ))
+    }
+
+    /// Extract parameter names from a lambda_expression node
+    ///
+    /// Handles various lambda parameter syntaxes:
+    /// - Single parameter: `x => ...`
+    /// - Multiple parameters: `(x, y) => ...`
+    /// - Explicit types: `(int x, string y) => ...`
+    /// - Discards: `_ => ...` or `(_, y) => ...`
+    fn extract_lambda_parameters(node: Node, code: &str) -> Vec<String> {
+        let mut parameters = Vec::new();
+        let mut cursor = node.walk();
+
+        for child in node.children(&mut cursor) {
+            match child.kind() {
+                "identifier" | "implicit_parameter" => {
+                    // Single parameter without parentheses: x => ...
+                    let param_name = code[child.byte_range()].to_string();
+                    if param_name != "async" {
+                        // Don't treat "async" as a parameter
+                        parameters.push(param_name);
+                        break; // Only one parameter in this syntax
+                    }
+                }
+                "parameter_list" => {
+                    // Multiple parameters or explicit types: (x, y) => ... or (int x, int y) => ...
+                    let mut param_cursor = child.walk();
+                    for param_child in child.children(&mut param_cursor) {
+                        if param_child.kind() == "parameter" {
+                            // Find the identifier within the parameter
+                            if let Some(identifier) = param_child.child_by_field_name("name") {
+                                parameters.push(code[identifier.byte_range()].to_string());
+                            } else {
+                                // Fallback: look for identifier child
+                                let mut id_cursor = param_child.walk();
+                                for id_child in param_child.children(&mut id_cursor) {
+                                    if id_child.kind() == "identifier" {
+                                        parameters.push(code[id_child.byte_range()].to_string());
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    break;
+                }
+                _ => {}
+            }
+        }
+
+        parameters
+    }
+
+    /// Extract parameter names from an anonymous_method_expression node
+    ///
+    /// Handles delegate parameter syntax: `delegate(int x, string y) { ... }`
+    fn extract_anonymous_method_parameters(node: Node, code: &str) -> Vec<String> {
+        let mut parameters = Vec::new();
+        let mut cursor = node.walk();
+
+        for child in node.children(&mut cursor) {
+            if child.kind() == "parameter_list" {
+                let mut param_cursor = child.walk();
+                for param_child in child.children(&mut param_cursor) {
+                    if param_child.kind() == "parameter" {
+                        if let Some(identifier) = param_child.child_by_field_name("name") {
+                            parameters.push(code[identifier.byte_range()].to_string());
+                        } else {
+                            // Fallback: look for identifier child
+                            let mut id_cursor = param_child.walk();
+                            for id_child in param_child.children(&mut id_cursor) {
+                                if id_child.kind() == "identifier" {
+                                    parameters.push(code[id_child.byte_range()].to_string());
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                break;
+            }
+        }
+
+        parameters
+    }
+
     /// Recursively extract attributes from AST nodes
     fn extract_attributes_from_node(
         &self,

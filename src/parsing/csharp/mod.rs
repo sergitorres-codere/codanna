@@ -45,6 +45,7 @@ pub mod audit;
 pub mod behavior;
 pub mod definition;
 pub mod generic_types;
+pub mod lambdas;
 pub mod parser;
 pub mod resolution;
 pub mod xml_doc;
@@ -53,6 +54,7 @@ pub use attributes::{AttributeCollection, AttributeInfo};
 pub use behavior::CSharpBehavior;
 pub use definition::CSharpLanguage;
 pub use generic_types::{GenericConstraint, GenericInfo, GenericTypeParam, Variance};
+pub use lambdas::{LambdaCollection, LambdaInfo, LambdaType};
 pub use parser::CSharpParser;
 pub use xml_doc::{XmlDocumentation, XmlException, XmlParam, XmlTypeParam};
 
