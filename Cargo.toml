@@ -113,3 +113,7 @@ harness = false
 [[bench]]
 name = "kotlin_parser_bench"
 harness = false
+
+[[bench]]
+name = "csharp_parser_bench"
+harness = false
