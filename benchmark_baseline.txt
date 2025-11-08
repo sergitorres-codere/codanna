@@ -1,0 +1,135 @@
+    Finished `bench` profile [optimized] target(s) in 1.85s
+     Running benches/csharp_parser_bench.rs (target/release/deps/csharp_parser_bench-91ed78e2ba33d569)
+Gnuplot not found, using plotters backend
+Benchmarking csharp_symbol_extraction/symbol_extraction/basic_csharp
+Benchmarking csharp_symbol_extraction/symbol_extraction/basic_csharp: Warming up for 3.0000 s
+Benchmarking csharp_symbol_extraction/symbol_extraction/basic_csharp: Collecting 100 samples in estimated 5.2796 s (40k iterations)
+Benchmarking csharp_symbol_extraction/symbol_extraction/basic_csharp: Analyzing
+csharp_symbol_extraction/symbol_extraction/basic_csharp
+                        time:   [129.66 µs 130.16 µs 130.75 µs]
+                        thrpt:  [68.836 Kelem/s 69.146 Kelem/s 69.414 Kelem/s]
+Found 12 outliers among 100 measurements (12.00%)
+  5 (5.00%) high mild
+  7 (7.00%) high severe
+Benchmarking csharp_symbol_extraction/symbol_extraction/medium_csharp
+Benchmarking csharp_symbol_extraction/symbol_extraction/medium_csharp: Warming up for 3.0000 s
+Benchmarking csharp_symbol_extraction/symbol_extraction/medium_csharp: Collecting 100 samples in estimated 6.1747 s (15k iterations)
+Benchmarking csharp_symbol_extraction/symbol_extraction/medium_csharp: Analyzing
+csharp_symbol_extraction/symbol_extraction/medium_csharp
+                        time:   [409.89 µs 414.69 µs 419.93 µs]
+                        thrpt:  [40.483 Kelem/s 40.995 Kelem/s 41.475 Kelem/s]
+Found 6 outliers among 100 measurements (6.00%)
+  5 (5.00%) high mild
+  1 (1.00%) high severe
+Benchmarking csharp_symbol_extraction/symbol_extraction/complex_csharp
+Benchmarking csharp_symbol_extraction/symbol_extraction/complex_csharp: Warming up for 3.0000 s
+
+Warning: Unable to complete 100 samples in 5.0s. You may wish to increase target time to 5.7s, enable flat sampling, or reduce sample count to 60.
+Benchmarking csharp_symbol_extraction/symbol_extraction/complex_csharp: Collecting 100 samples in estimated 5.7279 s (5050 iterations)
+Benchmarking csharp_symbol_extraction/symbol_extraction/complex_csharp: Analyzing
+csharp_symbol_extraction/symbol_extraction/complex_csharp
+                        time:   [1.1587 ms 1.1804 ms 1.2028 ms]
+                        thrpt:  [7.4826 Kelem/s 7.6243 Kelem/s 7.7670 Kelem/s]
+Found 10 outliers among 100 measurements (10.00%)
+  6 (6.00%) high mild
+  4 (4.00%) high severe
+Benchmarking csharp_symbol_extraction/symbol_extraction/real_world_csharp
+Benchmarking csharp_symbol_extraction/symbol_extraction/real_world_csharp: Warming up for 3.0000 s
+
+Warning: Unable to complete 100 samples in 5.0s. You may wish to increase target time to 8.0s, enable flat sampling, or reduce sample count to 50.
+Benchmarking csharp_symbol_extraction/symbol_extraction/real_world_csharp: Collecting 100 samples in estimated 8.0483 s (5050 iterations)
+Benchmarking csharp_symbol_extraction/symbol_extraction/real_world_csharp: Analyzing
+csharp_symbol_extraction/symbol_extraction/real_world_csharp
+                        time:   [1.6102 ms 1.6216 ms 1.6327 ms]
+                        thrpt:  [12.862 Kelem/s 12.950 Kelem/s 13.042 Kelem/s]
+Found 4 outliers among 100 measurements (4.00%)
+  1 (1.00%) high mild
+  3 (3.00%) high severe
+
+Benchmarking csharp_memory_usage/large_file_parsing/100
+Benchmarking csharp_memory_usage/large_file_parsing/100: Warming up for 3.0000 s
+
+Warning: Unable to complete 100 samples in 5.0s. You may wish to increase target time to 9.3s, enable flat sampling, or reduce sample count to 50.
+Benchmarking csharp_memory_usage/large_file_parsing/100: Collecting 100 samples in estimated 9.3237 s (5050 iterations)
+Benchmarking csharp_memory_usage/large_file_parsing/100: Analyzing
+csharp_memory_usage/large_file_parsing/100
+                        time:   [1.8231 ms 1.8381 ms 1.8563 ms]
+                        thrpt:  [53.871 Kelem/s 54.405 Kelem/s 54.852 Kelem/s]
+Found 5 outliers among 100 measurements (5.00%)
+  3 (3.00%) high mild
+  2 (2.00%) high severe
+Benchmarking csharp_memory_usage/large_file_parsing/500
+Benchmarking csharp_memory_usage/large_file_parsing/500: Warming up for 3.0000 s
+Benchmarking csharp_memory_usage/large_file_parsing/500: Collecting 100 samples in estimated 5.5934 s (600 iterations)
+Benchmarking csharp_memory_usage/large_file_parsing/500: Analyzing
+csharp_memory_usage/large_file_parsing/500
+                        time:   [9.0578 ms 9.1031 ms 9.1521 ms]
+                        thrpt:  [54.632 Kelem/s 54.926 Kelem/s 55.201 Kelem/s]
+Found 3 outliers among 100 measurements (3.00%)
+  2 (2.00%) high mild
+  1 (1.00%) high severe
+Benchmarking csharp_memory_usage/large_file_parsing/1000
+Benchmarking csharp_memory_usage/large_file_parsing/1000: Warming up for 3.0000 s
+Benchmarking csharp_memory_usage/large_file_parsing/1000: Collecting 100 samples in estimated 5.7313 s (300 iterations)
+Benchmarking csharp_memory_usage/large_file_parsing/1000: Analyzing
+csharp_memory_usage/large_file_parsing/1000
+                        time:   [18.315 ms 18.436 ms 18.563 ms]
+                        thrpt:  [53.871 Kelem/s 54.242 Kelem/s 54.599 Kelem/s]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking csharp_memory_usage/large_file_parsing/2000
+Benchmarking csharp_memory_usage/large_file_parsing/2000: Warming up for 3.0000 s
+Benchmarking csharp_memory_usage/large_file_parsing/2000: Collecting 100 samples in estimated 7.8540 s (200 iterations)
+Benchmarking csharp_memory_usage/large_file_parsing/2000: Analyzing
+csharp_memory_usage/large_file_parsing/2000
+                        time:   [38.078 ms 38.715 ms 39.538 ms]
+                        thrpt:  [50.584 Kelem/s 51.659 Kelem/s 52.524 Kelem/s]
+Found 13 outliers among 100 measurements (13.00%)
+  7 (7.00%) high mild
+  6 (6.00%) high severe
+Benchmarking csharp_memory_usage/large_file_parsing/5000
+Benchmarking csharp_memory_usage/large_file_parsing/5000: Warming up for 3.0000 s
+
+Warning: Unable to complete 100 samples in 5.0s. You may wish to increase target time to 10.8s, or reduce sample count to 40.
+Benchmarking csharp_memory_usage/large_file_parsing/5000: Collecting 100 samples in estimated 10.795 s (100 iterations)
+Benchmarking csharp_memory_usage/large_file_parsing/5000: Analyzing
+csharp_memory_usage/large_file_parsing/5000
+                        time:   [102.99 ms 103.98 ms 104.99 ms]
+                        thrpt:  [47.624 Kelem/s 48.087 Kelem/s 48.547 Kelem/s]
+Found 2 outliers among 100 measurements (2.00%)
+  2 (2.00%) high mild
+
+Benchmarking parser_initialization/csharp_parser_creation
+Benchmarking parser_initialization/csharp_parser_creation: Warming up for 3.0000 s
+Benchmarking parser_initialization/csharp_parser_creation: Collecting 100 samples in estimated 5.0016 s (14M iterations)
+Benchmarking parser_initialization/csharp_parser_creation: Analyzing
+parser_initialization/csharp_parser_creation
+                        time:   [369.63 ns 380.10 ns 395.02 ns]
+Found 8 outliers among 100 measurements (8.00%)
+  2 (2.00%) high mild
+  6 (6.00%) high severe
+
+Benchmarking csharp_language_constructs/construct_parsing/classes
+Benchmarking csharp_language_constructs/construct_parsing/classes: Warming up for 3.0000 s
+
+Warning: Unable to complete 100 samples in 5.0s. You may wish to increase target time to 8.6s, enable flat sampling, or reduce sample count to 50.
+Benchmarking csharp_language_constructs/construct_parsing/classes: Collecting 100 samples in estimated 8.6235 s (5050 iterations)
+Benchmarking csharp_language_constructs/construct_parsing/classes: Analyzing
+csharp_language_constructs/construct_parsing/classes
+                        time:   [1.6569 ms 1.6769 ms 1.6989 ms]
+                        thrpt:  [206.01 Kelem/s 208.71 Kelem/s 211.24 Kelem/s]
+Found 10 outliers among 100 measurements (10.00%)
+  6 (6.00%) high mild
+  4 (4.00%) high severe
+Benchmarking csharp_language_constructs/construct_parsing/interfaces
+Benchmarking csharp_language_constructs/construct_parsing/interfaces: Warming up for 3.0000 s
+Benchmarking csharp_language_constructs/construct_parsing/interfaces: Collecting 100 samples in estimated 6.8395 s (10k iterations)
+Benchmarking csharp_language_constructs/construct_parsing/interfaces: Analyzing
+csharp_language_constructs/construct_parsing/interfaces
+                        time:   [669.21 µs 677.29 µs 687.30 µs]
+                        thrpt:  [43.649 Kelem/s 44.294 Kelem/s 44.829 Kelem/s]
+Found 12 outliers among 100 measurements (12.00%)
+  5 (5.00%) high mild
+  7 (7.00%) high severe
+Benchmarking csharp_language_constructs/construct_parsing/methods
+Benchmarking csharp_language_constructs/construct_parsing/methods: Warming up for 3.0000 s
